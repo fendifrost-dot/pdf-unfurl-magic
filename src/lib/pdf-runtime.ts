@@ -3,6 +3,8 @@
  * PDF.js for reading/rendering, pdf-lib for writing. No network calls.
  */
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
+import { installMapPolyfills } from "./map-polyfill";
+import { isDesktopApp } from "./desktop";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -11,6 +13,16 @@ let pdfjsPromise: Promise<PdfJs> | null = null;
 export async function getPdfJs(): Promise<PdfJs> {
   if (!pdfjsPromise) {
     pdfjsPromise = (async () => {
+      // PDF.js reaches for Map.getOrInsertComputed; older engines (Electron) lack it.
+      installMapPolyfills();
+
+      if (isDesktopApp()) {
+        // Desktop runs the legacy build with a worker boot file that polyfills first.
+        const legacy = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as unknown as PdfJs;
+        legacy.GlobalWorkerOptions.workerSrc = "/pdf.worker.boot.mjs";
+        return legacy;
+      }
+
       const pdfjs = await import("pdfjs-dist");
       const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -126,6 +138,12 @@ export function formatBytes(bytes: number): string {
 }
 
 export function downloadBytes(bytes: Uint8Array, filename: string) {
+  // Desktop app: a real Save dialog. Browser: the usual download.
+  const desktop = typeof window === "undefined" ? undefined : window.pdfReliefDesktop;
+  if (desktop) {
+    void desktop.saveFile({ name: filename, data: new Uint8Array(bytes.slice(0)) });
+    return;
+  }
   const blob = new Blob([bytes.slice(0) as unknown as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

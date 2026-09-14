@@ -3,13 +3,52 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
+  "main": "desktop/main.cjs",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "postinstall": "node desktop/copy-worker.cjs",
+    "desktop": "npm run build && electron .",
+    "desktop:dev": "node desktop/dev.cjs",
+    "pack": "npm run build && electron-builder --publish never"
+  },
+  "build": {
+    "appId": "app.pdfrelief.desktop",
+    "productName": "PDF Relief",
+    "files": [
+      "desktop/**/*",
+      "dist/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "desktop/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "desktop/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "desktop/icon.png",
+      "category": "Office",
+      "target": [
+        "AppImage"
+      ]
+    }
   },
   "overrides": {
     "rolldown": "1.2.1"
@@ -77,6 +116,8 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
