@@ -4,11 +4,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/*
- * PDF Relief design system — "workshop bench".
- * Graphite steel surfaces, machined amber accent, blueprint grid.
- * All colors are oklch semantic tokens. Never hardcode colors in components.
- */
+/* PDF Relief — warm paper, oldstyle type, and burnt-sienna workshop details. */
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -19,9 +15,9 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -65,58 +61,59 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --shadow-bench: 0 1px 0 0 oklch(1 0 0 / 6%) inset, 0 18px 40px -24px oklch(0 0 0 / 70%);
-  --shadow-lift: 0 24px 60px -30px oklch(0 0 0 / 80%);
-  --shadow-etch: 0 0 0 1px oklch(0.78 0.16 62 / 35%), 0 0 32px -8px oklch(0.78 0.16 62 / 30%);
+  --shadow-bench: 0 1px 2px oklch(0.23 0.025 48 / 5%), 0 8px 24px oklch(0.23 0.025 48 / 4%);
+  --shadow-lift: 0 18px 44px oklch(0.23 0.025 48 / 10%);
 }
 
 :root {
-  --radius: 0.35rem;
-  --background: oklch(0.17 0.012 250);
-  --foreground: oklch(0.95 0.006 250);
-  --surface: oklch(0.221 0.014 252);
-  --surface-foreground: oklch(0.95 0.006 250);
-  --card: oklch(0.221 0.014 252);
-  --card-foreground: oklch(0.95 0.006 250);
-  --popover: oklch(0.23 0.014 252);
-  --popover-foreground: oklch(0.95 0.006 250);
-  --primary: oklch(0.79 0.16 62);
-  --primary-foreground: oklch(0.19 0.03 60);
-  --secondary: oklch(0.28 0.016 252);
-  --secondary-foreground: oklch(0.93 0.006 250);
-  --muted: oklch(0.26 0.014 252);
-  --muted-foreground: oklch(0.7 0.014 252);
-  --accent: oklch(0.66 0.11 210);
-  --accent-foreground: oklch(0.16 0.02 210);
-  --destructive: oklch(0.62 0.2 25);
-  --destructive-foreground: oklch(0.98 0.005 250);
-  --warning: oklch(0.8 0.15 78);
-  --warning-foreground: oklch(0.2 0.03 78);
-  --success: oklch(0.72 0.14 158);
-  --success-foreground: oklch(0.17 0.03 158);
-  --border: oklch(0.32 0.014 252);
-  --input: oklch(0.3 0.014 252);
-  --ring: oklch(0.79 0.16 62);
-  --paper: oklch(0.97 0.008 90);
-  --paper-foreground: oklch(0.2 0.01 250);
-  --chart-1: oklch(0.79 0.16 62);
-  --chart-2: oklch(0.66 0.11 210);
-  --chart-3: oklch(0.72 0.14 158);
-  --chart-4: oklch(0.62 0.2 25);
-  --chart-5: oklch(0.7 0.014 252);
-  --sidebar: oklch(0.2 0.013 252);
-  --sidebar-foreground: oklch(0.93 0.006 250);
-  --sidebar-primary: oklch(0.79 0.16 62);
-  --sidebar-primary-foreground: oklch(0.19 0.03 60);
-  --sidebar-accent: oklch(0.27 0.015 252);
-  --sidebar-accent-foreground: oklch(0.93 0.006 250);
-  --sidebar-border: oklch(0.32 0.014 252);
-  --sidebar-ring: oklch(0.79 0.16 62);
+  --radius: 0.625rem;
+  --background: oklch(0.965 0.014 85);
+  --foreground: oklch(0.23 0.025 48);
+  --surface: oklch(0.985 0.008 85);
+  --surface-foreground: oklch(0.23 0.025 48);
+  --card: oklch(0.985 0.008 85);
+  --card-foreground: oklch(0.23 0.025 48);
+  --popover: oklch(0.985 0.008 85);
+  --popover-foreground: oklch(0.23 0.025 48);
+  --primary: oklch(0.48 0.13 38);
+  --primary-foreground: oklch(0.985 0.012 85);
+  --secondary: oklch(0.93 0.02 80);
+  --secondary-foreground: oklch(0.28 0.03 48);
+  --muted: oklch(0.94 0.015 82);
+  --muted-foreground: oklch(0.48 0.03 50);
+  --accent: oklch(0.93 0.028 75);
+  --accent-foreground: oklch(0.3 0.04 45);
+  --destructive: oklch(0.5 0.18 28);
+  --destructive-foreground: oklch(0.985 0.012 85);
+  --warning: oklch(0.64 0.13 72);
+  --warning-foreground: oklch(0.25 0.035 48);
+  --success: oklch(0.5 0.1 145);
+  --success-foreground: oklch(0.985 0.012 85);
+  --border: oklch(0.88 0.02 75);
+  --input: oklch(0.88 0.02 75);
+  --ring: oklch(0.55 0.1 40);
+  --paper: oklch(0.995 0.004 85);
+  --paper-foreground: oklch(0.23 0.025 48);
+  --rose: oklch(0.94 0.035 25);
+  --rose-border: oklch(0.78 0.08 28);
+  --chart-1: oklch(0.48 0.13 38);
+  --chart-2: oklch(0.64 0.13 72);
+  --chart-3: oklch(0.5 0.1 145);
+  --chart-4: oklch(0.5 0.18 28);
+  --chart-5: oklch(0.48 0.03 50);
+  --sidebar: oklch(0.985 0.008 85);
+  --sidebar-foreground: oklch(0.23 0.025 48);
+  --sidebar-primary: oklch(0.48 0.13 38);
+  --sidebar-primary-foreground: oklch(0.985 0.012 85);
+  --sidebar-accent: oklch(0.93 0.028 75);
+  --sidebar-accent-foreground: oklch(0.3 0.04 45);
+  --sidebar-border: oklch(0.88 0.02 75);
+  --sidebar-ring: oklch(0.55 0.1 40);
 }
 
 .dark {
-  --background: oklch(0.17 0.012 250);
-  --foreground: oklch(0.95 0.006 250);
+  --background: oklch(0.965 0.014 85);
+  --foreground: oklch(0.23 0.025 48);
 }
 
 @layer base {
@@ -136,15 +133,12 @@
   h3,
   h4 {
     font-family: var(--font-display);
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   }
 }
 
 @utility bench-grid {
-  background-image:
-    linear-gradient(to right, oklch(1 0 0 / 3.5%) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(1 0 0 / 3.5%) 1px, transparent 1px);
-  background-size: 48px 48px;
+  background-color: var(--color-background);
 }
 
 @utility bench-panel {
@@ -155,11 +149,18 @@
 }
 
 @utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.18em;
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--color-muted-foreground);
+  color: var(--color-primary);
+}
+
+@utility panic-panel {
+  background-color: var(--rose);
+  border: 1px solid var(--rose-border);
+  border-radius: var(--radius-lg);
 }
 
 @utility hairline {

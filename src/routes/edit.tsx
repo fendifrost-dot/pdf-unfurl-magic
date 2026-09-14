@@ -266,19 +266,18 @@ function Editor() {
   );
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader />
 
-      <main className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-10 sm:px-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="eyebrow">Editor</p>
-            <h1 className="mt-2 font-display text-3xl font-semibold sm:text-4xl">
-              Click a line. Rewrite it. Keep everything else untouched.
+            <p className="eyebrow">Local editor · No Adobe license</p>
+            <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight sm:text-5xl">
+              Edit the words. Leave the rest of the page alone.
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              One page is rendered at a time, so a huge file stays openable. Export writes only the
-              boxes you edited — every other object is left exactly as it was.
+            <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
+              Original pages stay as PDF objects — fonts, rules, and images you do not touch are not rasterized. Click a line, change it, and export. Assistants here only clean copy, fit a sentence to its box, or check whether the numbers on the page add up.
             </p>
           </div>
           {doc && (
@@ -305,7 +304,7 @@ function Editor() {
         )}
 
         {!doc ? (
-          <div className="bench-panel mt-8 p-6 sm:p-10">
+          <div className="mt-8">
             {status ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -321,17 +320,12 @@ function Editor() {
                     const file = files[0];
                     if (file) await loadBytes(file.name, await file.arrayBuffer());
                   }}
-                  title="Drop the PDF you want to edit"
-                  hint="Quotes, handouts, notes, contracts you are allowed to change. Nothing is uploaded."
-                />
-                <div className="mt-6 flex flex-col items-center gap-2 text-center">
-                  <p className="text-sm text-muted-foreground">
-                    No file handy? Open the sample quote — its total is wrong on purpose.
-                  </p>
-                  <Button variant="secondary" size="sm" onClick={openSample}>
-                    <FileText className="mr-1.5 size-3.5" /> Open the sample quote
-                  </Button>
-                </div>
+                  title="Drop a PDF to edit"
+                  hint="Stays in this browser. One page at a time, so it will not pin 32 GB."
+                >
+                  <Button variant="outline" onClick={openSample}><FileText /> Load workshop notes</Button>
+                </PdfDropZone>
+                <div className="bench-panel mt-5 p-4 text-sm text-muted-foreground">No document yet. Use a contract, handout, quote, or the workshop notes sample. This editor is for documents you own — it will not help fake bank statements or other official records.</div>
               </>
             )}
           </div>
@@ -513,10 +507,6 @@ function Editor() {
           </div>
         )}
 
-        <p className="mt-8 text-xs text-muted-foreground">
-          For documents you own or are allowed to change. Do not use this to alter bank statements,
-          invoices issued to you, or any official record.
-        </p>
       </main>
 
       <SiteFooter />

@@ -71,11 +71,11 @@ export function PdfWorkbench() {
   };
 
   return (
-    <div className="bench-panel p-5 sm:p-7">
+    <div className="p-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="eyebrow">Bench tools</p>
-          <h3 className="mt-1 font-display text-xl font-semibold">Split, extract, merge</h3>
+          <p className="eyebrow">PDF tools</p>
+          <h3 className="mt-1 font-display text-2xl font-semibold">Drop a PDF here</h3>
           <p className="mt-1 max-w-lg text-sm text-muted-foreground">
             Everything runs on a copy held in this tab. Your original file is never modified and
             never leaves the machine.
@@ -92,7 +92,7 @@ export function PdfWorkbench() {
         {!loaded && !busy && (
           <PdfDropZone
             onFiles={openFile}
-            title="Drop a PDF to get started"
+            title="Drop a PDF here"
             hint="Nothing is uploaded. Big files are fine — they are read page by page."
           />
         )}
