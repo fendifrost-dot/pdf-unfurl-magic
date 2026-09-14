@@ -3,33 +3,37 @@ import { Menu, Pencil, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
+const LINKS = [
+  { to: "/edit" as const, label: "Edit" },
+  { to: "/split" as const, label: "Split" },
+  { to: "/merge" as const, label: "Merge" },
+  { to: "/scan" as const, label: "Scan" },
+  { to: "/sign" as const, label: "E-Sign" },
+];
+
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-8">
-        <Link to="/" className="flex items-center gap-3">
+      <div
+        className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:h-16 sm:px-8"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
+        <Link to="/" className="flex min-h-11 items-center gap-3 touch-manipulation">
           <span className="flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Pencil className="size-4" />
           </span>
           <span className="font-display text-xl font-medium">PDF Relief</span>
         </Link>
-        <nav className="hidden items-center gap-7 text-sm text-muted-foreground md:flex">
-          <Link to="/edit" className="transition-colors hover:text-foreground">
-            Edit a PDF
-          </Link>
+        <nav className="hidden items-center gap-5 text-sm text-muted-foreground xl:flex">
+          {LINKS.map((link) => (
+            <Link key={link.to} to={link.to} className="transition-colors hover:text-foreground">
+              {link.label}
+            </Link>
+          ))}
           <Link to="/edit" hash="images" className="transition-colors hover:text-foreground">
-            Image studio
+            Images
           </Link>
-          <Link to="/scan" className="transition-colors hover:text-foreground">
-            Scan pages
-          </Link>
-          <Link to="/sign" className="transition-colors hover:text-foreground">
-            E-Sign
-          </Link>
-          <a href="/#bench" className="transition-colors hover:text-foreground">
-            Split a file
-          </a>
           <a href="/#desktop" className="transition-colors hover:text-foreground">
             Desktop app
           </a>
@@ -40,7 +44,7 @@ export function SiteHeader() {
         <Button
           variant="ghost"
           size="icon"
-          className="md:hidden"
+          className="min-h-11 min-w-11 xl:hidden"
           onClick={() => setOpen((value) => !value)}
           aria-label={open ? "Close menu" : "Open menu"}
         >
@@ -48,52 +52,34 @@ export function SiteHeader() {
         </Button>
       </div>
       {open && (
-        <nav className="border-t border-border bg-background px-4 py-4 md:hidden">
+        <nav className="border-t border-border bg-background px-4 py-4 xl:hidden">
           <div className="mx-auto flex max-w-5xl flex-col gap-1">
-            <Link
-              to="/edit"
-              onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
-            >
-              Edit a PDF
-            </Link>
+            {LINKS.map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                onClick={() => setOpen(false)}
+                className="min-h-12 rounded-md px-3 py-3 text-sm touch-manipulation hover:bg-accent"
+              >
+                {link.label}
+              </Link>
+            ))}
             <Link
               to="/edit"
               hash="images"
               onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+              className="min-h-12 rounded-md px-3 py-3 text-sm touch-manipulation hover:bg-accent"
             >
               Image studio
             </Link>
-            <Link
-              to="/scan"
-              onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
-            >
-              Scan pages
-            </Link>
-            <Link
-              to="/sign"
-              onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
-            >
-              E-Sign
-            </Link>
-            <a
-              href="/#bench"
-              onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
-            >
-              Split a file
-            </a>
             <a
               href="/#desktop"
               onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+              className="min-h-12 rounded-md px-3 py-3 text-sm touch-manipulation hover:bg-accent"
             >
               Desktop app
             </a>
-            <Button asChild className="mt-2">
+            <Button asChild className="mt-2 min-h-12 touch-manipulation">
               <Link to="/edit">Open editor</Link>
             </Button>
           </div>

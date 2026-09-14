@@ -10,10 +10,10 @@ import {
   Scissors,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+import { AppShell } from "@/components/app-shell";
 import { RamMeter } from "@/components/ram-meter";
 import { PdfWorkbench } from "@/components/pdf-workbench";
+import { ToolShortcuts } from "@/components/tool-shortcuts";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -76,8 +76,7 @@ const SETTINGS = [
 
 function Home() {
   return (
-    <div className="min-h-screen">
-      <SiteHeader />
+    <AppShell>
       <main>
         <section className="mx-auto max-w-5xl px-4 pb-12 pt-11 sm:px-8 sm:pb-16 sm:pt-16">
           <div className="grid items-center gap-12 lg:grid-cols-[1.28fr_0.82fr] lg:gap-16">
@@ -93,31 +92,33 @@ function Home() {
                 64-bit Acrobat has no memory ceiling, so it will take every gigabyte you have.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button asChild size="lg">
+                <Button asChild size="lg" className="min-h-12 touch-manipulation">
                   <Link to="/edit">
                     Open the editor <ArrowRight />
                   </Link>
                 </Button>
-                <Button asChild size="lg" variant="outline">
+                <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">
                   <Link to="/scan">
                     Scan pages <ScanLine />
                   </Link>
                 </Button>
-                <Button asChild size="lg" variant="outline">
+                <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">
                   <Link to="/sign">
                     E-Sign a PDF <PenLine />
                   </Link>
                 </Button>
-                <Button asChild size="lg" variant="outline">
-                  <a href="#bench">
+                <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">
+                  <Link to="/split">
                     Split a large file <Scissors />
-                  </a>
+                  </Link>
                 </Button>
               </div>
             </div>
             <RamMeter />
           </div>
         </section>
+
+        <ToolShortcuts />
 
         <section className="mx-auto max-w-5xl px-4 pb-16 sm:px-8">
           <div className="panic-panel p-5 sm:p-8">
@@ -181,18 +182,18 @@ function Home() {
             ))}
           </div>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button asChild>
+            <Button asChild className="min-h-12 touch-manipulation">
               <Link to="/edit">Edit a PDF without Adobe</Link>
             </Button>
-            <Button asChild variant="outline">
+            <Button asChild variant="outline" className="min-h-12 touch-manipulation">
               <Link to="/edit" hash="images">
                 Fix a photo in the PDF
               </Link>
             </Button>
-            <Button asChild variant="outline">
+            <Button asChild variant="outline" className="min-h-12 touch-manipulation">
               <Link to="/scan">Scan pages without a phone app</Link>
             </Button>
-            <Button asChild variant="outline">
+            <Button asChild variant="outline" className="min-h-12 touch-manipulation">
               <Link to="/sign">E-Sign without a DocuSign seat</Link>
             </Button>
           </div>
@@ -225,7 +226,7 @@ function Home() {
               </div>
             ))}
           </div>
-          <Button asChild className="mt-6">
+          <Button asChild className="mt-6 min-h-12 touch-manipulation">
             <Link to="/sign">Open E-Sign</Link>
           </Button>
         </section>
@@ -315,6 +316,9 @@ function Home() {
         </section>
 
         <section id="bench" className="mx-auto max-w-5xl scroll-mt-24 px-4 py-14 sm:px-8">
+          <div id="split" className="sr-only">
+            Split a file
+          </div>
           <p className="eyebrow">Workaround that actually works</p>
           <h2 className="mt-3 font-display text-4xl font-semibold">
             Split the PDF, edit a piece, merge it back
@@ -329,7 +333,6 @@ function Home() {
           </div>
         </section>
       </main>
-      <SiteFooter />
-    </div>
+    </AppShell>
   );
 }

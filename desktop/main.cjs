@@ -208,7 +208,11 @@ function buildMenu() {
         },
         {
           label: "Split a file",
-          click: () => mainWindow?.loadURL(joinAppPath("/#bench")),
+          click: () => mainWindow?.loadURL(joinAppPath("/split")),
+        },
+        {
+          label: "Merge PDFs",
+          click: () => mainWindow?.loadURL(joinAppPath("/merge")),
         },
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },

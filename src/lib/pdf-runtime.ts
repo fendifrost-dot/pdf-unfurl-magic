@@ -5,6 +5,7 @@
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { installMapPolyfills } from "./map-polyfill";
 import { isDesktopApp } from "./desktop";
+import { saveBytes } from "./file-export";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -152,7 +153,9 @@ export async function renderPage(
   const page = await doc.getPage(pageNumber);
   const base = page.getViewport({ scale: 1 });
   const scale = cssWidth / base.width;
-  const dpr = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, 2);
+  // Phones keep one page in memory; cap backing-store size so a 3x display does not 3x RAM.
+  const dprCap = cssWidth < 520 ? 1.5 : 2;
+  const dpr = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, dprCap);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
   canvas.width = Math.floor(viewport.width * dpr);
@@ -174,7 +177,10 @@ export function formatBytes(bytes: number): string {
 }
 
 export function downloadBytes(bytes: Uint8Array, filename: string, mime = "application/pdf") {
-  // Desktop app: a real Save dialog. Browser: the usual download.
+  if (mime === "application/pdf") {
+    void saveBytes(bytes, filename);
+    return;
+  }
   const desktop = typeof window === "undefined" ? undefined : window.pdfReliefDesktop;
   if (desktop) {
     void desktop.saveFile({ name: filename, data: new Uint8Array(bytes.slice(0)) });
