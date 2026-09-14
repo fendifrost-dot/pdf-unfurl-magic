@@ -39,11 +39,11 @@ function Home() {
     <div className="min-h-screen">
       <SiteHeader />
       <main>
-        <section className="mx-auto max-w-6xl px-4 pb-12 pt-11 sm:px-8 sm:pb-16 sm:pt-16">
+        <section className="mx-auto max-w-5xl px-4 pb-12 pt-11 sm:px-8 sm:pb-16 sm:pt-16">
           <div className="grid items-center gap-12 lg:grid-cols-[1.28fr_0.82fr] lg:gap-16">
             <div>
               <p className="eyebrow">Adobe Acrobat · Large PDFs · RAM death spiral</p>
-              <h1 className="mt-5 max-w-3xl font-display text-5xl font-semibold leading-[0.98] sm:text-6xl lg:text-[4.4rem]">
+              <h1 className="mt-5 max-w-3xl font-display text-4xl font-semibold leading-[1.02] sm:text-5xl lg:text-6xl">
                 Acrobat is not “using 32 GB.” It is filling 32 GB and then the operating system starts drowning.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
@@ -58,7 +58,7 @@ function Home() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-8">
+        <section className="mx-auto max-w-5xl px-4 pb-16 sm:px-8">
           <div className="panic-panel p-5 sm:p-8">
             <div className="flex gap-4">
               <AlertTriangle className="mt-1 size-5 shrink-0 text-destructive" />
@@ -74,7 +74,7 @@ function Home() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 py-14 sm:px-8">
+        <section className="mx-auto max-w-5xl px-4 py-14 sm:px-8">
           <p className="eyebrow">Cancel the $60 stack</p>
           <h2 className="mt-3 max-w-2xl font-display text-4xl font-semibold leading-tight">A local editor for documents you own, plus a splitter when a file is too big</h2>
           <p className="mt-4 max-w-3xl text-muted-foreground">Acrobat is the expensive, memory-hungry part of that bundle. This app rewrites only the lines you click so the rest of the page keeps its original fonts, rules, and images. Assistants check arithmetic and fit copy to the existing box — they are not a second Creative Cloud cost.</p>
@@ -84,7 +84,7 @@ function Home() {
           <Button asChild className="mt-6"><Link to="/edit">Edit a PDF without Adobe</Link></Button>
         </section>
 
-        <section id="desktop" className="mx-auto max-w-6xl scroll-mt-24 px-4 py-10 sm:px-8">
+        <section id="desktop" className="mx-auto max-w-5xl scroll-mt-24 px-4 py-10 sm:px-8">
           <div className="bench-panel p-6 sm:p-8">
             <p className="eyebrow">Easy access</p>
             <h2 className="mt-2 font-display text-3xl font-semibold">A window on your computer, not a browser tab</h2>
@@ -95,7 +95,7 @@ function Home() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 py-14 sm:px-8">
+        <section className="mx-auto max-w-5xl px-4 py-14 sm:px-8">
           <p className="eyebrow">What’s actually happening</p>
           <h2 className="mt-3 max-w-2xl font-display text-4xl font-semibold leading-tight">Acrobat is decoding the document as pictures, then leaking the pictures</h2>
           <p className="mt-4 max-w-3xl text-muted-foreground">The PDF on disk is compressed. Editing it is not. Acrobat builds an in-memory model, rasterizes pages for the screen, and keeps thumbnails and undo buffers nearby. One large or scanned file becomes a memory load with no practical cap.</p>
@@ -104,13 +104,13 @@ function Home() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-6xl px-4 py-14 sm:px-8">
+        <section className="mx-auto max-w-5xl px-4 py-14 sm:px-8">
           <p className="eyebrow">Stay in Acrobat, spend less RAM</p>
           <h2 className="mt-3 font-display text-4xl font-semibold">Settings that actually change the behavior</h2>
           <div className="mt-7 space-y-3">{SETTINGS.map(([title, body]) => <div key={title} className="bench-panel flex gap-3 p-4"><Check className="mt-0.5 size-4 shrink-0 text-primary"/><div><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{body}</p></div></div>)}</div>
         </section>
 
-        <section id="bench" className="mx-auto max-w-6xl scroll-mt-24 px-4 py-14 sm:px-8">
+        <section id="bench" className="mx-auto max-w-5xl scroll-mt-24 px-4 py-14 sm:px-8">
           <p className="eyebrow">Workaround that actually works</p>
           <h2 className="mt-3 font-display text-4xl font-semibold">Split the PDF, edit a piece, merge it back</h2>
           <p className="mt-3 max-w-2xl text-muted-foreground">Files never leave this tab. The splitter copies pages without rendering thumbnails — the thing Acrobat does that fills RAM. Open a 10-page chunk in Acrobat, make the edits, then merge.</p>

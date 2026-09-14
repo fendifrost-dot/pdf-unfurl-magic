@@ -7,7 +7,7 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false);
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
+      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-8">
         <Link to="/" className="flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Pencil className="size-4" />
@@ -28,7 +28,7 @@ export function SiteHeader() {
       </div>
       {open && (
         <nav className="border-t border-border bg-background px-4 py-4 md:hidden">
-          <div className="mx-auto flex max-w-6xl flex-col gap-1">
+          <div className="mx-auto flex max-w-5xl flex-col gap-1">
             <Link to="/edit" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Edit a PDF</Link>
             <a href="/#bench" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Split a file</a>
             <a href="/#desktop" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Desktop app</a>

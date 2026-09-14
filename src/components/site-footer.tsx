@@ -1,7 +1,7 @@
 export function SiteFooter() {
   return (
     <footer className="mt-24 border-t border-border">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-5 py-10 sm:px-8 md:flex-row md:items-center md:justify-between">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 px-5 py-10 sm:px-8 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="font-display text-sm font-semibold">PDF Relief</p>
           <p className="mt-1 text-sm text-muted-foreground">

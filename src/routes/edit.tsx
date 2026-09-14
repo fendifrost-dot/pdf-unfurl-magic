@@ -266,10 +266,10 @@ function Editor() {
   );
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader />
 
-      <main className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-10 sm:px-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="eyebrow">Local editor · No Adobe license</p>
@@ -507,10 +507,6 @@ function Editor() {
           </div>
         )}
 
-        <p className="mt-8 text-xs text-muted-foreground">
-          For documents you own or are allowed to change. Do not use this to alter bank statements,
-          invoices issued to you, or any official record.
-        </p>
       </main>
 
       <SiteFooter />

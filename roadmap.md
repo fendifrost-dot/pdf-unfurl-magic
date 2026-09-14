@@ -11,4 +11,4 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] Footer: "Files stay in the browser. Not affiliated with Adobe."
 - [x] Head metadata per route
 - [x] Verified end to end in browser: sample -> edit -> check numbers -> export; split on home
-- [ ] Restyle home and editor to the approved cream-paper screenshots without changing PDF or Electron behavior
+- [x] Restyle home and editor to the approved cream-paper screenshots without changing PDF or Electron behavior
