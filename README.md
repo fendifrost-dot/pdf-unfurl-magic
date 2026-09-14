@@ -1,8 +1,8 @@
 # PDF Relief
 
-A PDF workshop that runs on your own machine — split, extract, merge, and click-to-edit
-text in a PDF. There is no account, no database, and nothing is uploaded: files stay on
-the computer. Ships in two shapes from this one repo:
+A PDF workshop that runs on your own machine — split, extract, merge, click-to-edit
+text, and scan pages into a multi-page PDF. There is no account, no database, and
+nothing is uploaded: files stay on the computer. Ships in two shapes from this one repo:
 
 - **Browser** — the TanStack Start + Vite web app.
 - **Desktop** — an Electron wrapper with a native File → Open PDF and real Save dialogs.
@@ -33,6 +33,13 @@ on Windows, **Open PDF Relief.bat**.
 
 The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
 server's port.
+
+## Scan pages
+
+Open `/scan` (or **File → Scan pages** in the desktop app). Capture from the camera or
+import photos, drag the document corners if the auto outline misses, pick an enhance
+preset, and export an ordered PDF. Optional OCR adds a hidden text layer only — the
+JPEG page stays the picture. Processing is one page at a time.
 
 ## Built with
 

@@ -7,6 +7,7 @@ export type PdfReliefDesktop = {
   isDesktop: true;
   pickPdf: () => Promise<DesktopPdfFile | null>;
   pickPdfs: () => Promise<DesktopPdfFile[] | null>;
+  pickImages?: () => Promise<DesktopPdfFile[] | null>;
   takePendingPdf: () => Promise<DesktopPdfFile | null>;
   saveFile: (payload: { name: string; data: Uint8Array }) => Promise<string | null>;
   onPdfReady: (callback: () => void) => () => void;
@@ -48,4 +49,21 @@ export async function pickDesktopPdfs(): Promise<{ name: string; bytes: Uint8Arr
   const picked = await api.pickPdfs();
   if (!picked || picked.length === 0) return null;
   return picked.map((file) => ({ name: file.name, bytes: toDesktopBytes(file.data) }));
+}
+
+export async function pickDesktopImages(): Promise<File[] | null> {
+  const api = window.pdfReliefDesktop;
+  if (!api?.pickImages) return null;
+  const picked = await api.pickImages();
+  if (!picked || picked.length === 0) return null;
+  return picked.map((file) => {
+    const bytes = toDesktopBytes(file.data);
+    const lower = file.name.toLowerCase();
+    const type = lower.endsWith(".png")
+      ? "image/png"
+      : lower.endsWith(".webp")
+        ? "image/webp"
+        : "image/jpeg";
+    return new File([bytes.slice(0) as unknown as BlobPart], file.name, { type });
+  });
 }

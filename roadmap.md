@@ -12,3 +12,4 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] Head metadata per route
 - [x] Verified end to end in browser: sample -> edit -> check numbers -> export; split on home
 - [x] Restyle home and editor to the approved cream-paper screenshots without changing PDF or Electron behavior
+- [x] Scan lane `/scan`: camera + import, edge detect, perspective, enhance presets, multi-page session, optional local OCR text layer
