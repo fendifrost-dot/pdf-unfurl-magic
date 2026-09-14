@@ -15,26 +15,77 @@ export function SiteHeader() {
           <span className="font-display text-xl font-medium">PDF Relief</span>
         </Link>
         <nav className="hidden items-center gap-7 text-sm text-muted-foreground md:flex">
-          <Link to="/edit" className="transition-colors hover:text-foreground">Edit a PDF</Link>
-          <Link to="/scan" className="transition-colors hover:text-foreground">Scan pages</Link>
-          <a href="/#bench" className="transition-colors hover:text-foreground">Split a file</a>
-          <a href="/#desktop" className="transition-colors hover:text-foreground">Desktop app</a>
+          <Link to="/edit" className="transition-colors hover:text-foreground">
+            Edit a PDF
+          </Link>
+          <Link to="/edit" hash="images" className="transition-colors hover:text-foreground">
+            Image studio
+          </Link>
+          <Link to="/scan" className="transition-colors hover:text-foreground">
+            Scan pages
+          </Link>
+          <a href="/#bench" className="transition-colors hover:text-foreground">
+            Split a file
+          </a>
+          <a href="/#desktop" className="transition-colors hover:text-foreground">
+            Desktop app
+          </a>
           <Button asChild size="sm">
             <Link to="/edit">Open editor</Link>
           </Button>
         </nav>
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setOpen((value) => !value)} aria-label={open ? "Close menu" : "Open menu"}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden"
+          onClick={() => setOpen((value) => !value)}
+          aria-label={open ? "Close menu" : "Open menu"}
+        >
           {open ? <X /> : <Menu />}
         </Button>
       </div>
       {open && (
         <nav className="border-t border-border bg-background px-4 py-4 md:hidden">
           <div className="mx-auto flex max-w-5xl flex-col gap-1">
-            <Link to="/edit" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Edit a PDF</Link>
-            <Link to="/scan" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Scan pages</Link>
-            <a href="/#bench" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Split a file</a>
-            <a href="/#desktop" onClick={() => setOpen(false)} className="rounded-md px-3 py-3 text-sm hover:bg-accent">Desktop app</a>
-            <Button asChild className="mt-2"><Link to="/edit">Open editor</Link></Button>
+            <Link
+              to="/edit"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              Edit a PDF
+            </Link>
+            <Link
+              to="/edit"
+              hash="images"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              Image studio
+            </Link>
+            <Link
+              to="/scan"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              Scan pages
+            </Link>
+            <a
+              href="/#bench"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              Split a file
+            </a>
+            <a
+              href="/#desktop"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              Desktop app
+            </a>
+            <Button asChild className="mt-2">
+              <Link to="/edit">Open editor</Link>
+            </Button>
           </div>
         </nav>
       )}

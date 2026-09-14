@@ -17,6 +17,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test:scan": "node --experimental-strip-types --test src/lib/scan/geometry.node-test.ts",
+    "test:image-studio": "node scripts/verify-image-studio.mjs",
     "format": "prettier --write .",
     "postinstall": "node desktop/copy-worker.cjs",
     "desktop": "npm run build && electron .",

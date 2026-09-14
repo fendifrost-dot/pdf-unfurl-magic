@@ -3,6 +3,10 @@
  * the original file on disk is never touched and nothing is uploaded.
  */
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { containFit } from "./image-process";
+import { encodeDemoPhoto } from "./tiny-png";
+import type { AnnotationBurn, ImagePatch } from "./pdf-images";
+import { jpegMagic } from "./pdf-images";
 import { fitFontSize } from "./text-helpers";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
@@ -126,7 +130,92 @@ export async function applyTextPatches(
   return doc.save();
 }
 
-/** A quote with a deliberately wrong total, so Check numbers has something real to catch. */
+export async function applyWorkshopPatches(
+  bytes: ArrayBuffer,
+  textPatches: TextPatch[],
+  imagePatches: ImagePatch[],
+  marks: AnnotationBurn[],
+): Promise<Uint8Array> {
+  const doc = await load(bytes);
+  const pages = doc.getPages();
+  const font = textPatches.length ? await doc.embedFont(StandardFonts.Helvetica) : null;
+
+  for (const patch of imagePatches) {
+    const page = pages[patch.page - 1];
+    if (!page) continue;
+    const mime = patch.mime ?? jpegMagic(patch.bytes);
+    const image =
+      mime === "image/png" ? await doc.embedPng(patch.bytes) : await doc.embedJpg(patch.bytes);
+    page.drawRectangle({
+      x: patch.x,
+      y: patch.y,
+      width: patch.width,
+      height: patch.height,
+      color: rgb(1, 1, 1),
+    });
+    const fitted = containFit(image.width, image.height, patch.width, patch.height);
+    page.drawImage(image, {
+      x: patch.x + fitted.x,
+      y: patch.y + fitted.y,
+      width: fitted.w,
+      height: fitted.h,
+    });
+  }
+
+  if (font) {
+    for (const patch of textPatches) {
+      const page = pages[patch.page - 1];
+      if (!page) continue;
+      const pad = Math.max(1, patch.fontSize * 0.18);
+      page.drawRectangle({
+        x: patch.x - pad,
+        y: patch.y - pad * 1.1,
+        width: patch.width + pad * 4,
+        height: patch.height + pad * 1.6,
+        color: rgb(1, 1, 1),
+      });
+      let size = fitFontSize(patch.text, patch.fontSize, patch.width);
+      while (size > 4 && font.widthOfTextAtSize(patch.text, size) > patch.width) size -= 0.25;
+      page.drawText(patch.text.replace(/\s*\n\s*/g, " "), {
+        x: patch.x,
+        y: patch.y + Math.max(0, (patch.height - size) * 0.28),
+        size,
+        font,
+        color: rgb(0.08, 0.08, 0.1),
+      });
+    }
+  }
+
+  for (const mark of marks) {
+    const page = pages[mark.page - 1];
+    if (!page) continue;
+    if (mark.kind === "redact") {
+      page.drawRectangle({
+        x: mark.x,
+        y: mark.y,
+        width: mark.width,
+        height: mark.height,
+        color: rgb(0.06, 0.06, 0.07),
+      });
+    } else {
+      page.drawRectangle({
+        x: mark.x,
+        y: mark.y,
+        width: mark.width,
+        height: mark.height,
+        borderColor: rgb(0.48, 0.27, 0.14),
+        borderWidth: 1.35,
+        color: rgb(1, 1, 1),
+        opacity: 0,
+        borderOpacity: 1,
+      });
+    }
+  }
+
+  return doc.save();
+}
+
+/** A quote with photos, rules, and a deliberately wrong total. */
 export async function buildSamplePdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]);
@@ -134,6 +223,9 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   const body = await doc.embedFont(StandardFonts.Helvetica);
   const ink = rgb(0.1, 0.11, 0.13);
   const soft = rgb(0.42, 0.44, 0.48);
+  const oak = await doc.embedPng(encodeDemoPhoto("oak", 320, 200));
+  const kitchen = await doc.embedPng(encodeDemoPhoto("kitchen", 280, 180));
+  const washout = await doc.embedPng(encodeDemoPhoto("washout", 360, 220));
 
   let y = 770;
   const write = (
@@ -155,7 +247,19 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 34;
   write("Prepared for: R. Alvarez, 14 Wren Street", { size: 10 });
   y -= 14;
-  write("Valid for 30 days. Please kindly note that timber prices really move weekly.", { size: 10, color: soft });
+  write("Valid for 30 days. Please kindly note that timber prices really move weekly.", {
+    size: 10,
+    color: soft,
+  });
+
+  page.drawImage(oak, { x: 390, y: 708, width: 150, height: 94 });
+  page.drawText("Site photo — oak delivery", {
+    x: 390,
+    y: 694,
+    size: 8,
+    font: body,
+    color: soft,
+  });
 
   y -= 32;
   write("Description", { font: bold, size: 10 });
@@ -199,10 +303,52 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   write("Total due", { font: bold, size: 11, x: 420 });
   write("1,987.00", { font: bold, size: 11, x: 490 });
 
-  y -= 40;
+  page.drawImage(kitchen, { x: 56, y: 318, width: 220, height: 141 });
+  page.drawLine({
+    start: { x: 56, y: 308 },
+    end: { x: 276, y: 308 },
+    thickness: 0.75,
+    color: rgb(0.8, 0.8, 0.82),
+  });
+  page.drawText("Finished bench — client reference. Fix the photo, not the page.", {
+    x: 56,
+    y: 294,
+    size: 8,
+    font: body,
+    color: soft,
+  });
+
+  y = 250;
   write("3 x 12 = 35 for the worktop run (per-metre pricing).", { size: 10, color: soft });
   y -= 16;
-  write("Deposit of 40% is due before before the timber order is placed.", { size: 10, color: soft });
+  write("Deposit of 40% is due before before the timber order is placed.", {
+    size: 10,
+    color: soft,
+  });
+
+  const appendix = doc.addPage([595, 842]);
+  appendix.drawText("Photo appendix", { x: 56, y: 780, size: 20, font: bold, color: ink });
+  appendix.drawText("Washed-out site shot — pull exposure down, then compress.", {
+    x: 56,
+    y: 758,
+    size: 11,
+    font: body,
+    color: soft,
+  });
+  appendix.drawImage(washout, { x: 56, y: 430, width: 360, height: 220 });
+  appendix.drawLine({
+    start: { x: 56, y: 414 },
+    end: { x: 416, y: 414 },
+    thickness: 0.9,
+    color: rgb(0.8, 0.8, 0.82),
+  });
+  appendix.drawText("NORTHGATE_KEEP  ·  surrounding type and this rule stay as PDF objects.", {
+    x: 56,
+    y: 396,
+    size: 10,
+    font: body,
+    color: ink,
+  });
 
   return doc.save();
 }
