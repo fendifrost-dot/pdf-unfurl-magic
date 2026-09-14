@@ -2,11 +2,12 @@
 
 Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 
-- [ ] Install pdf-lib + pdfjs-dist, add shadcn/ui components needed
-- [ ] Design system in src/styles.css (workshop/tool aesthetic, no purple)
-- [ ] Home `/`: hero, RAM meter, "Mac is drowning" section, replace-the-$60-stack list, drop zone for split/extract/merge with empty/loading/error states
-- [ ] Editor `/edit`: single-page render, click text line -> side panel edit, targeted export overlay with auto-shrink
-- [ ] Local helpers: Clean copy, Shorten to fit, Check numbers
-- [ ] Sample PDF generated in-browser with a wrong total
-- [ ] Footer: "Files stay in the browser. Not affiliated with Adobe."
-- [ ] Head metadata per route
+- [x] Install pdf-lib + pdfjs-dist (4.10.38), shadcn/ui components
+- [x] Design system in src/styles.css (workshop bench aesthetic)
+- [x] Home `/`: hero, RAM meter, "Mac is drowning" guide, $60-stack list, split/extract/merge bench with empty/loading/error states
+- [x] Editor `/edit`: single-page render, click line -> side panel edit, targeted export with auto-shrink
+- [x] Local helpers: Clean copy, Shorten to fit, Check numbers
+- [x] Sample PDF with wrong total (1,987.00 vs 2,257.00) and "3 x 12 = 35"
+- [x] Footer: "Files stay in the browser. Not affiliated with Adobe."
+- [x] Head metadata per route
+- [x] Verified end to end in browser: sample -> edit -> check numbers -> export; split on home
