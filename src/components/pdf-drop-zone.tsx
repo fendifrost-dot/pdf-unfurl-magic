@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { FileUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isDesktopApp, pickDesktopPdf, pickDesktopPdfs } from "@/lib/desktop";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   onFiles: (files: File[]) => void;
@@ -67,7 +68,7 @@ export function PdfDropZone({
         if (!disabled) accept(e.dataTransfer.files);
       }}
       className={cn(
-        "relative rounded-lg border-2 border-dashed border-border bg-background/40 p-8 text-center transition-colors",
+        "relative rounded-lg border-2 border-dashed border-border bg-card/40 p-8 text-center transition-colors",
         dragging && "border-primary bg-primary/5",
         disabled && "opacity-60",
         className,
@@ -85,21 +86,20 @@ export function PdfDropZone({
         }}
       />
       <div className="mx-auto flex max-w-md flex-col items-center gap-3">
-        <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-primary">
+        <span className="flex size-11 items-center justify-center text-primary">
           <FileUp className="size-5" />
         </span>
         <div>
           <p className="font-display text-base font-semibold">{title}</p>
           <p className="mt-1 text-sm text-muted-foreground">{hint}</p>
         </div>
-        <button
+        <Button
           type="button"
           disabled={disabled}
           onClick={() => void choose()}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none"
         >
-          Choose {multiple ? "PDFs" : "a PDF"}
-        </button>
+          Choose {multiple ? "PDFs" : "PDF"}
+        </Button>
         {children}
       </div>
     </div>
