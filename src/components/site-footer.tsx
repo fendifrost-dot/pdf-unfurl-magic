@@ -10,15 +10,7 @@ export function SiteFooter() {
             Files stay in the browser. Not affiliated with Adobe.
           </p>
         </div>
-        <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
-          <Link to="/" className="transition-colors hover:text-foreground">
-            Home
-          </Link>
-          <Link to="/edit" className="transition-colors hover:text-foreground">
-            Editor
-          </Link>
-          <span className="text-gauge text-xs">for documents you own</span>
-        </nav>
+        <p className="text-sm text-muted-foreground">Work on a copy. Merge when the edits are done.</p>
       </div>
     </footer>
   );
