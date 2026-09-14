@@ -137,14 +137,14 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-export function downloadBytes(bytes: Uint8Array, filename: string) {
+export function downloadBytes(bytes: Uint8Array, filename: string, mime = "application/pdf") {
   // Desktop app: a real Save dialog. Browser: the usual download.
   const desktop = typeof window === "undefined" ? undefined : window.pdfReliefDesktop;
   if (desktop) {
     void desktop.saveFile({ name: filename, data: new Uint8Array(bytes.slice(0)) });
     return;
   }
-  const blob = new Blob([bytes.slice(0) as unknown as BlobPart], { type: "application/pdf" });
+  const blob = new Blob([bytes.slice(0) as unknown as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -164,7 +164,8 @@ export function parsePageRanges(input: string, pageCount: number): number[] {
     if (range) {
       const from = Number(range[1]);
       const to = Number(range[2]);
-      if (from < 1 || to > pageCount || from > to) throw new Error(`Page range “${part}” is outside 1–${pageCount}.`);
+      if (from < 1 || to > pageCount || from > to)
+        throw new Error(`Page range “${part}” is outside 1–${pageCount}.`);
       for (let p = from; p <= to; p++) out.push(p);
       continue;
     }

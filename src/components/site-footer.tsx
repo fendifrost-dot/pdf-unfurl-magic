@@ -5,10 +5,12 @@ export function SiteFooter() {
         <div>
           <p className="font-display text-sm font-semibold">PDF Relief</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Files stay in the browser. Not affiliated with Adobe.
+            Files stay in the browser. Not affiliated with Adobe or DocuSign.
           </p>
         </div>
-        <p className="text-sm text-muted-foreground">Work on a copy. Merge when the edits are done.</p>
+        <p className="text-sm text-muted-foreground">
+          Work on a copy. Merge when the edits are done.
+        </p>
       </div>
     </footer>
   );

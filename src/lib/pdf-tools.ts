@@ -3,12 +3,13 @@
  * the original file on disk is never touched and nothing is uploaded.
  */
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { loadPdfDocument } from "./pdf-io";
 import { fitFontSize } from "./text-helpers";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
 async function load(bytes: ArrayBuffer) {
-  return PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
+  return loadPdfDocument(bytes);
 }
 
 /** Split into fixed-size chunks so a huge file becomes several openable ones. */
@@ -155,7 +156,10 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 34;
   write("Prepared for: R. Alvarez, 14 Wren Street", { size: 10 });
   y -= 14;
-  write("Valid for 30 days. Please kindly note that timber prices really move weekly.", { size: 10, color: soft });
+  write("Valid for 30 days. Please kindly note that timber prices really move weekly.", {
+    size: 10,
+    color: soft,
+  });
 
   y -= 32;
   write("Description", { font: bold, size: 10 });
@@ -202,7 +206,10 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 40;
   write("3 x 12 = 35 for the worktop run (per-metre pricing).", { size: 10, color: soft });
   y -= 16;
-  write("Deposit of 40% is due before before the timber order is placed.", { size: 10, color: soft });
+  write("Deposit of 40% is due before before the timber order is placed.", {
+    size: 10,
+    color: soft,
+  });
 
   return doc.save();
 }
