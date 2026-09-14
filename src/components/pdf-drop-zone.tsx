@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { FileUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isDesktopApp, pickDesktopPdf, pickDesktopPdfs } from "@/lib/desktop";
 
 type Props = {
   onFiles: (files: File[]) => void;
@@ -11,6 +12,12 @@ type Props = {
   className?: string;
   disabled?: boolean;
 };
+
+function toFile(picked: { name: string; bytes: Uint8Array }): File {
+  return new File([picked.bytes.slice(0) as unknown as BlobPart], picked.name, {
+    type: "application/pdf",
+  });
+}
 
 export function PdfDropZone({
   onFiles,
@@ -30,6 +37,21 @@ export function PdfDropZone({
       (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"),
     );
     if (pdfs.length) onFiles(multiple ? pdfs : pdfs.slice(0, 1));
+  };
+
+  const choose = async () => {
+    // Desktop app: use the real Open dialog instead of the hidden file input.
+    if (isDesktopApp()) {
+      if (multiple) {
+        const picked = await pickDesktopPdfs();
+        if (picked?.length) onFiles(picked.map(toFile));
+      } else {
+        const picked = await pickDesktopPdf();
+        if (picked) onFiles([toFile(picked)]);
+      }
+      return;
+    }
+    inputRef.current?.click();
   };
 
   return (
@@ -73,7 +95,7 @@ export function PdfDropZone({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => void choose()}
           className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none"
         >
           Choose {multiple ? "PDFs" : "a PDF"}
