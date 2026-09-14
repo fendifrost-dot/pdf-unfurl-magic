@@ -138,6 +138,12 @@ export function formatBytes(bytes: number): string {
 }
 
 export function downloadBytes(bytes: Uint8Array, filename: string) {
+  // Desktop app: a real Save dialog. Browser: the usual download.
+  const desktop = typeof window === "undefined" ? undefined : window.pdfReliefDesktop;
+  if (desktop) {
+    void desktop.saveFile({ name: filename, data: new Uint8Array(bytes.slice(0)) });
+    return;
+  }
   const blob = new Blob([bytes.slice(0) as unknown as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
