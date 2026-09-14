@@ -42,38 +42,43 @@ export type TextLine = {
   id: string;
   page: number;
   text: string;
-  /** PDF user-space coordinates, origin bottom-left. */
+  /** PDF user-space coordinates, origin bottom-left. Baseline is `y`. */
   x: number;
   y: number;
   width: number;
   height: number;
   fontSize: number;
+  fontName: string;
+  fontFamily: string;
 };
 
-/** Group PDF.js text items into visual lines with a bounding box in PDF space. */
-export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): Promise<TextLine[]> {
-  const page = await doc.getPage(pageNumber);
-  const content = await page.getTextContent();
+export type RawTextItem = {
+  str: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontName: string;
+  fontFamily: string;
+};
 
-  type Raw = { str: string; x: number; y: number; w: number; h: number };
-  const raw: Raw[] = [];
+/**
+ * Group PDF.js items into clickable runs. Items on the same baseline stay
+ * together only when they share a font and the gap is word-sized — table
+ * columns (amount vs label) stay separate so we rewrite one Tj, not a row.
+ */
+export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLine[] {
+  const raw = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
+  const groups: RawTextItem[][] = [];
 
-  for (const item of content.items) {
-    if (!("str" in item)) continue;
-    const str = item.str;
-    if (!str || !str.trim()) continue;
-    const t = item.transform as number[];
-    const height = Math.abs(t[3] ?? 0) || Math.abs(item.height) || 10;
-    raw.push({ str, x: t[4] ?? 0, y: t[5] ?? 0, w: item.width || 0, h: height });
-  }
-
-  raw.sort((a, b) => b.y - a.y || a.x - b.x);
-
-  const groups: Raw[][] = [];
   for (const item of raw) {
     const last = groups[groups.length - 1];
-    const anchor = last?.[0];
-    if (last && anchor && Math.abs(anchor.y - item.y) <= Math.max(2, item.h * 0.4)) {
+    const anchor = last?.[last.length - 1];
+    const sameBaseline = !!anchor && Math.abs(anchor.y - item.y) <= Math.max(2, item.h * 0.35);
+    const sameFont = !!anchor && anchor.fontName === item.fontName;
+    const gap = anchor ? item.x - (anchor.x + anchor.w) : 0;
+    const wordGap = Math.max(10, Math.max(item.h, anchor?.h ?? 0) * 1.15);
+    if (last && sameBaseline && sameFont && gap >= -1 && gap <= wordGap) {
       last.push(item);
     } else {
       groups.push([item]);
@@ -82,6 +87,7 @@ export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): P
 
   return groups.map((group, index) => {
     group.sort((a, b) => a.x - b.x);
+    const first = group[0];
     const x = Math.min(...group.map((g) => g.x));
     const right = Math.max(...group.map((g) => g.x + g.w));
     const y = Math.min(...group.map((g) => g.y));
@@ -94,7 +100,7 @@ export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): P
       cursor = g.x + g.w;
     }
     return {
-      id: `p${pageNumber}-l${index}`,
+      id: `p${pageNumber}-r${index}-${Math.round(x)}-${Math.round(y)}`,
       page: pageNumber,
       text: text.replace(/\s+/g, " ").trim(),
       x,
@@ -102,8 +108,38 @@ export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): P
       width: Math.max(right - x, fontSize * 0.6),
       height: fontSize * 1.18,
       fontSize,
+      fontName: first?.fontName ?? "",
+      fontFamily: first?.fontFamily ?? "",
     };
   });
+}
+
+/** Group PDF.js text items into visual runs with a bounding box in PDF space. */
+export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): Promise<TextLine[]> {
+  const page = await doc.getPage(pageNumber);
+  const content = await page.getTextContent();
+  const raw: RawTextItem[] = [];
+
+  for (const item of content.items) {
+    if (!("str" in item)) continue;
+    const str = item.str;
+    if (!str || !str.trim()) continue;
+    const t = item.transform as number[];
+    const height = Math.abs(t[3] ?? 0) || Math.abs(item.height) || 10;
+    const fontName = "fontName" in item && typeof item.fontName === "string" ? item.fontName : "";
+    const style = fontName ? content.styles[fontName] : undefined;
+    raw.push({
+      str,
+      x: t[4] ?? 0,
+      y: t[5] ?? 0,
+      w: item.width || 0,
+      h: height,
+      fontName,
+      fontFamily: style?.fontFamily ?? "",
+    });
+  }
+
+  return groupTextItems(raw, pageNumber);
 }
 
 export type RenderResult = { canvas: HTMLCanvasElement; viewport: PageViewport };
@@ -164,7 +200,8 @@ export function parsePageRanges(input: string, pageCount: number): number[] {
     if (range) {
       const from = Number(range[1]);
       const to = Number(range[2]);
-      if (from < 1 || to > pageCount || from > to) throw new Error(`Page range “${part}” is outside 1–${pageCount}.`);
+      if (from < 1 || to > pageCount || from > to)
+        throw new Error(`Page range “${part}” is outside 1–${pageCount}.`);
       for (let p = from; p <= to; p++) out.push(p);
       continue;
     }

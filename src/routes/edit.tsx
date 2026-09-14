@@ -29,8 +29,16 @@ import {
   renderPage,
   type TextLine,
 } from "@/lib/pdf-runtime";
-import { applyTextPatches, buildSamplePdf, type TextPatch } from "@/lib/pdf-tools";
+import {
+  applyTextPatches,
+  buildSamplePdf,
+  inspectTextPatch,
+  type TextPatch,
+} from "@/lib/pdf-tools";
 import { toDesktopBytes } from "@/lib/desktop";
+import { FontMatchIndicator } from "@/components/font-match-indicator";
+import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
+import { charsMissingFromWinAnsi } from "@/lib/pdf-font-match";
 import {
   checkNumbers,
   cleanCopy,
@@ -47,7 +55,7 @@ export const Route = createFileRoute("/edit")({
       {
         name: "description",
         content:
-          "Open a PDF, click a line of text, and rewrite it. Only the box you touched is redrawn, type shrinks to fit, and the file never leaves your browser.",
+          "Open a PDF, click a text run, and rewrite it using fonts already in the file. Only that operator is replaced — no white-out layer, no Creative Cloud fonts.",
       },
       { property: "og:title", content: "Edit a PDF line without Acrobat — PDF Relief" },
       {
@@ -86,6 +94,8 @@ function Editor() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [findings, setFindings] = useState<NumberFinding[] | null>(null);
+  const [inspection, setInspection] = useState<TextEditInspection | null>(null);
+  const [inspecting, setInspecting] = useState(false);
   const holderRef = useRef<HTMLDivElement>(null);
 
   const selected = selectedId ? lines.find((l) => l.id === selectedId) : undefined;
@@ -100,6 +110,7 @@ function Editor() {
       setDoc({ name, base: name.replace(/\.pdf$/i, ""), bytes, proxy, pageCount: proxy.numPages });
       setEdits({});
       setSelectedId(null);
+      setInspection(null);
       setPage(1);
     } catch {
       setDoc(null);
@@ -169,6 +180,41 @@ function Editor() {
   const boxWidth = selected ? selected.width : 0;
   const draftFits = selected ? estimateWidth(draft, selected.fontSize) <= boxWidth : true;
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
+  const missingGlyphs = useMemo(() => charsMissingFromWinAnsi(draft), [draft]);
+
+  useEffect(() => {
+    if (!doc || !selected) {
+      setInspection(null);
+      return;
+    }
+    let cancelled = false;
+    setInspecting(true);
+    const probe: TextPatch = {
+      page: selected.page,
+      x: selected.x,
+      y: selected.y,
+      width: selected.width,
+      height: selected.height,
+      fontSize: selected.fontSize,
+      text: selected.text,
+      originalText: selected.text,
+      fontName: selected.fontName,
+      fontFamily: selected.fontFamily,
+    };
+    void inspectTextPatch(doc.bytes, probe)
+      .then((result) => {
+        if (!cancelled) setInspection(result);
+      })
+      .catch(() => {
+        if (!cancelled) setInspection(null);
+      })
+      .finally(() => {
+        if (!cancelled) setInspecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, selected]);
 
   const openSample = async () => {
     setStatus("Building the sample quote");
@@ -185,6 +231,7 @@ function Editor() {
   const commit = () => {
     if (!selected) return;
     const text = draft.trim();
+    if (text && text !== selected.text && !canCommitSafely(inspection, text, selected.text)) return;
     setEdits((prev) => {
       const next = { ...prev };
       if (!text || text === selected.text) delete next[selected.id];
@@ -220,11 +267,18 @@ function Editor() {
         height: line.height,
         fontSize: line.fontSize,
         text,
+        originalText: line.text,
+        fontName: line.fontName,
+        fontFamily: line.fontFamily,
       }));
       const bytes = await applyTextPatches(doc.bytes, patches);
       downloadBytes(bytes, `${doc.base}-edited.pdf`);
-    } catch {
-      setError("The export failed. Nothing was changed on your original file.");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The export failed. Nothing was changed on your original file.",
+      );
     } finally {
       setStatus(null);
     }
@@ -277,7 +331,10 @@ function Editor() {
               Edit the words. Leave the rest of the page alone.
             </h1>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
-              Original pages stay as PDF objects — fonts, rules, and images you do not touch are not rasterized. Click a line, change it, and export. Assistants here only clean copy, fit a sentence to its box, or check whether the numbers on the page add up.
+              Original pages stay as PDF objects — fonts, rules, and images you do not touch are not
+              rasterized. Click a run, rewrite it in a font already in the file, and export. No
+              white-out layer, no Creative Cloud activation. Assistants here only clean copy, fit a
+              sentence to its box, or check whether the numbers on the page add up.
             </p>
           </div>
           {doc && (
@@ -323,9 +380,15 @@ function Editor() {
                   title="Drop a PDF to edit"
                   hint="Stays in this browser. One page at a time, so it will not pin 32 GB."
                 >
-                  <Button variant="outline" onClick={openSample}><FileText /> Load workshop notes</Button>
+                  <Button variant="outline" onClick={openSample}>
+                    <FileText /> Load workshop notes
+                  </Button>
                 </PdfDropZone>
-                <div className="bench-panel mt-5 p-4 text-sm text-muted-foreground">No document yet. Use a contract, handout, quote, or the workshop notes sample. This editor is for documents you own — it will not help fake bank statements or other official records.</div>
+                <div className="bench-panel mt-5 p-4 text-sm text-muted-foreground">
+                  No document yet. Use a contract, handout, quote, or the workshop notes sample.
+                  This editor is for documents you own — it will not help fake bank statements or
+                  other official records.
+                </div>
               </>
             )}
           </div>
@@ -379,8 +442,8 @@ function Editor() {
                 </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                {lines.length} text lines found on this page. Hover to see the boxes; click one to
-                edit it.
+                {lines.length} text runs on this page. Hover to see the boxes; click one to edit
+                that run only.
               </p>
             </div>
 
@@ -395,11 +458,25 @@ function Editor() {
                 </div>
               ) : (
                 <>
-                  <p className="eyebrow">Editing one line</p>
+                  <p className="eyebrow">Editing one run</p>
                   <p className="text-gauge mt-2 text-xs text-muted-foreground">
                     page {selected.page} · {selected.fontSize.toFixed(1)}pt ·{" "}
                     {selected.width.toFixed(0)}pt wide
+                    {selected.fontFamily ? ` · ${selected.fontFamily.split(",")[0]}` : ""}
                   </p>
+                  <FontMatchIndicator
+                    inspection={
+                      inspection && missingGlyphs.length > 0
+                        ? {
+                            ...inspection,
+                            method: "blocked",
+                            missingGlyphs,
+                            message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
+                          }
+                        : inspection
+                    }
+                    loading={inspecting}
+                  />
                   <Textarea
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -409,9 +486,7 @@ function Editor() {
                   />
                   <p
                     className={
-                      draftFits
-                        ? "mt-2 text-xs text-muted-foreground"
-                        : "mt-2 text-xs text-warning"
+                      draftFits ? "mt-2 text-xs text-muted-foreground" : "mt-2 text-xs text-warning"
                     }
                   >
                     {draftFits
@@ -420,7 +495,11 @@ function Editor() {
                   </p>
 
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => setDraft(cleanCopy(draft))}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setDraft(cleanCopy(draft))}
+                    >
                       <Eraser className="mr-1.5 size-3.5" /> Clean copy
                     </Button>
                     <Button
@@ -433,7 +512,15 @@ function Editor() {
                   </div>
 
                   <div className="mt-4 flex gap-2">
-                    <Button size="sm" className="flex-1" onClick={commit}>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={commit}
+                      disabled={
+                        !canCommitSafely(inspection, draft, selected.text) ||
+                        missingGlyphs.length > 0
+                      }
+                    >
                       Keep this change
                     </Button>
                     <Button
@@ -445,9 +532,7 @@ function Editor() {
                       <Undo2 className="size-3.5" />
                     </Button>
                   </div>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Original: “{selected.text}”
-                  </p>
+                  <p className="mt-3 text-xs text-muted-foreground">Original: “{selected.text}”</p>
                 </>
               )}
 
@@ -476,7 +561,9 @@ function Editor() {
                             : "border-warning/50 bg-warning/10",
                         ].join(" ")}
                       >
-                        <p className="text-gauge truncate text-xs text-muted-foreground">{f.line}</p>
+                        <p className="text-gauge truncate text-xs text-muted-foreground">
+                          {f.line}
+                        </p>
                         <p className="mt-1 break-words text-sm">{f.message}</p>
                         {f.suggestion && (
                           <p className="text-gauge mt-1 text-xs text-muted-foreground">
@@ -506,7 +593,6 @@ function Editor() {
             </aside>
           </div>
         )}
-
       </main>
 
       <SiteFooter />
