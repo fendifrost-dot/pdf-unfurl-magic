@@ -30,6 +30,7 @@ import {
   type TextLine,
 } from "@/lib/pdf-runtime";
 import { applyTextPatches, buildSamplePdf, type TextPatch } from "@/lib/pdf-tools";
+import { toDesktopBytes } from "@/lib/desktop";
 import {
   checkNumbers,
   cleanCopy,
@@ -109,6 +110,29 @@ function Editor() {
       setStatus(null);
     }
   }, []);
+
+  // Desktop app: pick up a file opened from File → Open PDF or the Finder.
+  useEffect(() => {
+    const api = typeof window === "undefined" ? undefined : window.pdfReliefDesktop;
+    if (!api) return;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const pending = await api.takePendingPdf();
+        if (!pending || cancelled) return;
+        const bytes = toDesktopBytes(pending.data);
+        await loadBytes(pending.name, bytes.slice(0).buffer as ArrayBuffer);
+      } catch {
+        if (!cancelled) setError("That file could not be opened from the desktop app.");
+      }
+    };
+    void pull();
+    const unsubscribe = api.onPdfReady(() => void pull());
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [loadBytes]);
 
   // Render the current page and collect its text lines.
   useEffect(() => {
