@@ -29,6 +29,29 @@ test.describe("PDF Relief fixture smoke", () => {
     await expect(page.getByText(/1\s*\/\s*3/)).toBeVisible({ timeout: 15_000 });
   });
 
+  test("editor: native text PDF still offers collapsed Enhance", async ({ page }) => {
+    await page.goto(`${baseURL}/edit`);
+    await dropPdf(page, "main", "simple-text.pdf");
+    await expect(page.getByText(/1\s*\/\s*1/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("edit-mode-enhance")).toBeVisible();
+    await expect(page.getByTestId("enhance-panel")).toBeVisible();
+    await expect(page.getByTestId("enhance-trigger")).toBeVisible();
+    const runOcr = page.getByRole("button", { name: /^Enhance page & OCR$/i });
+    await expect(runOcr).toBeHidden();
+    await page.getByTestId("edit-mode-enhance").click();
+    await expect(runOcr).toBeVisible();
+    await expect(page.getByText(/optional/i).first()).toBeVisible();
+  });
+
+  test("editor: scanned fixture auto-expands Enhance", async ({ page }) => {
+    await page.goto(`${baseURL}/edit`);
+    await dropPdf(page, "main", "scan-image-only.pdf");
+    await expect(page.getByText(/this page looks scanned/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByRole("button", { name: /^Enhance page & OCR$/i })).toBeVisible();
+  });
+
   test("editor export of an edited simple-text stays a small PDF", async ({ page }) => {
     await page.goto(`${baseURL}/edit`);
     await dropPdf(page, "main", "simple-text.pdf");

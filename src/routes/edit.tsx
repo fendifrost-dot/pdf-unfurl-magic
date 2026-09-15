@@ -14,6 +14,7 @@ import {
   Loader2,
   Scissors,
   ScanLine,
+  Sparkles,
   Square,
   StickyNote,
   Type,
@@ -59,6 +60,7 @@ import {
   type ScanPageSession,
 } from "@/lib/pdf-scan-edit";
 import { disposeOcr, type EnhancePreset } from "@/lib/scan";
+import { ENHANCE_CHIP_LABEL, shouldAutoExpandEnhance } from "@/lib/enhance-entry";
 import {
   defaultFontChoiceId,
   loadSystemFontBytes,
@@ -206,6 +208,7 @@ function Editor() {
   const [scanReport, setScanReport] = useState<PageScanReport | null>(null);
   const [scanByPage, setScanByPage] = useState<Record<number, ScanPageSession>>({});
   const [scanBusy, setScanBusy] = useState<string | null>(null);
+  const [enhanceOpen, setEnhanceOpen] = useState(false);
   const [fontCatalog, setFontCatalog] = useState<CatalogFont[]>([]);
   const [fontChoiceId, setFontChoiceId] = useState("");
   const holderRef = useRef<HTMLDivElement>(null);
@@ -215,6 +218,7 @@ function Editor() {
   const previewTimer = useRef<number | null>(null);
   const scanByPageRef = useRef(scanByPage);
   scanByPageRef.current = scanByPage;
+  const enhancePageKeyRef = useRef("");
 
   const selected = selectedId ? lines.find((l) => l.id === selectedId) : undefined;
   const selectedImage = selectedImageId
@@ -229,8 +233,21 @@ function Editor() {
   ).length;
   const pendingCount = editedIds.length + imageEditIds.length + marks.length + scanExportReady;
   const scanSession = scanByPage[page] ?? emptyScanSession();
-  const scanMode = !!scanReport?.looksScanned || scanSession.ocrLines.length > 0;
+  const scanMode = shouldAutoExpandEnhance({
+    looksScanned: !!scanReport?.looksScanned,
+    ocrLineCount: scanSession.ocrLines.length,
+  });
   const selectedIsOcr = selected?.source === "ocr";
+  const panelReport: PageScanReport = scanReport ?? {
+    looksScanned: scanMode,
+    reason: scanMode ? "image-only" : "ok",
+    message: scanMode ? "Enhance page and OCR to edit amounts without a white-out." : "",
+    showCount: 0,
+    imageCount: 0,
+    pdfJsLineCount: lines.length,
+    matchedLineCount: 0,
+    matchRatio: 0,
+  };
 
   const clearPreview = () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -279,11 +296,32 @@ function Editor() {
     const sync = () => {
       if (window.location.hash === "#images") setMode("image");
       if (window.location.hash === "#marks") setMode("mark");
+      if (window.location.hash === "#enhance") {
+        setMode("text");
+        setEnhanceOpen(true);
+      }
     };
     sync();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
+
+  const enhancePageKey = `${doc?.name ?? ""}:${page}`;
+
+  useEffect(() => {
+    const pageChanged = enhancePageKeyRef.current !== enhancePageKey;
+    enhancePageKeyRef.current = enhancePageKey;
+    const hashEnhance = typeof window !== "undefined" && window.location.hash === "#enhance";
+    const auto = shouldAutoExpandEnhance({
+      looksScanned: !!scanReport?.looksScanned,
+      ocrLineCount: scanSession.ocrLines.length,
+    });
+    if (auto || hashEnhance) {
+      setEnhanceOpen(true);
+      return;
+    }
+    if (pageChanged) setEnhanceOpen(false);
+  }, [enhancePageKey, scanReport?.looksScanned, scanSession.ocrLines.length]);
 
   // Desktop app: pick up a file opened from File → Open PDF or the Finder.
   useEffect(() => {
@@ -315,6 +353,7 @@ function Editor() {
     setStatus("Rendering page " + page);
     setSelectedImageId(null);
     setSourceCanvas(null);
+    setScanReport(null);
     clearPreview();
     (async () => {
       try {
@@ -1006,6 +1045,7 @@ function Editor() {
                       setSelectedId(null);
                       setSelectedImageId(null);
                       setDraftMark(null);
+                      setScanReport(null);
                       setPage((p) => Math.max(1, p - 1));
                     }}
                     aria-label="Previous page"
@@ -1023,6 +1063,7 @@ function Editor() {
                       setSelectedId(null);
                       setSelectedImageId(null);
                       setDraftMark(null);
+                      setScanReport(null);
                       setPage((p) => Math.min(doc.pageCount, p + 1));
                     }}
                     aria-label="Next page"
@@ -1043,13 +1084,35 @@ function Editor() {
                   <Button
                     key={value}
                     size="sm"
-                    variant={mode === value ? "default" : "ghost"}
+                    variant={
+                      mode === value && !(value === "text" && enhanceOpen) ? "default" : "ghost"
+                    }
                     className="flex-1"
-                    onClick={() => setMode(value)}
+                    onClick={() => {
+                      setMode(value);
+                      if (value === "text" && !scanMode) setEnhanceOpen(false);
+                    }}
                   >
                     <Icon className="size-3.5" /> {label}
                   </Button>
                 ))}
+                <Button
+                  size="sm"
+                  variant={mode === "text" && enhanceOpen ? "default" : "ghost"}
+                  className="flex-1"
+                  data-testid="edit-mode-enhance"
+                  onClick={() => {
+                    setMode("text");
+                    setEnhanceOpen(true);
+                    window.requestAnimationFrame(() => {
+                      const panel = document.getElementById("enhance-page-panel");
+                      panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                      panel?.querySelector<HTMLElement>("[data-enhance-focus]")?.focus();
+                    });
+                  }}
+                >
+                  <Sparkles className="size-3.5" /> {ENHANCE_CHIP_LABEL}
+                </Button>
               </div>
 
               {scanMode && mode === "text" && (
@@ -1283,52 +1346,40 @@ function Editor() {
                 </>
               ) : (
                 <>
-                  {scanMode && (
-                    <ScanAwarePanel
-                      report={
-                        scanReport ?? {
-                          looksScanned: true,
-                          reason: "image-only",
-                          message:
-                            "This page looks scanned. Enhance page and OCR to edit amounts without a white-out.",
-                          showCount: 0,
-                          imageCount: 0,
-                          pdfJsLineCount: 0,
-                          matchedLineCount: 0,
-                          matchRatio: 0,
-                        }
-                      }
-                      session={scanSession}
-                      busy={scanBusy}
-                      onPreset={(preset) => patchScanSession({ preset })}
-                      onReplaceToggle={(value) => patchScanSession({ replaceWithCleaned: value })}
-                      onEnhanceAndOcr={() => void enhanceAndOcr()}
-                      selectedId={selectedId}
-                      editedIds={editedIds}
-                      onSelectLine={select}
-                    />
-                  )}
-                  {scanMode && selected && <Separator className="my-5" />}
+                  <ScanAwarePanel
+                    report={panelReport}
+                    session={scanSession}
+                    busy={scanBusy}
+                    open={enhanceOpen}
+                    onOpenChange={setEnhanceOpen}
+                    onPreset={(preset) => patchScanSession({ preset })}
+                    onReplaceToggle={(value) => patchScanSession({ replaceWithCleaned: value })}
+                    onEnhanceAndOcr={() => void enhanceAndOcr()}
+                    selectedId={selectedId}
+                    editedIds={editedIds}
+                    onSelectLine={select}
+                  />
+                  <Separator className="my-5" />
                   {!selected ? (
-                    scanMode ? null : (
-                      <div className="py-8 text-center">
-                        <p className="font-display text-base font-semibold">
-                          {lines.length === 0 && doc
-                            ? "No text operators on this page"
-                            : "Nothing selected"}
-                        </p>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {lines.length === 0 && doc
-                            ? "This looks like a scan. A Safe edit here would paint over the image. Use Enhance page or Scan to OCR it instead."
-                            : "Click any line on the page to open it here, or switch to Image studio."}
-                        </p>
-                        {lines.length === 0 && doc && (
-                          <Button asChild className="mt-4" variant="secondary" size="sm">
-                            <a href="/scan">Open Scan</a>
-                          </Button>
-                        )}
-                      </div>
-                    )
+                    <div className="py-8 text-center">
+                      <p className="font-display text-base font-semibold">
+                        {lines.length === 0 && doc
+                          ? "No text operators on this page"
+                          : "Nothing selected"}
+                      </p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {scanSession.ocrLines.length > 0
+                          ? "Click an OCR line above or a box on the page."
+                          : lines.length === 0 && doc
+                            ? "Use Enhance & OCR this page when this is a scan or the picture is hard to read. A Safe edit here would paint over the image."
+                            : "Click any line on the page to open it here, or switch to Image studio. Enhance is optional if picking feels wrong."}
+                      </p>
+                      {lines.length === 0 && doc && (
+                        <Button asChild className="mt-4" variant="secondary" size="sm">
+                          <a href="/scan">Open Scan</a>
+                        </Button>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <p className="eyebrow">
