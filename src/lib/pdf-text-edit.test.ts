@@ -17,6 +17,7 @@ import {
   inspectTextPatch,
   listPageEmbeddedFonts,
   listPageShownText,
+  listPageTextShows,
   pageHasWhiteCover,
 } from "./pdf-text-edit";
 import { mergeFontCatalog } from "./pdf-font-catalog";
@@ -619,5 +620,68 @@ describe("safe text replace", () => {
     expect(catalog[0]?.safety).toBe("safe");
     expect(catalog.some((item) => item.source === "bundled")).toBe(true);
     expect(catalog.some((item) => item.source === "standard")).toBe(true);
+  });
+});
+
+describe("align writes x into the content stream", () => {
+  it("Align Right shares a right edge and Snap restores original xs", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Paid To", { x: 50, y: 640, size: 10, font });
+    page.drawText("500.00", { x: 400, y: 640, size: 10, font });
+    page.drawText("1,200.00", { x: 500, y: 640, size: 10, font });
+    const bytes = await doc.save();
+    const before = bytes.slice().buffer as ArrayBuffer;
+
+    const originals = await listPageTextShows(before, 1);
+    expect(originals.map((show) => show.text)).toEqual(["Paid To", "500.00", "1,200.00"]);
+    const right = Math.max(
+      ...originals.map((show) => show.x + font.widthOfTextAtSize(show.text, 10)),
+    );
+
+    const aligned = await applyTextPatchesWithReport(
+      before,
+      originals.map((show) => ({
+        page: 1,
+        x: show.x,
+        y: show.y,
+        width: font.widthOfTextAtSize(show.text, 10),
+        height: 12,
+        fontSize: 10,
+        text: show.text,
+        originalText: show.text,
+        fontFamily: "Helvetica",
+        targetX: right - font.widthOfTextAtSize(show.text, 10),
+        targetY: show.y,
+      })),
+    );
+    const moved = await listPageTextShows(aligned.bytes.slice().buffer as ArrayBuffer, 1);
+    expect(moved.map((show) => show.text)).toEqual(["Paid To", "500.00", "1,200.00"]);
+    const rights = moved.map((show) => show.x + font.widthOfTextAtSize(show.text, 10));
+    expect(Math.max(...rights) - Math.min(...rights)).toBeLessThan(0.2);
+    expect(moved.map((show) => show.x)).not.toEqual(originals.map((show) => show.x));
+
+    const snapped = await applyTextPatchesWithReport(
+      aligned.bytes.slice().buffer as ArrayBuffer,
+      moved.map((show, index) => ({
+        page: 1,
+        x: show.x,
+        y: show.y,
+        width: font.widthOfTextAtSize(show.text, 10),
+        height: 12,
+        fontSize: 10,
+        text: show.text,
+        originalText: show.text,
+        fontFamily: "Helvetica",
+        targetX: originals[index]!.x,
+        targetY: originals[index]!.y,
+      })),
+    );
+    const restored = await listPageTextShows(snapped.bytes.slice().buffer as ArrayBuffer, 1);
+    restored.forEach((show, index) => {
+      expect(show.x).toBeCloseTo(originals[index]!.x, 1);
+      expect(show.y).toBeCloseTo(originals[index]!.y, 1);
+    });
   });
 });

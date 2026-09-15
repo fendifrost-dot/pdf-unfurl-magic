@@ -7,6 +7,7 @@ import {
   hasWhiteCoverRect,
   replaceShowText,
   sameVisibleRun,
+  shiftShowUserPosition,
   softMatchKey,
   spliceHaystack,
   streamTextMatchesVisual,
@@ -100,5 +101,31 @@ describe("statement fragment matching", () => {
       ),
     ).toBe(true);
     expect(streamTextMatchesVisual("3DLG 7R", "Paid To")).toBe(false);
+  });
+});
+
+describe("shiftShowUserPosition", () => {
+  it("rewrites a dedicated Tm so the show origin moves", () => {
+    const src = "BT /F1 11 Tf 1 0 0 1 50 400 Tm (Paid To) Tj ET";
+    const tokens = tokenizeContentStream(src);
+    const show = collectTextShows(tokens)[0];
+    expect(show?.x).toBeCloseTo(50);
+    const next = shiftShowUserPosition(tokens, show!, 120, 400);
+    const moved = collectTextShows(next)[0];
+    expect(moved?.text).toBe("Paid To");
+    expect(moved?.x).toBeCloseTo(120);
+    expect(extractShownStrings(next)).toEqual(["Paid To"]);
+  });
+
+  it("does not move a neighbour that has its own Tm", () => {
+    const src = "BT /F1 11 Tf 1 0 0 1 50 400 Tm (Paid To) Tj 1 0 0 1 400 400 Tm (500.00) Tj ET";
+    const tokens = tokenizeContentStream(src);
+    const shows = collectTextShows(tokens);
+    expect(shows).toHaveLength(2);
+    const next = shiftShowUserPosition(tokens, shows[0]!, 90, 400);
+    const after = collectTextShows(next);
+    expect(after[0]?.x).toBeCloseTo(90);
+    expect(after[1]?.x).toBeCloseTo(400);
+    expect(after.map((item) => item.text)).toEqual(["Paid To", "500.00"]);
   });
 });

@@ -493,6 +493,140 @@ function applyMatrix(m: Matrix, x: number, y: number): { x: number; y: number } 
   return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
 }
 
+function invertMatrix(m: Matrix, x: number, y: number): { x: number; y: number } {
+  const det = m[0] * m[3] - m[1] * m[2];
+  const nx = x - m[4];
+  const ny = y - m[5];
+  if (Math.abs(det) < 1e-12) return { x: nx, y: ny };
+  return { x: (m[3] * nx - m[2] * ny) / det, y: (m[0] * ny - m[1] * nx) / det };
+}
+
+function trimCoord(n: number): string {
+  return String(Math.round(n * 1000) / 1000);
+}
+
+function numToken(n: number): Token {
+  return { kind: "num", raw: trimCoord(n), value: n };
+}
+
+function collectPrevNumbers(
+  tokens: Token[],
+  opIndex: number,
+  count: number,
+): { indices: number[]; values: number[] } {
+  const indices: number[] = [];
+  for (let i = opIndex - 1; i >= 0 && indices.length < count; i--) {
+    const token = tokens[i];
+    if (!token || token.kind === "ws" || token.kind === "comment") continue;
+    if (token.kind !== "num" || typeof token.value !== "number") break;
+    indices.push(i);
+  }
+  indices.reverse();
+  return { indices, values: indices.map((i) => Number(tokens[i]?.value)) };
+}
+
+function tmSnippet(matrix: AffineMatrix, e: number, f: number): Token[] {
+  const values = [matrix[0], matrix[1], matrix[2], matrix[3], e, f];
+  const out: Token[] = [];
+  for (let i = 0; i < values.length; i++) {
+    out.push(numToken(values[i]!));
+    out.push({ kind: "ws", raw: i === values.length - 1 ? " " : " " });
+  }
+  out.push({ kind: "op", raw: "Tm", value: "Tm" });
+  out.push({ kind: "ws", raw: "\n" });
+  return out;
+}
+
+function previousPositionOp(
+  tokens: Token[],
+  show: TextShow,
+): { opIndex: number; op: "Tm" | "Td" | "TD" } | null {
+  for (let i = show.start - 1; i >= 0; i--) {
+    const token = tokens[i];
+    if (!token || token.kind === "ws" || token.kind === "comment") continue;
+    if (token.kind === "op" && token.value === "BT") return null;
+    if (
+      token.kind === "op" &&
+      (token.value === "Tj" || token.value === "TJ" || token.value === "'" || token.value === '"')
+    ) {
+      return null;
+    }
+    if (
+      token.kind === "op" &&
+      (token.value === "Tm" || token.value === "Td" || token.value === "TD")
+    ) {
+      return { opIndex: i, op: token.value };
+    }
+  }
+  return null;
+}
+
+function showOwnsPositionOp(tokens: Token[], show: TextShow): boolean {
+  for (let i = show.end + 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token || token.kind === "ws" || token.kind === "comment") continue;
+    if (
+      token.kind === "op" &&
+      (token.value === "ET" || token.value === "Tm" || token.value === "BT")
+    ) {
+      return true;
+    }
+    if (
+      token.kind === "op" &&
+      (token.value === "Tj" ||
+        token.value === "TJ" ||
+        token.value === "Td" ||
+        token.value === "TD" ||
+        token.value === "T*" ||
+        token.value === "'" ||
+        token.value === '"')
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Move a text-show’s user-space origin. Dedicated Tm/Td before the show is
+ * rewritten; otherwise a Tm is inserted immediately before that operator so
+ * neighbours with their own Tm stay put.
+ */
+export function shiftShowUserPosition(
+  tokens: Token[],
+  show: TextShow,
+  targetX: number,
+  targetY: number,
+): Token[] {
+  if (Math.abs(show.x - targetX) < 0.001 && Math.abs(show.y - targetY) < 0.001) return tokens;
+  const dest = invertMatrix(show.ctm, targetX, targetY);
+  const pos = previousPositionOp(tokens, show);
+  if (pos && showOwnsPositionOp(tokens, show)) {
+    if (pos.op === "Tm") {
+      const nums = collectPrevNumbers(tokens, pos.opIndex, 6);
+      if (nums.indices.length === 6) {
+        const next = tokens.slice();
+        next[nums.indices[4]!] = numToken(dest.x);
+        next[nums.indices[5]!] = numToken(dest.y);
+        return next;
+      }
+    }
+    const count = pos.op === "Tm" ? 6 : 2;
+    const nums = collectPrevNumbers(tokens, pos.opIndex, count);
+    const start = nums.indices[0] ?? pos.opIndex;
+    return [
+      ...tokens.slice(0, start),
+      ...tmSnippet(show.textMatrix, dest.x, dest.y),
+      ...tokens.slice(pos.opIndex + 1),
+    ];
+  }
+  return [
+    ...tokens.slice(0, show.start),
+    ...tmSnippet(show.textMatrix, dest.x, dest.y),
+    ...tokens.slice(show.start),
+  ];
+}
+
 type GState = {
   ctm: Matrix;
   fill: { r: number; g: number; b: number };

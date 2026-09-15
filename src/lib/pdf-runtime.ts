@@ -54,6 +54,12 @@ export type TextLine = {
   /** PDF user-space coordinates, origin bottom-left. Baseline is `y`. */
   x: number;
   y: number;
+  /**
+   * Extract-time x,y before the user nudges or aligns. Snap-to-original
+   * restores these. Missing means the current x,y *is* the extract position.
+   */
+  originX?: number;
+  originY?: number;
   width: number;
   height: number;
   fontSize: number;
@@ -138,6 +144,8 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       text: text.replace(/[ \t]+/g, " ").trim(),
       x,
       y,
+      originX: x,
+      originY: y,
       width: Math.max(right - x, fontSize * 0.6),
       height: fontSize * 1.18,
       fontSize,
@@ -263,11 +271,24 @@ export function joinRunsToLine(runs: TextLine[]): TextLine {
     };
   }
   if (sorted.length === 1) {
-    return { ...first, kind: "line", members: first.members ?? [first] };
+    const only = first.members ?? [first];
+    return {
+      ...first,
+      originX: first.originX ?? first.x,
+      originY: first.originY ?? first.y,
+      kind: "line",
+      members: only.map((run) => ({
+        ...run,
+        originX: run.originX ?? run.x,
+        originY: run.originY ?? run.y,
+      })),
+    };
   }
   const x = Math.min(...sorted.map((r) => r.x));
   const right = Math.max(...sorted.map((r) => r.x + r.width));
   const y = Math.min(...sorted.map((r) => r.y));
+  const originX = Math.min(...sorted.map((r) => r.originX ?? r.x));
+  const originY = Math.min(...sorted.map((r) => r.originY ?? r.y));
   const fontSize = Math.max(...sorted.map((r) => r.fontSize));
   let text = "";
   const rawParts: string[] = [];
@@ -290,15 +311,23 @@ export function joinRunsToLine(runs: TextLine[]): TextLine {
     ...(rawJoined && rawJoined !== display ? { rawText: rawJoined } : {}),
     x,
     y,
+    originX,
+    originY,
     width: Math.max(right - x, fontSize * 0.6),
     height: fontSize * 1.18,
     fontSize,
     fontName: first.fontName,
     fontFamily: first.fontFamily,
-    source: first.source,
+    ...(first.source ? { source: first.source } : {}),
     hasTextOperator: sorted.some((r) => r.hasTextOperator !== false),
     kind: "line",
-    members: sorted.flatMap((run) => (run.members?.length ? run.members : [run])),
+    members: sorted
+      .flatMap((run) => (run.members?.length ? run.members : [run]))
+      .map((run) => ({
+        ...run,
+        originX: run.originX ?? run.x,
+        originY: run.originY ?? run.y,
+      })),
   };
 }
 
