@@ -10,8 +10,20 @@ import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
 import { burnMarksOnPages } from "./pdf-marks";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
-export type { TextPatch, TextEditReport, TextEditInspection } from "./pdf-text-edit";
-export { applyTextPatches, applyTextPatchesWithReport, inspectTextPatch } from "./pdf-text-edit";
+export type {
+  TextPatch,
+  TextEditReport,
+  TextEditInspection,
+  TextLayerInspection,
+} from "./pdf-text-edit";
+export {
+  applyTextPatches,
+  applyTextPatchesWithReport,
+  inspectTextPatch,
+  inspectTextLayer,
+  listPageTextShows,
+  listPageEmbeddedFonts,
+} from "./pdf-text-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 

@@ -1,4 +1,4 @@
-import { ShieldAlert, ShieldCheck, Type } from "lucide-react";
+import { ShieldAlert, ShieldCheck, ScanSearch, Type } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { TextEditInspection } from "@/lib/pdf-text-edit";
 
@@ -16,10 +16,31 @@ export function FontMatchIndicator({
   }
   if (!inspection) return null;
 
+  const scan = !!inspection.deferToScan || inspection.blockReason === "scan-page";
   const blocked = inspection.method === "blocked";
   const inPlace = inspection.method === "in-place";
-  const tone = blocked ? "text-destructive" : inPlace ? "text-success" : "text-warning";
-  const Icon = blocked ? ShieldAlert : ShieldCheck;
+  const system = inspection.method === "redraw-system";
+  const tone = scan
+    ? "text-warning"
+    : blocked
+      ? "text-destructive"
+      : inPlace
+        ? "text-success"
+        : "text-warning";
+  const Icon = scan ? ScanSearch : blocked ? ShieldAlert : ShieldCheck;
+  const label = scan
+    ? "Scan page — use Scan, not a fake Safe edit"
+    : blocked && inspection.blockReason === "not-found"
+      ? "Run not found"
+      : blocked && inspection.blockReason === "unsafe-font"
+        ? "Unsafe font"
+        : blocked
+          ? "Blocked"
+          : inPlace
+            ? "Safe in-place rewrite"
+            : system
+              ? "Safe local system font"
+              : "Safe standard stand-in";
 
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-surface/60 px-3 py-2.5">
@@ -30,11 +51,11 @@ export function FontMatchIndicator({
         </Badge>
         <span className={`inline-flex items-center gap-1 text-xs ${tone}`}>
           <Icon className="size-3.5" />
-          {blocked ? "Unsafe" : inPlace ? "Safe in-place rewrite" : "Safe standard stand-in"}
+          {label}
         </span>
       </div>
       <p
-        className={`mt-1.5 text-xs leading-relaxed ${blocked ? "text-destructive" : "text-muted-foreground"}`}
+        className={`mt-1.5 text-xs leading-relaxed ${blocked && !scan ? "text-destructive" : "text-muted-foreground"}`}
       >
         {inspection.message}
       </p>
