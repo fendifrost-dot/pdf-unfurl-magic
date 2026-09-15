@@ -145,11 +145,22 @@ describe("OCR line grouping", () => {
     ]);
     expect(lines).toHaveLength(1);
     expect(lines[0]?.text).toBe("Paid To PayPal");
+    expect(lines[0]?.words?.map((word) => word.text)).toEqual(["Paid", "To", "PayPal"]);
   });
 
   it("maps pixel boxes into PDF user space", () => {
     const [line] = ocrBoxesToTextLines(
-      [{ text: "1,987.00", x0: 100, y0: 50, x1: 200, y1: 70, confidence: 92 }],
+      [
+        {
+          text: "1,987.00",
+          x0: 100,
+          y0: 50,
+          x1: 200,
+          y1: 70,
+          confidence: 92,
+          words: [{ text: "1,987.00", x0: 100, y0: 50, x1: 200, y1: 70, confidence: 92 }],
+        },
+      ],
       1,
       400,
       500,
@@ -161,6 +172,7 @@ describe("OCR line grouping", () => {
     expect(line?.y).toBeCloseTo(430);
     expect(line?.width).toBeCloseTo(100);
     expect(line?.height).toBeCloseTo(20);
+    expect(line?.ocrWords).toEqual([{ text: "1,987.00", confidence: 92 }]);
   });
 });
 

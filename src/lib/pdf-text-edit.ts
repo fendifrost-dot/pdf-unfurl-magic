@@ -82,6 +82,11 @@ export type TextPatch = {
   fontFamily?: string;
   fontChoice?: FontChoice;
   /**
+   * Member boxes for marquee / multi-run selections. Locate and rewrite only
+   * operators that intersect these, not everything in the union gutter.
+   */
+  coverBoxes?: Array<{ x: number; y: number; width: number; height: number }>;
+  /**
    * Extra boxes from a joined / expanded line (description + amount columns).
    * Used to locate overlapping shows; rewrite still happens per member when
    * `members` is set or the shows sit in distinct columns.
@@ -578,14 +583,29 @@ function sizeForWrite(text: string, originalSize: number, width: number, font?: 
   return shrinkSize(text, originalSize, width, font);
 }
 
+function showOverlapsBox(
+  show: TextShow,
+  box: { x: number; y: number; width: number; height: number },
+  fallbackFontSize: number,
+): boolean {
+  const showW = showWidth(show);
+  const showH = Math.max(show.fontSize || fallbackFontSize, 4);
+  const pad = Math.max(4, showH * 0.3);
+  const overlapX =
+    Math.min(show.x + showW, box.x + box.width + pad) - Math.max(show.x, box.x - pad);
+  if (overlapX <= 0) return false;
+  const overlapY =
+    Math.min(show.y + showH, box.y + (box.height || showH)) - Math.max(show.y, box.y);
+  if (overlapY > 0) return true;
+  const band = Math.max(4, Math.max(showH, box.height || showH) * 0.55);
+  return Math.abs(show.y - box.y) <= band;
+}
+
 function showOverlapsPatch(show: TextShow, patch: TextPatch): boolean {
-  const band = Math.max(4, Math.max(show.fontSize, patch.fontSize || 10) * 0.55);
-  if (Math.abs(show.y - patch.y) > band) return false;
-  const pad = Math.max(4, (patch.fontSize || 10) * 0.3);
-  const overlap =
-    Math.min(show.x + showWidth(show), patch.x + patch.width + pad) -
-    Math.max(show.x, patch.x - pad);
-  return overlap > 0;
+  const boxes = patch.coverBoxes?.length
+    ? patch.coverBoxes
+    : [{ x: patch.x, y: patch.y, width: patch.width, height: patch.height }];
+  return boxes.some((box) => showOverlapsBox(show, box, patch.fontSize || 10));
 }
 
 function showCoveredByPatch(show: TextShow, patch: TextPatch): boolean {
@@ -633,7 +653,7 @@ function expandLocatedShows(
   const headKey = textMatchKey(head.text);
   const originalLooksJoined = origKey.length > headKey.length + 2;
   const patchLooksWide = patch.width > showWidth(head) * 1.35;
-  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1;
+  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1 || (patch.coverBoxes?.length ?? 0) > 1;
   if (!originalLooksJoined && !patchLooksWide && !hasMembers) return located;
 
   const seen = new Set(
@@ -669,7 +689,7 @@ function dropCoveredShowsOnOtherStreams(
   const headKey = textMatchKey(head.text);
   const originalLooksJoined = origKey.length > headKey.length + 2;
   const patchLooksWide = patch.width > showWidth(head) * 1.35;
-  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1;
+  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1 || (patch.coverBoxes?.length ?? 0) > 1;
   if (!originalLooksJoined && !patchLooksWide && !hasMembers) return;
 
   for (const stream of streams) {

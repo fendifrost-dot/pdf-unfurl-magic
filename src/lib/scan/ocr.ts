@@ -1,3 +1,4 @@
+import { OCR_KEEP_CONFIDENCE } from "../ocr-verify";
 import type { OcrLineBox, OcrWord } from "./types";
 
 type TesseractWorker = {
@@ -58,7 +59,7 @@ export async function recognizePage(image: Blob | HTMLCanvasElement): Promise<Oc
         for (const word of line.words ?? []) {
           const text = sanitizeWord(word.text);
           const box = word.bbox;
-          if (!text || word.confidence < 40) continue;
+          if (!text || word.confidence < OCR_KEEP_CONFIDENCE) continue;
           if (box.x1 <= box.x0 || box.y1 <= box.y0) continue;
           words.push({
             text,
@@ -127,6 +128,7 @@ export function groupOcrWords(words: OcrWord[]): OcrLineBox[] {
         x1: Math.max(...ordered.map((item) => item.x1)),
         y1: Math.max(...ordered.map((item) => item.y1)),
         confidence,
+        words: ordered,
       };
     })
     .filter((line): line is OcrLineBox => line !== null);

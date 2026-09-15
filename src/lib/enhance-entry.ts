@@ -19,7 +19,7 @@ export function enhanceEntryCopy(looksScanned: boolean): { title: string; body: 
   if (looksScanned) {
     return {
       title: "This page looks scanned",
-      body: "Enhance this page and OCR to edit amounts without painting Helvetica over the image.",
+      body: "Enhance this page and OCR to edit amounts without painting Helvetica over the image. Damaged lettering goes Enhance → Verify uncertain OCR → Edit — not silent bad OCR.",
     };
   }
   return {

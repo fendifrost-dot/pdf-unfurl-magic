@@ -26,6 +26,7 @@ export type OcrLineBox = {
   x1: number;
   y1: number;
   confidence: number;
+  words?: OcrWord[];
 };
 
 export type ScanPage = {
