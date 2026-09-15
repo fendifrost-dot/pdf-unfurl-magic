@@ -9,6 +9,7 @@ const LINKS: Array<{
   hash?: string;
 }> = [
   { to: "/edit", label: "Edit" },
+  { to: "/edit", hash: "form", label: "Form" },
   { to: "/edit", hash: "marks", label: "Mark" },
   { to: "/split", label: "Split" },
   { to: "/merge", label: "Merge" },

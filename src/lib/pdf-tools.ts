@@ -14,6 +14,8 @@ import { saveEditorAnnotations } from "./pdf-annotate-js";
 import { editorMarksForSave } from "./pdf-redact";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
+import { applyAcroFormToDocument, type AcroFormFillRequest } from "./pdf-acroform";
+export type { AcroFormFillRequest } from "./pdf-acroform";
 export type {
   TextPatch,
   TextEditReport,
@@ -104,7 +106,8 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
  * permanently erase `erase` marks, burn cover boxes, and write highlight/note
  * as real PDF annotations.
  * Overlay white-rect + stacked drawImage is only used when no identifiable
- * image XObject exists on the page.
+ * image XObject exists on the page. Optional AcroForm fill + flatten burns
+ * field appearances into the page and drops widget annotations.
  */
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
@@ -112,6 +115,7 @@ export async function applyWorkshopPatches(
   imagePatches: ImagePatch[],
   marks: AnnotationBurn[],
   scanPatches: ScanPageExport[] = [],
+  formFill?: AcroFormFillRequest | null,
 ): Promise<Uint8Array> {
   const afterText = textPatches.length ? await applyTextPatches(bytes, textPatches) : null;
   const afterScan = scanPatches.length
@@ -142,6 +146,10 @@ export async function applyWorkshopPatches(
       width: fitted.w,
       height: fitted.h,
     });
+  }
+
+  if (formFill) {
+    applyAcroFormToDocument(doc, formFill);
   }
 
   if (marks.length) {
