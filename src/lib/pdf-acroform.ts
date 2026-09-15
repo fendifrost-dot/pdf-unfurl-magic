@@ -386,6 +386,9 @@ export function applyAcroFormToDocument(
         `Could not flatten this form: ${error instanceof Error ? error.message : "unknown error"}. Some widgets may lack appearance streams.`,
       );
     }
+    if (catalogFieldCount(doc) === 0) {
+      doc.catalog.delete(PDFName.of("AcroForm"));
+    }
   }
 
   return { filled, flattened: flatten, hasXfa, warnings };

@@ -66,6 +66,8 @@ describe("AcroForm fill + flatten", () => {
     expect(result.flattened).toBe(true);
     expect(result.filled).toBe(4);
     expect(await catalogAcroFormFieldCount(asBuffer(bytes))).toBe(0);
+    const flattenedDoc = await PDFDocument.load(bytes.slice());
+    expect(catalogHasAcroForm(flattenedDoc)).toBe(false);
     const widgets = await listWidgetSubtypes(asBuffer(bytes));
     expect(widgets).not.toContain("Widget");
 
