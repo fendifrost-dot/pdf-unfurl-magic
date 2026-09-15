@@ -45,6 +45,7 @@ import {
 import { exportFileName } from "@/lib/pdf-marks";
 import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
+import { FontPicker } from "@/components/font-picker";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
 import { charsMissingFromWinAnsi } from "@/lib/pdf-font-match";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
@@ -59,6 +60,13 @@ import {
   type ScanPageSession,
 } from "@/lib/pdf-scan-edit";
 import { disposeOcr, type EnhancePreset } from "@/lib/scan";
+import {
+  defaultFontChoiceId,
+  loadSystemFontBytes,
+  mergeFontCatalog,
+  querySystemFonts,
+  type CatalogFont,
+} from "@/lib/pdf-font-catalog";
 import {
   checkNumbers,
   cleanCopy,
@@ -113,7 +121,7 @@ type Doc = {
   pageCount: number;
 };
 
-type Edit = { line: TextLine; text: string };
+type Edit = { line: TextLine; text: string; fontChoiceId?: string };
 type Mode = "text" | "image" | "mark";
 type MarkTool = AnnotationBurn["kind"];
 
@@ -199,6 +207,8 @@ function Editor() {
   const [scanReport, setScanReport] = useState<PageScanReport | null>(null);
   const [scanByPage, setScanByPage] = useState<Record<number, ScanPageSession>>({});
   const [scanBusy, setScanBusy] = useState<string | null>(null);
+  const [fontCatalog, setFontCatalog] = useState<CatalogFont[]>([]);
+  const [fontChoiceId, setFontChoiceId] = useState("");
   const holderRef = useRef<HTMLDivElement>(null);
   const pageBoxRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -305,7 +315,7 @@ function Editor() {
       try {
         const [{ canvas, viewport }, pageLines, pageImages] = await Promise.all([
           renderPage(doc.proxy, page, CANVAS_WIDTH),
-          extractLines(doc.proxy, page),
+          extractLines(doc.proxy, page, doc.bytes),
           extractImages(doc.proxy, page),
         ]);
         if (cancelled) return;
@@ -466,8 +476,24 @@ function Editor() {
       fontFamily: selected.fontFamily,
     };
     void inspectTextPatch(doc.bytes, probe)
-      .then((result) => {
-        if (!cancelled) setInspection(result);
+      .then(async (result) => {
+        if (cancelled) return;
+        setInspection(result);
+        const system = await querySystemFonts();
+        if (cancelled) return;
+        const catalog = mergeFontCatalog({
+          embedded: result.embeddedFonts ?? [],
+          selectedKey: result.resourceKey || selected.fontName,
+          originalText: selected.text,
+          match: result.fontMatch,
+          system,
+        });
+        setFontCatalog(catalog);
+        setFontChoiceId((prev) =>
+          catalog.some((item) => item.id === prev)
+            ? prev
+            : defaultFontChoiceId(catalog, result.resourceKey || selected.fontName),
+        );
       })
       .catch(() => {
         if (!cancelled) setInspection(null);
@@ -509,7 +535,7 @@ function Editor() {
     setEdits((prev) => {
       const next = { ...prev };
       if (!text || text === selected.text) delete next[selected.id];
-      else next[selected.id] = { line: selected, text };
+      else next[selected.id] = { line: selected, text, fontChoiceId };
       return next;
     });
   };
@@ -710,7 +736,9 @@ function Editor() {
       const all: string[] = [];
       for (let p = 1; p <= doc.pageCount; p++) {
         const ocrLines = scanByPage[p]?.ocrLines;
-        const pageLines = ocrLines?.length ? ocrLines : await extractLines(doc.proxy, p);
+        const pageLines = ocrLines?.length
+          ? ocrLines
+          : await extractLines(doc.proxy, p, doc.bytes);
         for (const l of pageLines) all.push(edits[l.id]?.text ?? l.text);
       }
       setFindings(checkNumbers(all));
@@ -723,9 +751,15 @@ function Editor() {
     if (!doc) return;
     setStatus("Writing the edited boxes");
     try {
-      const patches: TextPatch[] = Object.values(edits)
-        .filter(({ line }) => line.source !== "ocr" && !scanByPage[line.page]?.ocrLines.length)
-        .map(({ line, text }) => ({
+      const patches: TextPatch[] = [];
+      for (const { line, text, fontChoiceId: editFontId } of Object.values(edits)) {
+        if (line.source === "ocr" || scanByPage[line.page]?.ocrLines.length) continue;
+        const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
+        let embedBytes: Uint8Array | undefined;
+        if (option?.source === "system" && option.postscriptName) {
+          embedBytes = (await loadSystemFontBytes(option.postscriptName)) ?? undefined;
+        }
+        patches.push({
           page: line.page,
           x: line.x,
           y: line.y,
@@ -736,7 +770,19 @@ function Editor() {
           originalText: line.text,
           fontName: line.fontName,
           fontFamily: line.fontFamily,
-        }));
+          ...(option
+            ? {
+                fontChoice: {
+                  source: option.source,
+                  family: option.family,
+                  ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
+                  ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
+                  ...(embedBytes ? { embedBytes } : {}),
+                },
+              }
+            : {}),
+        });
+      }
       const imagePatches = Object.values(imageEdits).map((edit) => ({
         page: edit.region.page,
         x: edit.region.x,
@@ -1254,10 +1300,21 @@ function Editor() {
                   {!selected ? (
                     scanMode ? null : (
                       <div className="py-8 text-center">
-                        <p className="font-display text-base font-semibold">Nothing selected</p>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          Click any line on the page to open it here, or switch to Image studio.
+                        <p className="font-display text-base font-semibold">
+                          {lines.length === 0 && doc
+                            ? "No text operators on this page"
+                            : "Nothing selected"}
                         </p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {lines.length === 0 && doc
+                            ? "This looks like a scan. A Safe edit here would paint over the image. Use Enhance page or Scan to OCR it instead."
+                            : "Click any line on the page to open it here, or switch to Image studio."}
+                        </p>
+                        {lines.length === 0 && doc && (
+                          <Button asChild className="mt-4" variant="secondary" size="sm">
+                            <a href="/scan">Open Scan</a>
+                          </Button>
+                        )}
                       </div>
                     )
                   ) : (
@@ -1275,19 +1332,28 @@ function Editor() {
                             : ""}
                       </p>
                       {!selectedIsOcr && (
-                        <FontMatchIndicator
-                          inspection={
-                            inspection && missingGlyphs.length > 0
-                              ? {
-                                  ...inspection,
-                                  method: "blocked",
-                                  missingGlyphs,
-                                  message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
-                                }
-                              : inspection
-                          }
-                          loading={inspecting}
-                        />
+                        <>
+                          <FontMatchIndicator
+                            inspection={
+                              inspection && missingGlyphs.length > 0
+                                ? {
+                                    ...inspection,
+                                    method: "blocked",
+                                    blockReason: "missing-glyphs",
+                                    missingGlyphs,
+                                    message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
+                                  }
+                                : inspection
+                            }
+                            loading={inspecting}
+                          />
+                          <FontPicker
+                            options={fontCatalog}
+                            value={fontChoiceId}
+                            onChange={setFontChoiceId}
+                            disabled={!!inspection?.deferToScan}
+                          />
+                        </>
                       )}
                       <Textarea
                         value={draft}

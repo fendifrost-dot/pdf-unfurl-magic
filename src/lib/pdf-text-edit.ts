@@ -31,10 +31,14 @@ import {
   collectTextShows,
   encodePdfLiteral,
   extractShownStrings,
+  hasTextOperators,
   hasWhiteCoverRect,
+  looseAmountKey,
   normalizePdfText,
   removeShow,
+  replaceShowBytes,
   replaceShowText,
+  textMatchKey,
   tokenizeContentStream,
   tokensToBytes,
   type TextShow,
@@ -44,9 +48,11 @@ import {
   charsMissingFromWinAnsi,
   describeFontMatch,
   isExactStandardBaseFont,
+  looksLikeUtf16Be,
   matchFont,
   type FontMatch,
 } from "./pdf-font-match";
+import type { EmbeddedFontInfo, FontChoice } from "./pdf-font-catalog";
 import { fitFontSize } from "./text-helpers";
 
 export type TextPatch = {
@@ -60,9 +66,13 @@ export type TextPatch = {
   originalText?: string;
   fontName?: string;
   fontFamily?: string;
+  fontChoice?: FontChoice;
 };
 
-export type TextEditMethod = "in-place" | "redraw-standard" | "blocked";
+export type TextEditMethod = "in-place" | "redraw-standard" | "redraw-system" | "blocked";
+
+export type TextEditBlockReason =
+  "not-found" | "scan-page" | "missing-glyphs" | "unsafe-font" | null;
 
 export type TextEditReport = {
   page: number;
@@ -74,6 +84,7 @@ export type TextEditReport = {
   missingGlyphs: string[];
   found: boolean;
   warning?: string;
+  deferToScan?: boolean;
 };
 
 export type TextEditInspection = {
@@ -83,6 +94,18 @@ export type TextEditInspection = {
   fontLabel: string;
   missingGlyphs: string[];
   baseFont?: string;
+  message: string;
+  deferToScan?: boolean;
+  blockReason?: TextEditBlockReason;
+  embeddedFonts?: EmbeddedFontInfo[];
+  resourceKey?: string;
+};
+
+export type TextLayerKind = "operators" | "none";
+
+export type TextLayerInspection = {
+  kind: TextLayerKind;
+  showCount: number;
   message: string;
 };
 
@@ -148,6 +171,30 @@ function pageContentStreams(doc: PDFDocument, page: PDFPage): PageStream[] {
   return [];
 }
 
+function formContentStreams(doc: PDFDocument, page: PDFPage): PageStream[] {
+  const resources = page.node.Resources();
+  const xobjects = resources?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+  if (!xobjects) return [];
+  const out: PageStream[] = [];
+  for (const [, value] of xobjects.entries()) {
+    const obj = value instanceof PDFRef ? doc.context.lookup(value) : value;
+    if (!(obj instanceof PDFStream)) continue;
+    const dict = (obj as PDFRawStream).dict;
+    if (!dict || dict.lookup(PDFName.of("Subtype")) !== PDFName.of("Form")) continue;
+    out.push({
+      ref: value instanceof PDFRef ? value : null,
+      stream: obj,
+      tokens: tokenizeContentStream(decodeStream(obj)),
+      dirty: false,
+    });
+  }
+  return out;
+}
+
+function allPageStreams(doc: PDFDocument, page: PDFPage): PageStream[] {
+  return [...pageContentStreams(doc, page), ...formContentStreams(doc, page)];
+}
+
 function writeStream(doc: PDFDocument, entry: PageStream, page: PDFPage) {
   const bytes = tokensToBytes(entry.tokens);
   const next = doc.context.flateStream(bytes);
@@ -159,70 +206,173 @@ function writeStream(doc: PDFDocument, entry: PageStream, page: PDFPage) {
   page.node.set(PDFName.of("Contents"), registered);
 }
 
-type FontInfo = {
-  key: string;
-  baseFont: string;
-  encoding: string;
-  subset: boolean;
-  standard: boolean;
-};
+type FontInfo = EmbeddedFontInfo;
 
-function readPageFonts(page: PDFPage): Map<string, FontInfo> {
-  const map = new Map<string, FontInfo>();
-  const resources = page.node.Resources();
-  const fonts = resources?.lookupMaybe(PDFName.of("Font"), PDFDict);
-  if (!fonts) return map;
+function readFontDict(doc: PDFDocument, fonts: PDFDict, into: Map<string, FontInfo>) {
   for (const [name, value] of fonts.entries()) {
-    const dict = page.doc.context.lookup(value);
+    const dict = doc.context.lookup(value);
     if (!(dict instanceof PDFDict)) continue;
     const base = dict.lookupMaybe(PDFName.of("BaseFont"), PDFName);
     const encoding = dict.lookupMaybe(PDFName.of("Encoding"), PDFName);
+    const subtype = dict.lookupMaybe(PDFName.of("Subtype"), PDFName);
     const baseFont = base?.decodeText() ?? "";
     const encodingName = encoding?.decodeText() ?? "";
-    map.set(name.decodeText(), {
+    const subtypeName = subtype?.decodeText() ?? "";
+    into.set(name.decodeText(), {
       key: name.decodeText(),
       baseFont,
       encoding: encodingName,
       subset: /^[A-Z]{6}\+/.test(baseFont),
       standard: isExactStandardBaseFont(baseFont),
+      cid: subtypeName === "Type0" || /identity/i.test(encodingName),
     });
+  }
+}
+
+function readPageFonts(page: PDFPage): Map<string, FontInfo> {
+  const map = new Map<string, FontInfo>();
+  const resources = page.node.Resources();
+  const fonts = resources?.lookupMaybe(PDFName.of("Font"), PDFDict);
+  if (fonts) readFontDict(page.doc, fonts, map);
+
+  const xobjects = resources?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+  if (xobjects) {
+    for (const [, value] of xobjects.entries()) {
+      const obj = page.doc.context.lookup(value);
+      if (!(obj instanceof PDFStream) && !(obj instanceof PDFRawStream)) continue;
+      const dict = (obj as PDFRawStream).dict;
+      if (!dict) continue;
+      if (dict.lookup(PDFName.of("Subtype")) !== PDFName.of("Form")) continue;
+      const formFonts = dict
+        .lookupMaybe(PDFName.of("Resources"), PDFDict)
+        ?.lookupMaybe(PDFName.of("Font"), PDFDict);
+      if (formFonts) readFontDict(page.doc, formFonts, map);
+    }
   }
   return map;
 }
 
-function scoreShow(show: TextShow, patch: TextPatch, original: string): number | null {
-  if (normalizePdfText(show.text) !== normalizePdfText(original)) return null;
-  const dx = show.x - patch.x;
-  const dy = show.y - patch.y;
-  const dist = Math.hypot(dx, dy);
-  return 1000 - dist;
+type LocatedShows = { stream: PageStream; shows: TextShow[]; score: number };
+
+function joinedShowText(shows: TextShow[]): string[] {
+  const raw = shows.map((show) => show.text);
+  return [raw.join(""), raw.join(" "), raw.join(" ").replace(/\s+/g, " ").trim()];
 }
 
-function findShow(
+function textScoreForShows(shows: TextShow[], original: string): number | null {
+  const origKey = textMatchKey(original);
+  const origLoose = looseAmountKey(original);
+  if (!origKey) return null;
+  for (const candidate of joinedShowText(shows)) {
+    if (textMatchKey(candidate) === origKey) return 1000;
+    if (origLoose && looseAmountKey(candidate) === origLoose) return 860;
+  }
+  return null;
+}
+
+function scoreShows(shows: TextShow[], patch: TextPatch, original: string): number | null {
+  const textScore = textScoreForShows(shows, original);
+  if (textScore === null) return null;
+  const first = shows[0];
+  if (!first) return null;
+  return textScore - Math.hypot(first.x - patch.x, first.y - patch.y);
+}
+
+function sameBaseline(a: TextShow, b: TextShow): boolean {
+  return Math.abs(a.y - b.y) <= Math.max(2, Math.max(a.fontSize, b.fontSize) * 0.35);
+}
+
+function findShows(
   streams: PageStream[],
   patch: TextPatch,
   original: string,
-): { stream: PageStream; show: TextShow } | null {
-  let best: { stream: PageStream; show: TextShow; score: number } | null = null;
+): { stream: PageStream; shows: TextShow[] } | null {
+  let best: LocatedShows | null = null;
+  const consider = (stream: PageStream, shows: TextShow[], current: LocatedShows | null) => {
+    const score = scoreShows(shows, patch, original);
+    if (score === null) return current;
+    if (!current || score > current.score) return { stream, shows, score };
+    return current;
+  };
+
   for (const stream of streams) {
-    for (const show of collectTextShows(stream.tokens)) {
-      const score = scoreShow(show, patch, original);
-      if (score === null) continue;
-      if (!best || score > best.score) best = { stream, show, score };
+    const shows = collectTextShows(stream.tokens);
+    for (let i = 0; i < shows.length; i++) {
+      const first = shows[i];
+      if (!first) continue;
+      best = consider(stream, [first], best);
+      const group = [first];
+      for (let j = i + 1; j < shows.length && group.length < 8; j++) {
+        const next = shows[j];
+        if (!next || !sameBaseline(first, next)) break;
+        if (next.x + 1 < group[group.length - 1]!.x) break;
+        group.push(next);
+        best = consider(stream, [...group], best);
+      }
     }
   }
-  return best;
+
+  if (best) return { stream: best.stream, shows: best.shows };
+
+  // Position fallback: same baseline, nearby x, similar digits/letters.
+  const origLoose = looseAmountKey(original);
+  if (!origLoose) return null;
+  let positional: LocatedShows | null = null;
+  for (const stream of streams) {
+    for (const show of collectTextShows(stream.tokens)) {
+      if (Math.abs(show.y - patch.y) > Math.max(4, show.fontSize)) continue;
+      if (Math.abs(show.x - patch.x) > Math.max(patch.width, 80)) continue;
+      if (looseAmountKey(show.text) !== origLoose) continue;
+      const score = 400 - Math.hypot(show.x - patch.x, show.y - patch.y);
+      if (!positional || score > positional.score) positional = { stream, shows: [show], score };
+    }
+  }
+  return positional ? { stream: positional.stream, shows: positional.shows } : null;
 }
 
-function canReuseEmbeddedFont(info: FontInfo | undefined, original: string, next: string): boolean {
+function encodeReusingGlyphs(
+  original: string,
+  originalBytes: Uint8Array,
+  next: string,
+): Uint8Array | null {
+  const chars = [...original];
+  if (!chars.length || !originalBytes.length) return null;
+  const unit =
+    originalBytes.length === chars.length * 2 ? 2 : originalBytes.length === chars.length ? 1 : 0;
+  if (!unit) return null;
+  const map = new Map<string, Uint8Array>();
+  for (let i = 0; i < chars.length; i++) {
+    map.set(chars[i]!, originalBytes.subarray(i * unit, (i + 1) * unit));
+  }
+  const out: number[] = [];
+  for (const ch of next) {
+    let slice = map.get(ch);
+    if (!slice && ch === " ") {
+      slice = map.get(" ") ?? (unit === 2 ? Uint8Array.of(0, 0x20) : Uint8Array.of(0x20));
+    }
+    if (!slice) return null;
+    for (const byte of slice) out.push(byte);
+  }
+  return Uint8Array.from(out);
+}
+
+function canReuseEmbeddedFont(
+  info: FontInfo | undefined,
+  original: string,
+  next: string,
+  show?: TextShow,
+): boolean {
   if (!info) return false;
+  if (info.cid) {
+    return !!(show && encodeReusingGlyphs(original, show.bytes, next));
+  }
   if (info.subset) {
     const originalSet = new Set(original);
     return [...next].every((ch) => ch === " " || originalSet.has(ch));
   }
   if (info.standard) return charsMissingFromWinAnsi(next).length === 0;
   if (/winansi/i.test(info.encoding)) return charsMissingFromWinAnsi(next).length === 0;
-  return false;
+  return !!(show && encodeReusingGlyphs(original, show.bytes, next));
 }
 
 function shrinkSize(text: string, originalSize: number, width: number, font?: PDFFont): number {
@@ -341,29 +491,59 @@ function buildInspection(
   match: FontMatch,
   missingGlyphs: string[],
   reuse: boolean,
-  baseFont?: string,
+  extras: {
+    baseFont?: string;
+    deferToScan?: boolean;
+    blockReason?: TextEditBlockReason;
+    embeddedFonts?: EmbeddedFontInfo[];
+    resourceKey?: string;
+    systemRedraw?: boolean;
+  } = {},
 ): TextEditInspection {
   let method: TextEditMethod = "blocked";
-  if (missingGlyphs.length > 0 || match.kind === "unsafe") method = "blocked";
-  else if (found && reuse) method = "in-place";
+  let blockReason: TextEditBlockReason = extras.blockReason ?? null;
+  if (extras.deferToScan) {
+    method = "blocked";
+    blockReason = "scan-page";
+  } else if (missingGlyphs.length > 0) {
+    method = "blocked";
+    blockReason = "missing-glyphs";
+  } else if (match.kind === "unsafe") {
+    method = "blocked";
+    blockReason = "unsafe-font";
+  } else if (found && reuse) method = "in-place";
+  else if (found && extras.systemRedraw) method = "redraw-system";
   else if (found) method = "redraw-standard";
-  else method = "blocked";
+  else {
+    method = "blocked";
+    blockReason = blockReason ?? "not-found";
+  }
 
-  const fontLabel = !found ? "No text operator" : baseFont || match.label;
-  const message =
-    method === "blocked" && !found
+  const fontLabel = extras.deferToScan
+    ? extras.baseFont || match.label
+    : !found
+      ? "No text operator"
+      : extras.baseFont || match.label;
+  const message = extras.deferToScan
+    ? "This page has no text operators (likely a scan). Safe rewrite would invent an overlay. Use Enhance page or Scan to OCR it instead."
+    : method === "blocked" && !found
       ? "This run was not found as a text operator on the page. If the page is a scan or OCR ghost, use Enhance page instead of rewriting Helvetica over the image. Export will refuse rather than paint over it."
       : describeFontMatch(match, missingGlyphs);
 
-  return {
+  const inspection: TextEditInspection = {
     found,
     method,
     fontMatch: match,
     fontLabel,
     missingGlyphs,
-    ...(baseFont ? { baseFont } : {}),
     message,
+    blockReason,
   };
+  if (extras.baseFont) inspection.baseFont = extras.baseFont;
+  if (extras.deferToScan) inspection.deferToScan = true;
+  if (extras.embeddedFonts) inspection.embeddedFonts = extras.embeddedFonts;
+  if (extras.resourceKey) inspection.resourceKey = extras.resourceKey;
+  return inspection;
 }
 
 export function canCommitSafely(
@@ -373,9 +553,40 @@ export function canCommitSafely(
 ): boolean {
   if (!draft.trim() || draft.trim() === original) return true;
   if (!inspection) return true;
+  if (inspection.deferToScan) return false;
   if (inspection.missingGlyphs.length > 0) return false;
   if (inspection.method === "blocked") return false;
   return true;
+}
+
+export async function inspectTextLayer(
+  bytes: ArrayBuffer,
+  pageNumber: number,
+): Promise<TextLayerInspection> {
+  const doc = await loadDoc(bytes);
+  const page = doc.getPages()[pageNumber - 1];
+  if (!page) {
+    return { kind: "none", showCount: 0, message: "Page is missing." };
+  }
+  const streams = allPageStreams(doc, page);
+  const showCount = streams.reduce(
+    (sum, stream) => sum + collectTextShows(stream.tokens).length,
+    0,
+  );
+  const hasOps = streams.some((stream) => hasTextOperators(stream.tokens));
+  if (!hasOps || showCount === 0) {
+    return {
+      kind: "none",
+      showCount: 0,
+      message:
+        "No text operators on this page. Defer to the scan-aware flow instead of a fake Safe edit.",
+    };
+  }
+  return {
+    kind: "operators",
+    showCount,
+    message: `${showCount} text operator${showCount === 1 ? "" : "s"} on this page.`,
+  };
 }
 
 export async function inspectTextPatch(
@@ -389,25 +600,42 @@ export async function inspectTextPatch(
     fontFamily: patch.fontFamily,
   });
 
-  if (!original.trim()) {
-    return buildInspection(false, heuristic, missingGlyphs, false);
-  }
-
   const doc = await loadDoc(bytes);
   const page = doc.getPages()[patch.page - 1];
   if (!page) return buildInspection(false, heuristic, missingGlyphs, false);
 
-  const streams = pageContentStreams(doc, page);
-  const located = findShow(streams, patch, original);
+  const streams = allPageStreams(doc, page);
   const fonts = readPageFonts(page);
-  const fontInfo = located ? fonts.get(located.show.fontName) : undefined;
+  const embeddedFonts = [...fonts.values()];
+  const layerEmpty = !streams.some((stream) => hasTextOperators(stream.tokens));
+  if (layerEmpty) {
+    return buildInspection(false, heuristic, missingGlyphs, false, {
+      deferToScan: true,
+      blockReason: "scan-page",
+      embeddedFonts,
+    });
+  }
+
+  if (!original.trim()) {
+    return buildInspection(false, heuristic, missingGlyphs, false, { embeddedFonts });
+  }
+
+  const located = findShows(streams, patch, original);
+  const head = located?.shows[0];
+  const fontInfo = head ? fonts.get(head.fontName) : undefined;
   const match = matchFont({
     fontName: patch.fontName,
     fontFamily: patch.fontFamily,
     baseFont: fontInfo?.baseFont,
   });
-  const reuse = located ? canReuseEmbeddedFont(fontInfo, original, patch.text) : false;
-  return buildInspection(!!located, match, missingGlyphs, reuse, fontInfo?.baseFont);
+  const reuse = located ? canReuseEmbeddedFont(fontInfo, original, patch.text, head) : false;
+  const systemRedraw = patch.fontChoice?.source === "system" && !!patch.fontChoice.embedBytes;
+  return buildInspection(!!located, match, missingGlyphs, reuse, {
+    ...(fontInfo?.baseFont ? { baseFont: fontInfo.baseFont } : {}),
+    embeddedFonts,
+    ...(head?.fontName ? { resourceKey: head.fontName } : {}),
+    systemRedraw,
+  });
 }
 
 export async function applyTextPatchesWithReport(
@@ -443,22 +671,35 @@ export async function applyTextPatchesWithReport(
       continue;
     }
 
-    const streams = pageContentStreams(doc, page);
+    const streams = allPageStreams(doc, page);
     const fonts = readPageFonts(page);
+    const layerEmpty = !streams.some((stream) => hasTextOperators(stream.tokens));
 
     for (const patch of pagePatches) {
       const original = patch.originalText ?? "";
       const nextText = patch.text.replace(/\s*\n\s*/g, " ");
       const missingGlyphs = charsMissingFromWinAnsi(nextText);
-      const located = original ? findShow(streams, patch, original) : null;
-      const fontInfo = located ? fonts.get(located.show.fontName) : undefined;
+      const located = original ? findShows(streams, patch, original) : null;
+      const head = located?.shows[0];
+      const fontInfo = head ? fonts.get(head.fontName) : undefined;
       const match = matchFont({
         fontName: patch.fontName,
         fontFamily: patch.fontFamily,
         baseFont: fontInfo?.baseFont,
       });
 
-      if (!located) {
+      if (layerEmpty) {
+        reports.push(
+          blockedReport(
+            patch,
+            match,
+            "This page has no text operators. Defer to Scan instead of painting over it.",
+            true,
+          ),
+        );
+        continue;
+      }
+      if (!located || !head) {
         reports.push(
           blockedReport(patch, match, "Original text operator was not found on this page."),
         );
@@ -469,16 +710,38 @@ export async function applyTextPatchesWithReport(
         continue;
       }
 
-      const reuse = canReuseEmbeddedFont(fontInfo, original, nextText);
-      if (reuse) {
-        const size = shrinkSize(nextText, located.show.fontSize || patch.fontSize, patch.width);
-        located.stream.tokens = replaceShowText(located.stream.tokens, located.show, nextText);
-        if (Math.abs(size - (located.show.fontSize || patch.fontSize)) > 0.05) {
+      const reuse = canReuseEmbeddedFont(fontInfo, original, nextText, head);
+      const systemBytes =
+        patch.fontChoice?.source === "system" ? patch.fontChoice.embedBytes : undefined;
+      const preferSystem = !!systemBytes && patch.fontChoice?.source === "system";
+
+      if (reuse && !preferSystem) {
+        const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width);
+        dropTrailingShows(located.stream, located.shows.slice(1));
+        const reusedBytes =
+          looksLikeUtf16Be(head.bytes) || fontInfo?.cid
+            ? encodeReusingGlyphs(
+                located.shows.map((s) => s.text).join(""),
+                concatShowBytes(located.shows),
+                nextText,
+              )
+            : null;
+        if (reusedBytes) {
+          located.stream.tokens = replaceShowBytes(
+            located.stream.tokens,
+            head,
+            reusedBytes,
+            nextText,
+          );
+        } else {
+          located.stream.tokens = replaceShowText(located.stream.tokens, head, nextText);
+        }
+        if (Math.abs(size - (head.fontSize || patch.fontSize)) > 0.05) {
           const shows = collectTextShows(located.stream.tokens);
           const again = shows.find(
             (s) =>
               normalizePdfText(s.text) === normalizePdfText(nextText) &&
-              Math.hypot(s.x - located.show.x, s.y - located.show.y) < 1.5,
+              Math.hypot(s.x - head.x, s.y - head.y) < 1.5,
           );
           if (again) updateTfSize(located.stream.tokens, again, size);
         }
@@ -496,16 +759,41 @@ export async function applyTextPatchesWithReport(
         continue;
       }
 
+      if (systemBytes) {
+        try {
+          const sysFont = await doc.embedFont(systemBytes);
+          const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, sysFont);
+          const fontKey = ensurePageFont(page, sysFont);
+          for (const show of [...located.shows].reverse()) {
+            located.stream.tokens = removeShow(located.stream.tokens, show);
+          }
+          appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size);
+          located.stream.dirty = true;
+          reports.push({
+            page: patch.page,
+            originalText: original,
+            text: nextText,
+            method: "redraw-system",
+            fontMatch: match,
+            fontLabel:
+              patch.fontChoice?.family || patch.fontChoice?.postscriptName || "system font",
+            missingGlyphs,
+            found: true,
+            warning: `Wrote the local system font at the same baseline. The original resource was not reused.`,
+          });
+          continue;
+        } catch {
+          // Fall through to Standard 14 — never write a corrupt overlay.
+        }
+      }
+
       const stdFont = await embed(match.standard);
-      const size = shrinkSize(
-        nextText,
-        located.show.fontSize || patch.fontSize,
-        patch.width,
-        stdFont,
-      );
+      const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, stdFont);
       const fontKey = ensurePageFont(page, stdFont);
-      located.stream.tokens = removeShow(located.stream.tokens, located.show);
-      appendRedraw(located.stream, { ...patch, text: nextText }, located.show, fontKey, size);
+      for (const show of [...located.shows].reverse()) {
+        located.stream.tokens = removeShow(located.stream.tokens, show);
+      }
+      appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size);
       located.stream.dirty = true;
       reports.push({
         page: patch.page,
@@ -551,7 +839,29 @@ export class SafeEditError extends Error {
   }
 }
 
-function blockedReport(patch: TextPatch, match: FontMatch, warning: string): TextEditReport {
+function concatShowBytes(shows: TextShow[]): Uint8Array {
+  const total = shows.reduce((sum, show) => sum + show.bytes.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const show of shows) {
+    out.set(show.bytes, offset);
+    offset += show.bytes.length;
+  }
+  return out;
+}
+
+function dropTrailingShows(stream: PageStream, shows: TextShow[]) {
+  for (const show of [...shows].sort((a, b) => b.start - a.start)) {
+    stream.tokens = removeShow(stream.tokens, show);
+  }
+}
+
+function blockedReport(
+  patch: TextPatch,
+  match: FontMatch,
+  warning: string,
+  deferToScan = false,
+): TextEditReport {
   return {
     page: patch.page,
     originalText: patch.originalText ?? "",
@@ -562,6 +872,7 @@ function blockedReport(patch: TextPatch, match: FontMatch, warning: string): Tex
     missingGlyphs: charsMissingFromWinAnsi(patch.text),
     found: false,
     warning,
+    deferToScan,
   };
 }
 
@@ -578,8 +889,28 @@ export async function listPageShownText(bytes: ArrayBuffer, pageNumber: number):
   const doc = await loadDoc(bytes);
   const page = doc.getPages()[pageNumber - 1];
   if (!page) return [];
-  const streams = pageContentStreams(doc, page);
+  const streams = allPageStreams(doc, page);
   return streams.flatMap((s) => extractShownStrings(s.tokens));
+}
+
+export async function listPageTextShows(
+  bytes: ArrayBuffer,
+  pageNumber: number,
+): Promise<TextShow[]> {
+  const doc = await loadDoc(bytes);
+  const page = doc.getPages()[pageNumber - 1];
+  if (!page) return [];
+  return allPageStreams(doc, page).flatMap((s) => collectTextShows(s.tokens));
+}
+
+export async function listPageEmbeddedFonts(
+  bytes: ArrayBuffer,
+  pageNumber: number,
+): Promise<EmbeddedFontInfo[]> {
+  const doc = await loadDoc(bytes);
+  const page = doc.getPages()[pageNumber - 1];
+  if (!page) return [];
+  return [...readPageFonts(page).values()];
 }
 
 export async function pageHasWhiteCover(
@@ -590,7 +921,7 @@ export async function pageHasWhiteCover(
   const doc = await loadDoc(bytes);
   const page = doc.getPages()[pageNumber - 1];
   if (!page) return false;
-  const streams = pageContentStreams(doc, page);
+  const streams = allPageStreams(doc, page);
   return streams.some((s) => hasWhiteCoverRect(s.tokens, box));
 }
 
@@ -599,6 +930,6 @@ export async function decodePageContent(bytes: ArrayBuffer, pageNumber: number):
   const doc = await loadDoc(bytes);
   const page = doc.getPages()[pageNumber - 1];
   if (!page) return "";
-  const streams = pageContentStreams(doc, page);
+  const streams = allPageStreams(doc, page);
   return streams.map((s) => extractShownStrings(s.tokens).join("\n")).join("\n");
 }

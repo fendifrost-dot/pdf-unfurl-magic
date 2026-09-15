@@ -4,7 +4,14 @@ export function cleanCopy(input: string): string {
   let out = input.replace(/\u00a0/g, " ");
   out = out.replace(/[ \t]{2,}/g, " ");
   out = out.replace(/\s+([,.;:!?%])/g, "$1");
-  out = out.replace(/([,;:])(?=\S)/g, "$1 ");
+  // Do not insert a space after a thousands separator or decimal in amounts.
+  out = out.replace(/([;:])(?=\S)/g, "$1 ");
+  out = out.replace(/,(?=\S)/g, (match, offset, source: string) => {
+    const prev = source[offset - 1];
+    const next = source[offset + 1];
+    if (prev && next && /\d/.test(prev) && /\d/.test(next)) return ",";
+    return ", ";
+  });
   // Repeated words: "the the total total"
   out = out.replace(/\b(\p{L}+)(\s+\1\b)+/giu, "$1");
   return out.trim();

@@ -44,4 +44,23 @@ describe("content stream tokenizer", () => {
     const shows = collectTextShows(tokenizeContentStream(src));
     expect(shows.map((s) => s.text)).toEqual(["Label"]);
   });
+
+  it("keeps a thousands comma inside a TJ amount", () => {
+    const src = "BT /F2 11 Tf 1 0 0 1 420 500 Tm [(2,) -20 (500.00)] TJ ET";
+    const shows = collectTextShows(tokenizeContentStream(src));
+    expect(shows[0]?.text).toBe("2,500.00");
+  });
+
+  it("treats a large negative TJ kern as a word space, not a missing comma", () => {
+    const src = "BT /F1 10 Tf [(Hello) -250 (world)] TJ ET";
+    const shows = collectTextShows(tokenizeContentStream(src));
+    expect(shows[0]?.text).toBe("Hello world");
+  });
+
+  it("decodes Identity-H / UTF-16BE hex so commas survive", () => {
+    const src = "BT /F1 10 Tf <0032002C003500300030002E00300030> Tj ET";
+    const shows = collectTextShows(tokenizeContentStream(src));
+    expect(shows[0]?.text).toBe("2,500.00");
+    expect(shows[0]?.bytes.length).toBe(16);
+  });
 });
