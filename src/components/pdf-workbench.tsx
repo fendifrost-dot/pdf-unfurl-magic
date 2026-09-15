@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { AlertTriangle, Download, Loader2, Scissors, Layers, FileStack } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { AlertTriangle, Highlighter, Loader2, Scissors, Layers, FileStack } from "lucide-react";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { downloadBytes, formatBytes, parsePageRanges } from "@/lib/pdf-runtime";
+import { formatBytes, parsePageRanges } from "@/lib/pdf-runtime";
+import { FileActions } from "@/components/file-actions";
 import {
   extractPages,
   getPageCount,
@@ -18,8 +20,9 @@ import {
 } from "@/lib/pdf-tools";
 
 type Loaded = { name: string; base: string; size: number; bytes: ArrayBuffer; pages: number };
+type ToolTab = "split" | "extract" | "merge";
 
-export function PdfWorkbench() {
+export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [extra, setExtra] = useState<Array<{ name: string; bytes: ArrayBuffer }>>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -78,8 +81,15 @@ export function PdfWorkbench() {
           <h3 className="mt-1 font-display text-2xl font-semibold">Drop a PDF here</h3>
           <p className="mt-1 max-w-lg text-sm text-muted-foreground">
             Everything runs on a copy held in this tab. Your original file is never modified and
-            never leaves the machine.
+            never leaves the machine. Highlight, notes, and redaction boxes live in the page editor.
           </p>
+          <div className="mt-3">
+            <Button asChild size="sm" variant="outline" className="min-h-11 touch-manipulation">
+              <Link to="/edit" hash="marks">
+                <Highlighter className="size-3.5" /> Mark or redact
+              </Link>
+            </Button>
+          </div>
         </div>
         {loaded && (
           <Badge variant="secondary" className="text-gauge">
@@ -118,6 +128,7 @@ export function PdfWorkbench() {
               <Button
                 variant="ghost"
                 size="sm"
+                className="min-h-11 touch-manipulation"
                 onClick={() => {
                   setLoaded(null);
                   setExtra([]);
@@ -128,15 +139,24 @@ export function PdfWorkbench() {
               </Button>
             </div>
 
-            <Tabs defaultValue="split" className="mt-5">
-              <TabsList className="w-full sm:w-auto">
-                <TabsTrigger value="split" className="flex-1 sm:flex-none">
+            <Tabs defaultValue={initialTab} className="mt-5">
+              <TabsList className="h-auto w-full sm:w-auto">
+                <TabsTrigger
+                  value="split"
+                  className="min-h-11 flex-1 touch-manipulation sm:flex-none"
+                >
                   <Scissors className="mr-1.5 size-3.5" /> Split
                 </TabsTrigger>
-                <TabsTrigger value="extract" className="flex-1 sm:flex-none">
+                <TabsTrigger
+                  value="extract"
+                  className="min-h-11 flex-1 touch-manipulation sm:flex-none"
+                >
                   <Layers className="mr-1.5 size-3.5" /> Extract
                 </TabsTrigger>
-                <TabsTrigger value="merge" className="flex-1 sm:flex-none">
+                <TabsTrigger
+                  value="merge"
+                  className="min-h-11 flex-1 touch-manipulation sm:flex-none"
+                >
                   <FileStack className="mr-1.5 size-3.5" /> Merge
                 </TabsTrigger>
               </TabsList>
@@ -151,13 +171,14 @@ export function PdfWorkbench() {
                     <Label htmlFor="chunk">Pages per file</Label>
                     <Input
                       id="chunk"
-                      className="mt-1.5"
+                      className="mt-1.5 min-h-11"
                       inputMode="numeric"
                       value={chunk}
                       onChange={(e) => setChunk(e.target.value)}
                     />
                   </div>
                   <Button
+                    className="min-h-11 touch-manipulation"
                     disabled={!!busy}
                     onClick={() =>
                       run("Splitting the copy", async () => {
@@ -169,8 +190,8 @@ export function PdfWorkbench() {
                       })
                     }
                   >
-                    Split into {Math.max(1, Math.ceil(loaded.pages / Math.max(1, Number(chunk) || 1)))}{" "}
-                    files
+                    Split into{" "}
+                    {Math.max(1, Math.ceil(loaded.pages / Math.max(1, Number(chunk) || 1)))} files
                   </Button>
                 </div>
               </TabsContent>
@@ -184,13 +205,14 @@ export function PdfWorkbench() {
                     <Label htmlFor="ranges">Pages (1–{loaded.pages})</Label>
                     <Input
                       id="ranges"
-                      className="mt-1.5"
+                      className="mt-1.5 min-h-11"
                       placeholder="1-3, 7, 12"
                       value={ranges}
                       onChange={(e) => setRanges(e.target.value)}
                     />
                   </div>
                   <Button
+                    className="min-h-11 touch-manipulation"
                     disabled={!!busy}
                     onClick={() =>
                       run("Extracting pages", async () => {
@@ -232,13 +254,11 @@ export function PdfWorkbench() {
                   </ol>
                 )}
                 <Button
+                  className="min-h-11 touch-manipulation"
                   disabled={!!busy || extra.length === 0}
                   onClick={() =>
                     run("Merging the copies", async () => [
-                      await mergeFiles([
-                        { name: loaded.name, bytes: loaded.bytes },
-                        ...extra,
-                      ]),
+                      await mergeFiles([{ name: loaded.name, bytes: loaded.bytes }, ...extra]),
                     ])
                   }
                 >
@@ -279,9 +299,7 @@ export function PdfWorkbench() {
                       {r.pages} pages · {formatBytes(r.bytes.byteLength)}
                     </p>
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => downloadBytes(r.bytes, r.name)}>
-                    <Download className="mr-1.5 size-3.5" /> Save
-                  </Button>
+                  <FileActions bytes={r.bytes} filename={r.name} compact />
                 </li>
               ))}
             </ul>

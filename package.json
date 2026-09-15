@@ -1,7 +1,7 @@
 {
   "name": "tanstack_start_ts",
   "version": "0.1.0",
-  "description": "PDF Relief — a local PDF workshop for split, extract, merge, and click-to-edit text. Files stay on your computer.",
+  "description": "PDF Relief — a local PDF workshop for split, extract, merge, and click-to-edit text. Files stay on your computer. Before adding PDF/OCR/scan/e-sign libraries, read docs/PRIOR_ART.md.",
   "author": {
     "name": "PDF Relief",
     "url": "https://github.com/fendifrost-dot/pdf-unfurl-magic"
@@ -20,7 +20,7 @@
     "test:scan": "node --experimental-strip-types --test src/lib/scan/geometry.node-test.ts",
     "test:image-studio": "node scripts/verify-image-studio.mjs",
     "test:smoke": "node --test tests/smoke-pdf.test.mjs",
-    "fixtures:generate": "node fixtures/generate.mjs",
+    "fixtures:generate": "tsx fixtures/generate.mjs",
     "format": "prettier --write .",
     "postinstall": "node desktop/copy-worker.cjs",
     "desktop": "npm run build && electron .",

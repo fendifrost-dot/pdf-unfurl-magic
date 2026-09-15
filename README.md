@@ -5,8 +5,10 @@ text, scan pages into a multi-page PDF, and **E-Sign** a PDF. There is no accoun
 database, and nothing is uploaded: files stay on the computer. Ships in two shapes from
 this one repo:
 
-- **Browser** — the TanStack Start + Vite web app.
+- **Browser** — the TanStack Start + Vite web app, including a phone-sized
+  shell (bottom nav, large tap targets, camera scan, Save / Share).
 - **Desktop** — an Electron wrapper with a native File → Open PDF and real Save dialogs.
+- **PWA** — installable from a phone browser (Add to Home Screen / Install). Files still stay on the device.
 
 ## Run the desktop app
 
@@ -40,6 +42,8 @@ After a feature merge, rebuild the Dock app with `npm run pack:mac`. See
 
 Shared QA: `docs/QA_MVP.md` (10-minute human pass after edit / scan / e-sign). Optional Playwright and Vitest paths are in `tests/e2e/README.md`.
 
+Open-source reuse map (what to depend vs skip, including GPL/AGPL flags): [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md).
+
 The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
 server's port.
 
@@ -49,6 +53,18 @@ Open `/scan` (or **File → Scan pages** in the desktop app). Capture from the c
 import photos, drag the document corners if the auto outline misses, pick an enhance
 preset, and export an ordered PDF. Optional OCR adds a hidden text layer only — the
 JPEG page stays the picture. Processing is one page at a time.
+
+## Scan-aware edit
+
+Open `/edit` on a scanned or image-only PDF. If the page has no reliable text operators, the editor shows **This page looks scanned** instead of Helvetica Unsafe. Enhance the page (upscale + denoise/contrast, one page at a time) and run local OCR, then edit the OCR lines. Export writes a text layer on the page image — the original picture stays unless you choose **Replace with cleaned image**. Real text PDFs still use in-place rewrite.
+
+## Phone / PWA
+
+On iPhone or Android, open the web app and use the bottom bar: Home, Split, Merge,
+Scan, Edit. Choose a PDF (drag-and-drop is optional). Export uses the browser
+download or the OS share sheet. Electron still uses its Save dialog.
+
+Install: Android Chrome may offer **Install**. iOS Safari → Share → Add to Home Screen.
 
 ## Built with
 

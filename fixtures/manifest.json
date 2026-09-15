@@ -34,12 +34,28 @@
       "maxBytes": 20000
     },
     {
+      "file": "comma-amounts.pdf",
+      "pages": 1,
+      "kind": "comma-amounts",
+      "summary": "Comma amounts plus a multi-run POS line for text-extract / font-mimic QA.",
+      "bytes": 1317,
+      "maxBytes": 12000
+    },
+    {
       "file": "multi-page.pdf",
       "pages": 3,
       "kind": "multi-page",
       "summary": "Three labeled pages for split / extract / merge and untouched-page checks.",
       "bytes": 1858,
       "maxBytes": 16000
+    },
+    {
+      "file": "scan-image-only.pdf",
+      "pages": 1,
+      "kind": "scan-image",
+      "summary": "Full-page bitmap, no text operators. Scan-aware edit / OCR target.",
+      "bytes": 1673,
+      "maxBytes": 90000
     }
   ]
 }

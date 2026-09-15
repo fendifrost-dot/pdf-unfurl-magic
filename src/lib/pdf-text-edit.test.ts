@@ -5,10 +5,13 @@ import {
   applyTextPatches,
   applyTextPatchesWithReport,
   decodePageContent,
+  inspectTextLayer,
   inspectTextPatch,
+  listPageEmbeddedFonts,
   listPageShownText,
   pageHasWhiteCover,
 } from "./pdf-text-edit";
+import { mergeFontCatalog } from "./pdf-font-catalog";
 import { groupTextItems } from "./pdf-runtime";
 
 describe("groupTextItems", () => {
@@ -34,15 +37,38 @@ describe("groupTextItems", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]?.text).toBe("Valid for 30 days.");
   });
+
+  it("glues a split thousands comma back onto the amount", () => {
+    const lines = groupTextItems(
+      [
+        { str: "2", x: 490, y: 400, w: 8, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+        { str: ",", x: 498, y: 400, w: 4, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+        { str: "500.00", x: 502, y: 400, w: 36, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+      ],
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(["2,500.00"]);
+  });
+
+  it("reconstructs a thousands comma when PDF.js dropped the punctuation item", () => {
+    const lines = groupTextItems(
+      [
+        { str: "1", x: 490, y: 400, w: 7, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+        { str: "987.00", x: 499, y: 400, w: 36, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+      ],
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(["1,987.00"]);
+  });
 });
 
 describe("safe text replace", () => {
   it("rewrites a Helvetica-Bold amount in place and leaves page 2 intact", async () => {
     const sample = await buildSamplePdf();
     const before = sample.slice().buffer as ArrayBuffer;
-    const page2Before = await decodePageContent(before, 2);
-    expect(page2Before).toContain("REF-4421");
-    expect(page2Before).toContain("UNTOUCHED PAGE");
+    const page3Before = await decodePageContent(before, 3);
+    expect(page3Before).toContain("REF-4421");
+    expect(page3Before).toContain("UNTOUCHED PAGE");
 
     const shown = await listPageShownText(before, 1);
     expect(shown).toContain("1,987.00");
@@ -88,8 +114,8 @@ describe("safe text replace", () => {
     expect(after).toContain("SKU  NG-BENCH-40-OAK");
     expect(await pageHasWhiteCover(out, 1, { x: 480, y: 0, width: 80, height: 40 })).toBe(false);
 
-    const page2After = await decodePageContent(out, 2);
-    expect(page2After).toBe(page2Before);
+    const page3After = await decodePageContent(out, 3);
+    expect(page3After).toBe(page3Before);
   });
 
   it("refuses characters that would bake in question-mark glyphs", async () => {
@@ -142,5 +168,146 @@ describe("safe text replace", () => {
         height: 14,
       }),
     ).toBe(false);
+  });
+
+  it("edits a comma amount and a multi-run line without stripping punctuation", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    page.drawText("POS Debit", { x: 56, y: 648, size: 11, font, color: rgb(0.1, 0.1, 0.1) });
+    page.drawText("Card 6205", { x: 128, y: 648, size: 11, font, color: rgb(0.1, 0.1, 0.1) });
+    page.drawText("2,500.00", { x: 420, y: 648, size: 11, font: bold, color: rgb(0.1, 0.1, 0.1) });
+    const bytes = await doc.save();
+    const before = bytes.slice().buffer as ArrayBuffer;
+
+    const shown = await listPageShownText(before, 1);
+    expect(shown).toContain("2,500.00");
+    expect(shown).toContain("POS Debit");
+    expect(shown).toContain("Card 6205");
+
+    const amount = await inspectTextPatch(before, {
+      page: 1,
+      x: 420,
+      y: 648,
+      width: 50,
+      height: 14,
+      fontSize: 11,
+      text: "2,750.00",
+      originalText: "2,500.00",
+      fontFamily: "Helvetica",
+    });
+    expect(amount.found).toBe(true);
+    expect(amount.method).toBe("in-place");
+    expect(amount.deferToScan).toBeFalsy();
+
+    const grouped = await inspectTextPatch(before, {
+      page: 1,
+      x: 56,
+      y: 648,
+      width: 160,
+      height: 14,
+      fontSize: 11,
+      text: "POS Debit Card 6205",
+      originalText: "POS Debit Card 6205",
+      fontFamily: "Helvetica",
+    });
+    expect(grouped.found).toBe(true);
+
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 420,
+        y: 648,
+        width: 50,
+        height: 14,
+        fontSize: 11,
+        text: "2,750.00",
+        originalText: "2,500.00",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    const after = await listPageShownText(out.slice().buffer as ArrayBuffer, 1);
+    expect(after).toContain("2,750.00");
+    expect(after).not.toContain("2,500.00");
+    expect(after).toContain("POS Debit");
+    expect(after).toContain("Card 6205");
+  });
+
+  it("matches a PDF.js-stripped comma amount back to the stream run", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const font = await doc.embedFont(StandardFonts.HelveticaBold);
+    page.drawText("2,500.00", { x: 40, y: 200, size: 12, font });
+    const bytes = (await doc.save()).slice().buffer as ArrayBuffer;
+    const inspection = await inspectTextPatch(bytes, {
+      page: 1,
+      x: 40,
+      y: 200,
+      width: 60,
+      height: 14,
+      fontSize: 12,
+      text: "2,600.00",
+      originalText: "2 500.00",
+      fontFamily: "Helvetica",
+    });
+    expect(inspection.found).toBe(true);
+  });
+
+  it("defers to scan when the page has no text operators", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([300, 400]);
+    const bytes = (await doc.save()).slice().buffer as ArrayBuffer;
+    const layer = await inspectTextLayer(bytes, 1);
+    expect(layer.kind).toBe("none");
+    const inspection = await inspectTextPatch(bytes, {
+      page: 1,
+      x: 40,
+      y: 200,
+      width: 80,
+      height: 14,
+      fontSize: 12,
+      text: "hello",
+      originalText: "hello",
+    });
+    expect(inspection.found).toBe(false);
+    expect(inspection.deferToScan).toBe(true);
+    expect(inspection.blockReason).toBe("scan-page");
+    await expect(
+      applyTextPatches(bytes, [
+        {
+          page: 1,
+          x: 40,
+          y: 200,
+          width: 80,
+          height: 14,
+          fontSize: 12,
+          text: "hello",
+          originalText: "hello",
+        },
+      ]),
+    ).rejects.toThrow(/safely replace/);
+  });
+
+  it("lists embedded fonts before any stand-in in the picker catalog", async () => {
+    const sample = await buildSamplePdf();
+    const fonts = await listPageEmbeddedFonts(sample.slice().buffer as ArrayBuffer, 1);
+    expect(fonts.some((f) => /Helvetica/i.test(f.baseFont))).toBe(true);
+    const catalog = mergeFontCatalog({
+      embedded: fonts,
+      ...(fonts[0]?.key ? { selectedKey: fonts[0].key } : {}),
+      originalText: "1,987.00",
+      match: {
+        kind: "embedded-standard",
+        standard: StandardFonts.HelveticaBold,
+        label: "Helvetica-Bold",
+        family: "helvetica",
+        bold: true,
+        italic: false,
+      },
+    });
+    expect(catalog[0]?.source).toBe("embedded");
+    expect(catalog[0]?.safety).toBe("safe");
+    expect(catalog.some((item) => item.source === "standard")).toBe(true);
   });
 });

@@ -68,7 +68,7 @@ export function PdfDropZone({
         if (!disabled) accept(e.dataTransfer.files);
       }}
       className={cn(
-        "relative rounded-lg border-2 border-dashed border-border bg-card/40 p-8 text-center transition-colors",
+        "relative rounded-lg border-2 border-dashed border-border bg-card/40 p-6 text-center transition-colors sm:p-8",
         dragging && "border-primary bg-primary/5",
         disabled && "opacity-60",
         className,
@@ -90,11 +90,22 @@ export function PdfDropZone({
           <FileUp className="size-5" />
         </span>
         <div>
-          <p className="font-display text-base font-semibold">{title}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{hint}</p>
+          <p className="font-display text-base font-semibold [@media(pointer:coarse)]:hidden">
+            {title}
+          </p>
+          <p className="hidden font-display text-base font-semibold [@media(pointer:coarse)]:block">
+            {multiple ? "Open PDFs" : "Open a PDF"}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground [@media(pointer:coarse)]:hidden">
+            {hint}
+          </p>
+          <p className="mt-1 hidden text-sm text-muted-foreground [@media(pointer:coarse)]:block">
+            Tap to choose a file. Nothing is uploaded.
+          </p>
         </div>
         <Button
           type="button"
+          className="min-h-12 touch-manipulation"
           disabled={disabled}
           onClick={() => void choose()}
         >
