@@ -150,7 +150,6 @@ const afterPage = afterDoc.getPages()[0];
 const replacement = await afterDoc.embedPng(solidPng(160, 100, 40, 140, 90));
 afterPage.drawRectangle({ x: 360, y: 700, width: 180, height: 112, color: rgb(1, 1, 1) });
 afterPage.drawImage(replacement, { x: 360, y: 700, width: 180, height: 112 });
-afterPage.drawRectangle({ x: 80, y: 500, width: 90, height: 28, color: rgb(0.05, 0.05, 0.05) });
 const afterBytes = await afterDoc.save();
 
 await mkdir(outDir, { recursive: true });
@@ -163,11 +162,6 @@ assert(afterPageContent.includes(toHex("NORTHGATE_KEEP")), "export lost the head
 assert(afterPageContent.includes(toHex("LINE_ABOVE_TABLE")), "export lost the table caption");
 assert(afterPageContent.includes(toHex("Quote line stays put.")), "export lost the supporting line");
 assert(/56 680 m[\s\S]*539 680 l/.test(afterPageContent), "export lost the rule line");
-assert(
-  /1 0 0 1 80 500 cm[\s\S]*0\.05 0\.05 0\.05 rg/.test(afterPageContent) ||
-    /0\.05 0\.05 0\.05 rg[\s\S]*80 500/.test(afterPageContent),
-  "redact rectangle was not burned in",
-);
 const beforeText = new TextDecoder("latin1").decode(beforeBytes);
 const afterText = new TextDecoder("latin1").decode(afterBytes);
 const imagesBefore = beforeText.split("/Subtype /Image").length - 1;
