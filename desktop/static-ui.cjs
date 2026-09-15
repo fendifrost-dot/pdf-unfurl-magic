@@ -32,14 +32,25 @@ const MIME = {
   ".woff2": "font/woff2",
 };
 
-/** Nitro/Vite client output after `npm run build`. There is no top-level dist/. */
-const PRIMARY_UI_SEGMENTS = [".output", "public"];
+/**
+ * Runtime (packaged asar): dist/ is the SPA copied by build:desktop.
+ * Build output: Nitro may prerender index.html into .output/public first.
+ */
+const PACKED_UI_SEGMENTS = ["dist"];
 
 function uiRootCandidates(appRoot) {
   return [
-    path.join(appRoot, ...PRIMARY_UI_SEGMENTS),
+    path.join(appRoot, ...PACKED_UI_SEGMENTS),
     path.join(appRoot, "dist", "client"),
-    path.join(appRoot, "dist"),
+    path.join(appRoot, ".output", "public"),
+  ];
+}
+
+function uiBuildOutputCandidates(appRoot) {
+  return [
+    path.join(appRoot, ".output", "public"),
+    path.join(appRoot, "dist", "client"),
+    path.join(appRoot, ...PACKED_UI_SEGMENTS),
   ];
 }
 
@@ -53,6 +64,10 @@ function hasHtmlShell(dir) {
 
 function resolveUiRoot(appRoot) {
   return uiRootCandidates(appRoot).find(hasHtmlShell) ?? null;
+}
+
+function resolveUiBuildOutput(appRoot) {
+  return uiBuildOutputCandidates(appRoot).find(hasHtmlShell) ?? null;
 }
 
 function resolveShellFile(root) {
@@ -152,10 +167,11 @@ function startStaticUiServer(root, host = "127.0.0.1") {
 }
 
 module.exports = {
-  PRIMARY_UI_SEGMENTS,
+  PACKED_UI_SEGMENTS,
   fileForRequest,
   hasHtmlShell,
   resolveShellFile,
+  resolveUiBuildOutput,
   resolveUiRoot,
   serveStatic,
   startStaticUiServer,

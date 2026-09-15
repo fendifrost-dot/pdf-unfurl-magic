@@ -62,11 +62,15 @@ async function startPackagedUi() {
   if (staticOrigin) return staticOrigin;
   const appRoot = path.join(__dirname, "..");
   const uiRoot = resolveUiRoot(appRoot);
-  if (!uiRoot) {
+  const indexHtml = uiRoot ? path.join(uiRoot, "index.html") : "";
+  if (!uiRoot || !fs.existsSync(indexHtml)) {
     throw new Error(
-      "PDF Relief UI files were not found (no .output/public/index.html). npm run build does not create dist/; the client is .output/public. Rebuild with npm run pack or npm run desktop. Packed apps must not spawn npx or vite.",
+      "PDF Relief UI files were not found (no dist/index.html). A plain npm run build is TanStack Start/Nitro SSR: .output/public has assets but no HTML. Run npm run desktop or npm run pack (build:desktop). Packaged apps must not spawn npx or vite, and must not use app.asar as cwd.",
     );
   }
+  // file:// loadFile(index.html) cannot open /edit (no per-route HTML) or
+  // /assets and /pdf.worker.boot.mjs (absolute URLs). Serve dist/ in-process
+  // on loopback — no child_process, no asar cwd.
   const started = await startStaticUiServer(uiRoot);
   staticServer = started.server;
   staticOrigin = started.origin;

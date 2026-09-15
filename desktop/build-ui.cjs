@@ -1,7 +1,7 @@
 /**
- * Production desktop UI build. Sets PDF_RELIEF_DESKTOP so Vite prerenders a
- * static SPA shell into .output/public (the real Nitro client output — there
- * is no dist/ after npm run build).
+ * Production desktop UI: prerender a SPA shell, then copy it to dist/.
+ * Do not pack `.output/public` from a plain `npm run build` — that tree has
+ * assets and no index.html (TanStack Start / Nitro SSR).
  */
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");

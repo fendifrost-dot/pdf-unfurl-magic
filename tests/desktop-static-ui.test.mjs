@@ -10,7 +10,7 @@ import { test } from "node:test";
 const desktopDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../desktop");
 const repoRoot = path.join(desktopDir, "..");
 const require = createRequire(import.meta.url);
-const { fileForRequest, resolveUiRoot, startStaticUiServer } = require(
+const { fileForRequest, resolveUiBuildOutput, resolveUiRoot, startStaticUiServer } = require(
   path.join(desktopDir, "static-ui.cjs"),
 );
 
@@ -37,33 +37,48 @@ test("packed main process must not spawn npx or vite preview", () => {
   assert.doesNotMatch(source, /spawn\s*\(/);
   assert.doesNotMatch(source, /["']npx["']/);
   assert.doesNotMatch(source, /vite preview/);
+  assert.doesNotMatch(source, /startPreviewServer/);
   assert.match(source, /startStaticUiServer/);
-  assert.match(source, /loadURL/);
+  assert.match(source, /isPackaged/);
 });
 
-test("electron-builder files pack .output/public, not an empty dist glob", () => {
+test("electron-builder files pack dist SPA, not SSR-only .output/public", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
   const serialized = JSON.stringify(pkg.build.files);
-  assert.match(serialized, /\.output\/public/);
-  assert.doesNotMatch(serialized, /dist\/\*\*\/\*/);
+  assert.match(serialized, /"from":"dist"/);
+  assert.doesNotMatch(serialized, /\.output\/public/);
 });
 
-test("in-process static UI serves .output/public when dist/ does not exist", async () => {
+test("SSR .output/public without index.html is not a UI root", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-relief-ui-"));
-  const publicDir = path.join(tmp, ".output", "public");
-  fs.mkdirSync(path.join(publicDir, "assets"), { recursive: true });
+  const publicDir = path.join(tmp, ".output", "public", "assets");
+  fs.mkdirSync(publicDir, { recursive: true });
+  fs.writeFileSync(path.join(publicDir, "app.js"), "/* nitro client asset, no html */\n");
+  assert.equal(resolveUiRoot(tmp), null);
+  assert.equal(resolveUiBuildOutput(tmp), null);
+
+  const dist = path.join(tmp, "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(dist, "index.html"), "<!doctype html><html></html>");
+  assert.equal(resolveUiRoot(tmp), dist);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("in-process static UI serves dist SPA /edit without npx", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-relief-ui-"));
+  const dist = path.join(tmp, "dist");
+  fs.mkdirSync(path.join(dist, "assets"), { recursive: true });
   fs.writeFileSync(
-    path.join(publicDir, "index.html"),
+    path.join(dist, "index.html"),
     `<!doctype html><html><head><title>PDF Relief</title></head><body><div id="app">shell</div><script type="module" src="/assets/app.js"></script></body></html>`,
   );
-  fs.writeFileSync(path.join(publicDir, "assets", "app.js"), "window.__pdfRelief = true;\n");
-  fs.writeFileSync(path.join(publicDir, "pdf.worker.boot.mjs"), "export {};\n");
+  fs.writeFileSync(path.join(dist, "assets", "app.js"), "window.__pdfRelief = true;\n");
+  fs.writeFileSync(path.join(dist, "pdf.worker.boot.mjs"), "export {};\n");
 
-  assert.equal(fs.existsSync(path.join(tmp, "dist")), false);
-  assert.equal(resolveUiRoot(tmp), publicDir);
-  assert.ok(fileForRequest(publicDir, "/assets/app.js")?.endsWith(`${path.sep}app.js`));
+  assert.equal(resolveUiRoot(tmp), dist);
+  assert.ok(fileForRequest(dist, "/assets/app.js")?.endsWith(`${path.sep}app.js`));
 
-  const { server, origin } = await startStaticUiServer(publicDir);
+  const { server, origin } = await startStaticUiServer(dist);
   try {
     const edit = await fetchText(`${origin}/edit`);
     assert.equal(edit.status, 200);
@@ -88,10 +103,10 @@ test("in-process static UI serves .output/public when dist/ does not exist", asy
 
 test("path traversal does not escape the UI root", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-relief-ui-"));
-  const publicDir = path.join(tmp, ".output", "public");
-  fs.mkdirSync(publicDir, { recursive: true });
-  fs.writeFileSync(path.join(publicDir, "index.html"), "<html></html>");
+  const dist = path.join(tmp, "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(dist, "index.html"), "<html></html>");
   fs.writeFileSync(path.join(tmp, "secret.txt"), "nope");
-  assert.equal(fileForRequest(publicDir, "/../secret.txt"), null);
+  assert.equal(fileForRequest(dist, "/../secret.txt"), null);
   fs.rmSync(tmp, { recursive: true, force: true });
 });

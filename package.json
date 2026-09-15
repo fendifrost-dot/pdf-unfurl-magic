@@ -43,14 +43,10 @@
       "desktop/icon.png",
       "desktop/icon.svg",
       {
-        "from": ".output/public",
-        "to": ".output/public",
+        "from": "dist",
+        "to": "dist",
         "filter": [
-          "**/*",
-          "!server",
-          "!server/**/*",
-          "!_headers",
-          "!nitro.json"
+          "**/*"
         ]
       },
       "!node_modules",
