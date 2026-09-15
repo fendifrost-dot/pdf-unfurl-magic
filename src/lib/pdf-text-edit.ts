@@ -672,6 +672,13 @@ function buildInspection(
   return inspection;
 }
 
+/**
+ * Engine gate for *native* in-place rewrite. `deferToScan` means there is no
+ * text operator to splice — a Safe edit would paint Helvetica over the image.
+ *
+ * Do not combine this with UI `scanMode` / false scan-detect. OCR lines skip
+ * this function via `canApplyTextEdit` (`source === "ocr"` / `selectedIsOcr`).
+ */
 export function canCommitSafely(
   inspection: TextEditInspection | null,
   draft: string,

@@ -778,6 +778,7 @@ function Editor() {
     const text = draft.trim();
     if (
       !canApplyTextEdit({
+        selectedIsOcr,
         source: selected.source,
         deferToScan: inspection?.deferToScan,
         canCommitSafely: canCommitSafely(inspection, text, selected.text),
@@ -1855,6 +1856,7 @@ function Editor() {
                           onClick={commit}
                           disabled={
                             !canApplyTextEdit({
+                              selectedIsOcr,
                               source: selected.source,
                               deferToScan: inspection?.deferToScan,
                               canCommitSafely: canCommitSafely(

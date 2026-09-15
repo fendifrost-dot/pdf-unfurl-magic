@@ -74,10 +74,12 @@ describe("Apply / Enhance exit contracts", () => {
   it("enables commit for OCR lines even when a scan/OCR session is active", () => {
     expect(
       canApplyTextEdit({
+        selectedIsOcr: true,
         source: "ocr",
         deferToScan: true,
         canCommitSafely: false,
         looksScanned: true,
+        scanMode: true,
       }),
     ).toBe(true);
   });
@@ -89,6 +91,7 @@ describe("Apply / Enhance exit contracts", () => {
         deferToScan: false,
         canCommitSafely: canCommitSafely(safeInspection, "Paid From", "Paid To"),
         looksScanned: false,
+        scanMode: true,
       }),
     ).toBe(true);
     expect(
@@ -108,6 +111,38 @@ describe("Apply / Enhance exit contracts", () => {
         hasTextOperator: false,
       }),
     ).toBe(false);
+  });
+
+  it("false scan detect (looksScanned / scanMode) does not disable native Apply", () => {
+    expect(
+      canApplyTextEdit({
+        selectedIsOcr: false,
+        source: "pdfjs",
+        deferToScan: false,
+        canCommitSafely: true,
+        looksScanned: true,
+        scanMode: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("canCommitSafely is false on deferToScan, but OCR Apply still enables", () => {
+    const deferred: TextEditInspection = {
+      ...safeInspection,
+      method: "blocked",
+      blockReason: "scan-page",
+      deferToScan: true,
+    };
+    expect(canCommitSafely(deferred, "Paid From", "Paid To")).toBe(false);
+    expect(
+      canApplyTextEdit({
+        selectedIsOcr: true,
+        source: "ocr",
+        deferToScan: deferred.deferToScan,
+        canCommitSafely: canCommitSafely(deferred, "Paid From", "Paid To"),
+        scanMode: true,
+      }),
+    ).toBe(true);
   });
 
   it("apply updates overlay edited flag and display text", () => {
