@@ -218,8 +218,14 @@ function Editor() {
     setFindings(null);
     setStatus("Opening the file in this tab");
     try {
-      const proxy = await openDocument(bytes);
-      setDoc({ name, base: name.replace(/\.pdf$/i, ""), bytes, proxy, pageCount: proxy.numPages });
+      const proxy = await openDocument(bytes.slice(0));
+      setDoc({
+        name,
+        base: name.replace(/\.pdf$/i, ""),
+        bytes: bytes.slice(0),
+        proxy,
+        pageCount: proxy.numPages,
+      });
       setEdits({});
       setImageEdits({});
       setMarks([]);
@@ -698,6 +704,7 @@ function Editor() {
             type="button"
             onClick={() => select(line)}
             title={line.text}
+            data-text={line.text}
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
               "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors [@media(pointer:fine)]:min-h-0",
@@ -1144,6 +1151,7 @@ function Editor() {
                     rows={4}
                     className="mt-3"
                     placeholder="Replacement text"
+                    data-testid="edit-draft"
                   />
                   <p
                     className={
@@ -1193,7 +1201,9 @@ function Editor() {
                       <Undo2 className="size-3.5" />
                     </Button>
                   </div>
-                  <p className="mt-3 text-xs text-muted-foreground">Original: “{selected.text}”</p>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Original: <code className="font-mono">{selected.text}</code>
+                  </p>
                 </>
               )}
 
