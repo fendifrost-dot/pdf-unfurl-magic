@@ -141,43 +141,55 @@ export function demoPhotoPixels(kind: DemoPhotoKind, width: number, height: numb
       let b = 0;
 
       if (kind === "oak") {
-        const grain = Math.sin(y * 0.22 + Math.sin(x * 0.035) * 3.2 + n0 * 0.8);
-        const knot = Math.exp(-(((x - width * 0.62) ** 2 + (y - height * 0.38) ** 2) / 420));
-        r = 148 + grain * 28 + n1 * 18 + knot * 40;
-        g = 96 + grain * 18 + n1 * 10 + knot * 12;
-        b = 52 + grain * 8 + n1 * 6;
+        const wave = Math.sin(y * 0.18 + Math.sin(x * 0.028) * 4.4);
+        const stripe = Math.sin((y + n0 * 6) * 0.55) * 18;
+        const knot = Math.exp(-(((x - width * 0.68) ** 2 + (y - height * 0.42) ** 2) / 280));
+        const vignette = 1 - Math.hypot(nx - 0.5, ny - 0.45) * 0.35;
+        r = (132 + wave * 36 + stripe + n1 * 22 + knot * 55) * vignette;
+        g = (78 + wave * 20 + stripe * 0.5 + n1 * 12 + knot * 16) * vignette;
+        b = (38 + wave * 8 + n1 * 8 + knot * 6) * vignette;
       } else {
-        const window = nx > 0.58 && nx < 0.92 && ny > 0.08 && ny < 0.42;
-        const pane = window && (Math.abs(nx - 0.75) < 0.01 || Math.abs(ny - 0.25) < 0.015);
-        const cabinet = ny > 0.55 && ny < 0.88 && (nx < 0.46 || nx > 0.54);
-        const counter = ny > 0.86;
-        const wall = !window && !cabinet && !counter;
+        const window = nx > 0.56 && nx < 0.94 && ny > 0.1 && ny < 0.46;
+        const pane = window && (Math.abs(nx - 0.75) < 0.012 || Math.abs(ny - 0.28) < 0.018);
+        const cabinet = ny > 0.52 && ny < 0.84 && (nx < 0.48 || nx > 0.52);
+        const door = cabinet && (Math.abs(nx - 0.24) < 0.01 || Math.abs(nx - 0.74) < 0.01);
+        const counter = ny > 0.84 && ny < 0.93;
+        const kettle = Math.hypot(nx - 0.22, ny - 0.78) < 0.06;
+        const wall = !window && !cabinet && !counter && !kettle;
         if (window && !pane) {
-          r = 232 + n0 * 18;
-          g = 236 + n0 * 14;
-          b = 242;
+          r = 120 + (1 - ny) * 90 + n0 * 20;
+          g = 160 + (1 - ny) * 50 + n0 * 12;
+          b = 210 + n0 * 10;
         } else if (pane) {
-          r = 168;
-          g = 176;
-          b = 188;
+          r = 86;
+          g = 96;
+          b = 112;
+        } else if (kettle) {
+          r = 46;
+          g = 52;
+          b = 58;
+        } else if (door) {
+          r = 72;
+          g = 46;
+          b = 28;
         } else if (cabinet) {
-          const grain = Math.sin(x * 0.4 + ny * 2) * 10;
-          r = 118 + grain + n1 * 12;
-          g = 72 + grain * 0.6 + n1 * 8;
-          b = 42 + n1 * 6;
+          const grain = Math.sin(x * 0.55 + ny * 8) * 14;
+          r = 142 + grain + n1 * 10;
+          g = 86 + grain * 0.5 + n1 * 6;
+          b = 44 + n1 * 4;
         } else if (counter) {
-          r = 210 + n0 * 10;
-          g = 198 + n0 * 8;
-          b = 184;
+          r = 188 + n0 * 14;
+          g = 176 + n0 * 10;
+          b = 162;
         } else if (wall) {
-          r = 214 + n0 * 8;
-          g = 204 + n0 * 6;
-          b = 188;
+          r = 232 + n0 * 6;
+          g = 220 + n0 * 5;
+          b = 200;
         }
         if (kind === "washout") {
-          r = 210 + r * 0.22;
-          g = 208 + g * 0.22;
-          b = 205 + b * 0.22;
+          r = 140 + r * 0.55;
+          g = 138 + g * 0.55;
+          b = 136 + b * 0.55;
         }
       }
 

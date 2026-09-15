@@ -96,6 +96,39 @@ type MarkTool = AnnotationBurn["kind"];
 
 const CANVAS_WIDTH = 720;
 
+function CommittedImageOverlay({
+  edit,
+  scale,
+  viewSize,
+}: {
+  edit: ImageEdit;
+  scale: number;
+  viewSize: { width: number; height: number };
+}) {
+  const url = useMemo(() => {
+    const blob = new Blob([edit.output.bytes.slice(0) as unknown as BlobPart], {
+      type: "image/jpeg",
+    });
+    return URL.createObjectURL(blob);
+  }, [edit.output.bytes]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  return (
+    <img
+      src={url}
+      alt=""
+      className="pointer-events-none absolute object-contain"
+      style={boxStyle(
+        edit.region.x,
+        edit.region.y,
+        edit.region.width,
+        edit.region.height,
+        scale,
+        viewSize,
+      )}
+    />
+  );
+}
+
 function boxStyle(
   x: number,
   y: number,
@@ -726,7 +759,7 @@ function Editor() {
                 ))}
               </div>
 
-              <div className="mt-4 rounded-md bg-paper p-2 sm:p-3">
+              <div className="mt-4 max-h-[70vh] overflow-auto rounded-md bg-paper p-2 sm:p-3">
                 <div className="relative mx-auto w-full">
                   <div ref={holderRef} className="w-full" />
                   {status ? (
@@ -743,6 +776,35 @@ function Editor() {
                     >
                       {mode === "text" && textOverlay}
                       {mode === "image" && imageOverlay}
+                      {mode === "image" &&
+                        Object.values(imageEdits)
+                          .filter(
+                            (edit) =>
+                              edit.region.page === page && edit.region.id !== selectedImageId,
+                          )
+                          .map((edit) => (
+                            <CommittedImageOverlay
+                              key={edit.region.id}
+                              edit={edit}
+                              scale={scale}
+                              viewSize={viewSize}
+                            />
+                          ))}
+                      {mode === "image" && selectedImage && previewUrl && (
+                        <img
+                          src={previewUrl}
+                          alt=""
+                          className="pointer-events-none absolute object-contain"
+                          style={boxStyle(
+                            selectedImage.x,
+                            selectedImage.y,
+                            selectedImage.width,
+                            selectedImage.height,
+                            scale,
+                            viewSize,
+                          )}
+                        />
+                      )}
                       {markOverlay.map((mark, index) => (
                         <div
                           key={mark.id ?? `draft-${index}`}
