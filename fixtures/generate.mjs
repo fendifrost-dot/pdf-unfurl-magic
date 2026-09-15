@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { buildSampleAcroFormPdf } from "../src/lib/pdf-acroform.ts";
 import { encodePng } from "../src/lib/tiny-png.ts";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -397,6 +398,15 @@ const BUILDERS = [
     summary: "KEEP / SECRET / VISIBLE plus a magenta-cyan PNG for permanent redact QA.",
     build: redactSecret,
     maxBytes: 20_000,
+  },
+  {
+    file: "acroform-blank.pdf",
+    pages: 1,
+    kind: "acroform-blank",
+    summary:
+      "Blank AcroForm (5 widgets: name, email, city, size, agree). Email has format/calculate JS so Form UI must warn.",
+    build: () => buildSampleAcroFormPdf({ includeFieldJs: true }),
+    maxBytes: 24_000,
   },
 ];
 

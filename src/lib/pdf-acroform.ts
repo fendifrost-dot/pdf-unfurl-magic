@@ -11,6 +11,7 @@
  */
 import {
   PDFArray,
+  PDFBool,
   PDFButton,
   PDFCheckBox,
   PDFDict,
@@ -19,20 +20,33 @@ import {
   PDFName,
   PDFOptionList,
   PDFRadioGroup,
+  PDFRawStream,
+  PDFRef,
   PDFSignature,
+  PDFStream,
   PDFTextField,
   StandardFonts,
+  decodePDFRawStream,
   rgb,
   type PDFField,
 } from "pdf-lib";
+import { extractShownStrings, tokenizeContentStream } from "./pdf-content-stream";
 import { loadPdfDocument } from "./pdf-io";
 
 export const SAMPLE_ACROFORM_FIELDS = {
   fullName: "fullName",
+  email: "email",
   city: "city",
   size: "size",
   agree: "agree",
 } as const;
+
+/** Shown in Form UI when calculate / validate / format actions exist. */
+export const FIELD_JS_WARNING =
+  "Field JavaScript will not run. Calculate, validate, and format actions are present — totals will not recalculate. PDF Relief fills widget values only (same honesty as XFA: we do not pretend).";
+
+export const XFA_PACKET_WARNING =
+  "This file also has an XFA packet. PDF Relief fills AcroForm widgets only — LiveCycle XFA is not supported and is discarded on export.";
 
 export type AcroFormFieldKind =
   "text" | "checkbox" | "radio" | "dropdown" | "optionList" | "button" | "signature" | "unknown";
@@ -66,10 +80,16 @@ export type AcroFormField = {
 export type AcroFormReport = {
   hasAcroForm: boolean;
   hasXfa: boolean;
+  hasFieldJavaScript: boolean;
   fieldCount: number;
   fillableCount: number;
   fields: AcroFormField[];
   warnings: string[];
+};
+
+export type SampleAcroFormOptions = {
+  /** Plant format/calculate AA so QA can see the Form JS warning. */
+  includeFieldJs?: boolean;
 };
 
 export type AcroFormFillRequest = {
@@ -88,6 +108,7 @@ export type AcroFormApplyResult = {
 export const emptyAcroFormReport = (): AcroFormReport => ({
   hasAcroForm: false,
   hasXfa: false,
+  hasFieldJavaScript: false,
   fieldCount: 0,
   fillableCount: 0,
   fields: [],
@@ -218,14 +239,10 @@ function describeField(doc: PDFDocument, field: PDFField): AcroFormField {
 function collectWarnings(hasXfa: boolean, fields: AcroFormField[]): string[] {
   const warnings: string[] = [];
   if (hasXfa) {
-    warnings.push(
-      "This file also has an XFA packet. PDF Relief fills AcroForm widgets only — LiveCycle XFA is not supported and is discarded on export.",
-    );
+    warnings.push(XFA_PACKET_WARNING);
   }
   if (fields.some((field) => field.hasActions)) {
-    warnings.push(
-      "Some fields have JavaScript actions (calculate, validate, or format). Those scripts do not run here.",
-    );
+    warnings.push(FIELD_JS_WARNING);
   }
   if (fields.some((field) => field.kind === "signature")) {
     warnings.push("Signature fields are listed but not filled. Use E-Sign for a drawn mark.");
@@ -258,9 +275,11 @@ export async function inspectAcroForm(bytes: ArrayBuffer): Promise<AcroFormRepor
   }
 
   const fields = form.getFields().map((field) => describeField(doc, field));
+  const hasFieldJavaScript = fields.some((field) => field.hasActions);
   return {
     hasAcroForm: true,
     hasXfa,
+    hasFieldJavaScript,
     fieldCount: fields.length,
     fillableCount: fields.filter((field) => field.fillable).length,
     fields,
@@ -371,14 +390,22 @@ export function applyAcroFormToDocument(
     }
   }
 
+  // Always rebuild /AP so Preview and Chrome show /V. Classic trap: value
+  // set, appearance stream still blank. Then, if widgets stay interactive,
+  // set /NeedAppearances so viewers that ignore stale streams regenerate.
+  try {
+    form.updateFieldAppearances();
+  } catch (error) {
+    warnings.push(
+      `Appearance update used Helvetica/WinAnsi and failed (${error instanceof Error ? error.message : "unknown"}). ${
+        flatten
+          ? "Flatten will burn whatever appearance already exists."
+          : "NeedAppearances is set so a viewer may still draw the typed values."
+      }`,
+    );
+  }
+
   if (flatten) {
-    try {
-      form.updateFieldAppearances();
-    } catch (error) {
-      warnings.push(
-        `Appearance update used Helvetica/WinAnsi and failed (${error instanceof Error ? error.message : "unknown"}). Flatten will burn whatever appearance already exists.`,
-      );
-    }
     try {
       form.flatten({ updateFieldAppearances: false });
     } catch (error) {
@@ -389,6 +416,8 @@ export function applyAcroFormToDocument(
     if (catalogFieldCount(doc) === 0) {
       doc.catalog.delete(PDFName.of("AcroForm"));
     }
+  } else {
+    setCatalogNeedAppearances(doc, true);
   }
 
   return { filled, flattened: flatten, hasXfa, warnings };
@@ -426,15 +455,80 @@ export function catalogFieldCount(doc: PDFDocument): number {
   return fields?.size() ?? 0;
 }
 
+export function catalogNeedAppearances(doc: PDFDocument): boolean {
+  const acroForm = doc.catalog.lookupMaybe(PDFName.of("AcroForm"), PDFDict);
+  if (!acroForm) return false;
+  return acroForm.lookup(PDFName.of("NeedAppearances")) === PDFBool.True;
+}
+
+function setCatalogNeedAppearances(doc: PDFDocument, needed: boolean) {
+  const acroForm = doc.catalog.lookupMaybe(PDFName.of("AcroForm"), PDFDict);
+  if (!acroForm) return;
+  acroForm.set(PDFName.of("NeedAppearances"), needed ? PDFBool.True : PDFBool.False);
+}
+
+function decodeStreamBytes(stream: PDFStream): Uint8Array {
+  if (stream instanceof PDFRawStream) return decodePDFRawStream(stream).decode();
+  const withUnencoded = stream as PDFStream & { getUnencodedContents?: () => Uint8Array };
+  if (typeof withUnencoded.getUnencodedContents === "function") {
+    return withUnencoded.getUnencodedContents();
+  }
+  return stream.getContents();
+}
+
+function appearanceStreamBytes(doc: PDFDocument, node: unknown): Uint8Array[] {
+  const obj = node instanceof PDFRef ? doc.context.lookup(node) : node;
+  if (obj instanceof PDFStream) {
+    try {
+      return [decodeStreamBytes(obj)];
+    } catch {
+      return [];
+    }
+  }
+  if (obj instanceof PDFDict) {
+    const out: Uint8Array[] = [];
+    for (const key of obj.keys()) {
+      out.push(...appearanceStreamBytes(doc, obj.lookup(key)));
+    }
+    return out;
+  }
+  return [];
+}
+
+/** Shown strings inside widget /AP streams (what Preview/Chrome paint). */
+export function listWidgetAppearanceText(doc: PDFDocument): string[] {
+  const shown: string[] = [];
+  for (const page of doc.getPages()) {
+    const annots = page.node.Annots();
+    if (!annots) continue;
+    for (let i = 0; i < annots.size(); i++) {
+      const dict = doc.context.lookup(annots.get(i));
+      if (!(dict instanceof PDFDict)) continue;
+      const ap = dict.lookupMaybe(PDFName.of("AP"), PDFDict);
+      if (!ap) continue;
+      for (const bytes of appearanceStreamBytes(doc, ap)) {
+        try {
+          shown.push(...extractShownStrings(tokenizeContentStream(bytes)));
+        } catch {
+          // Skip a corrupt appearance rather than failing the whole export check.
+        }
+      }
+    }
+  }
+  return shown;
+}
+
 export async function catalogAcroFormFieldCount(bytes: ArrayBuffer): Promise<number> {
   const doc = await loadPdfDocument(bytes);
   return catalogFieldCount(doc);
 }
 
-/** Tiny intake form: text, dropdown, radio, checkbox. */
-export async function buildSampleAcroFormPdf(): Promise<Uint8Array> {
+/** Tiny intake form: two text fields, dropdown, radio, checkbox. */
+export async function buildSampleAcroFormPdf(
+  options: SampleAcroFormOptions = {},
+): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  doc.setTitle("acroform-simple");
+  doc.setTitle("acroform-blank");
   doc.setProducer("PDF Relief fixtures");
   doc.setCreator("PDF Relief fixtures");
   doc.setSubject("Synthetic AcroForm QA fixture — not a real document");
@@ -462,14 +556,15 @@ export async function buildSampleAcroFormPdf(): Promise<Uint8Array> {
   });
 
   page.drawText("Full name", { x: 56, y: 706, size: 11, font: body, color: ink });
-  page.drawText("City", { x: 56, y: 662, size: 11, font: body, color: ink });
-  page.drawText("Size", { x: 56, y: 618, size: 11, font: body, color: ink });
-  page.drawText("S", { x: 196, y: 618, size: 11, font: body, color: ink });
-  page.drawText("M", { x: 246, y: 618, size: 11, font: body, color: ink });
-  page.drawText("L", { x: 296, y: 618, size: 11, font: body, color: ink });
+  page.drawText("Email", { x: 56, y: 662, size: 11, font: body, color: ink });
+  page.drawText("City", { x: 56, y: 618, size: 11, font: body, color: ink });
+  page.drawText("Size", { x: 56, y: 574, size: 11, font: body, color: ink });
+  page.drawText("S", { x: 196, y: 574, size: 11, font: body, color: ink });
+  page.drawText("M", { x: 246, y: 574, size: 11, font: body, color: ink });
+  page.drawText("L", { x: 296, y: 574, size: 11, font: body, color: ink });
   page.drawText("I agree to the workshop terms", {
     x: 80,
-    y: 574,
+    y: 530,
     size: 11,
     font: body,
     color: ink,
@@ -487,11 +582,29 @@ export async function buildSampleAcroFormPdf(): Promise<Uint8Array> {
     backgroundColor: rgb(1, 1, 1),
   });
 
+  const email = form.createTextField(SAMPLE_ACROFORM_FIELDS.email);
+  email.addToPage(page, {
+    x: 160,
+    y: 656,
+    width: 280,
+    height: 20,
+    borderWidth: 1,
+    borderColor: border,
+    backgroundColor: rgb(1, 1, 1),
+  });
+  if (options.includeFieldJs) {
+    const aa = doc.context.obj({
+      F: { Type: "Action", S: "JavaScript", JS: "AFSpecial_Format(2);" },
+      C: { Type: "Action", S: "JavaScript", JS: 'AFSimple_Calculate("SUM", ["fullName"]);' },
+    });
+    email.acroField.dict.set(PDFName.of("AA"), aa);
+  }
+
   const city = form.createDropdown(SAMPLE_ACROFORM_FIELDS.city);
   city.addOptions(["Redwood", "Bristol", "York"]);
   city.addToPage(page, {
     x: 160,
-    y: 656,
+    y: 612,
     width: 180,
     height: 20,
     borderWidth: 1,
@@ -500,14 +613,14 @@ export async function buildSampleAcroFormPdf(): Promise<Uint8Array> {
   });
 
   const size = form.createRadioGroup(SAMPLE_ACROFORM_FIELDS.size);
-  size.addOptionToPage("S", page, { x: 176, y: 616, width: 14, height: 14 });
-  size.addOptionToPage("M", page, { x: 226, y: 616, width: 14, height: 14 });
-  size.addOptionToPage("L", page, { x: 276, y: 616, width: 14, height: 14 });
+  size.addOptionToPage("S", page, { x: 176, y: 572, width: 14, height: 14 });
+  size.addOptionToPage("M", page, { x: 226, y: 572, width: 14, height: 14 });
+  size.addOptionToPage("L", page, { x: 276, y: 572, width: 14, height: 14 });
 
   const agree = form.createCheckBox(SAMPLE_ACROFORM_FIELDS.agree);
   agree.addToPage(page, {
     x: 56,
-    y: 572,
+    y: 528,
     width: 16,
     height: 16,
     borderWidth: 1,

@@ -1,13 +1,18 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PDFArray, PDFDict, PDFDocument, PDFName, StandardFonts, rgb } from "pdf-lib";
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, StandardFonts, rgb } from "pdf-lib";
 import {
+  FIELD_JS_WARNING,
   SAMPLE_ACROFORM_FIELDS,
   applyAcroFormToDocument,
   buildSampleAcroFormPdf,
   catalogAcroFormFieldCount,
   catalogHasAcroForm,
+  catalogNeedAppearances,
   fillAndFlattenAcroForm,
   inspectAcroForm,
+  listWidgetAppearanceText,
   listWidgetSubtypes,
   valuesFromReport,
 } from "./pdf-acroform";
@@ -46,7 +51,35 @@ describe("AcroForm inspect", () => {
       "York",
     ]);
     const widgets = await listWidgetSubtypes(asBuffer(bytes));
-    expect(widgets.filter((subtype) => subtype === "Widget").length).toBeGreaterThanOrEqual(4);
+    expect(widgets.filter((subtype) => subtype === "Widget").length).toBeGreaterThanOrEqual(5);
+    expect(report.hasFieldJavaScript).toBe(false);
+    expect(report.fields).toHaveLength(Object.keys(SAMPLE_ACROFORM_FIELDS).length);
+  });
+
+  it("warns unmistakably when fields have calculate/validate/format JavaScript", async () => {
+    const bytes = await buildSampleAcroFormPdf({ includeFieldJs: true });
+    const report = await inspectAcroForm(asBuffer(bytes));
+    expect(report.hasFieldJavaScript).toBe(true);
+    expect(report.fields.find((field) => field.name === "email")?.hasActions).toBe(true);
+    expect(report.warnings).toContain(FIELD_JS_WARNING);
+    expect(report.warnings.join(" ")).toMatch(/will not recalculate/i);
+    expect(report.warnings.join(" ")).toMatch(/JavaScript/i);
+  });
+
+  it("reads the committed acroform-blank fixture as a real AcroForm", async () => {
+    const bytes = await readFile(join(process.cwd(), "fixtures/acroform-blank.pdf"));
+    const report = await inspectAcroForm(asBuffer(bytes));
+    expect(report.hasAcroForm).toBe(true);
+    expect(report.hasXfa).toBe(false);
+    expect(report.fillableCount).toBeGreaterThanOrEqual(5);
+    expect(report.fields.map((field) => field.name).sort()).toEqual(
+      Object.values(SAMPLE_ACROFORM_FIELDS).slice().sort(),
+    );
+    expect(report.hasFieldJavaScript).toBe(true);
+    expect(report.warnings).toContain(FIELD_JS_WARNING);
+    const doc = await PDFDocument.load(bytes.slice());
+    expect(catalogHasAcroForm(doc)).toBe(true);
+    expect(doc.catalog.lookup(PDFName.of("AcroForm"), PDFDict)).toBeInstanceOf(PDFDict);
   });
 });
 
@@ -84,7 +117,7 @@ describe("AcroForm fill + flatten", () => {
   it("can fill without flattening so widgets stay interactive", async () => {
     const source = await buildSampleAcroFormPdf();
     const { bytes, result } = await fillAndFlattenAcroForm(asBuffer(source), {
-      values: { fullName: "Grace Hopper", city: "Bristol" },
+      values: { fullName: "Grace Hopper", city: "Bristol", email: "grace@example.com" },
       flatten: false,
     });
     expect(result.flattened).toBe(false);
@@ -92,7 +125,18 @@ describe("AcroForm fill + flatten", () => {
     const report = await inspectAcroForm(asBuffer(bytes));
     expect(report.fields.find((field) => field.name === "fullName")?.value).toBe("Grace Hopper");
     expect(report.fields.find((field) => field.name === "city")?.value).toBe("Bristol");
+    expect(report.fields.find((field) => field.name === "email")?.value).toBe("grace@example.com");
     expect(await listWidgetSubtypes(asBuffer(bytes))).toContain("Widget");
+
+    const filledDoc = await PDFDocument.load(bytes.slice());
+    expect(catalogNeedAppearances(filledDoc)).toBe(true);
+    expect(filledDoc.catalog.lookup(PDFName.of("AcroForm"), PDFDict).lookup(PDFName.of("NeedAppearances"))).toBe(
+      PDFBool.True,
+    );
+    const appearance = listWidgetAppearanceText(filledDoc).join(" ");
+    expect(appearance).toContain("Grace Hopper");
+    expect(appearance).toContain("Bristol");
+    expect(appearance).toContain("grace@example.com");
   });
 
   it("goes through applyWorkshopPatches so Edit export shares the same path", async () => {
@@ -150,6 +194,7 @@ describe("AcroForm fill + flatten", () => {
     const report = await inspectAcroForm(asBuffer(bytes));
     const values = valuesFromReport(report);
     expect(values.fullName).toBe("");
+    expect(values.email).toBe("");
     expect(values.agree).toBe(false);
     expect(values.city).toBe("");
   });

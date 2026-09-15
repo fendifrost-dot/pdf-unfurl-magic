@@ -64,6 +64,14 @@
       "summary": "KEEP / SECRET / VISIBLE plus a magenta-cyan PNG for permanent redact QA.",
       "bytes": 1268,
       "maxBytes": 20000
+    },
+    {
+      "file": "acroform-blank.pdf",
+      "pages": 1,
+      "kind": "acroform-blank",
+      "summary": "Blank AcroForm (5 widgets: name, email, city, size, agree). Email has format/calculate JS so Form UI must warn.",
+      "bytes": 7925,
+      "maxBytes": 24000
     }
   ]
 }

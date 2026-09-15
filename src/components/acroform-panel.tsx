@@ -1,4 +1,4 @@
-import { ListChecks } from "lucide-react";
+import { AlertTriangle, ListChecks } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,13 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import type { AcroFormField, AcroFormReport, AcroFormValue } from "@/lib/pdf-acroform";
+import {
+  FIELD_JS_WARNING,
+  XFA_PACKET_WARNING,
+  type AcroFormField,
+  type AcroFormReport,
+  type AcroFormValue,
+} from "@/lib/pdf-acroform";
 
 type Props = {
   report: AcroFormReport;
@@ -57,7 +63,15 @@ function FieldEditor({
         <Label htmlFor={id} className="cursor-pointer text-sm">
           {field.name}
         </Label>
-        <span className="text-gauge text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="flex items-center gap-1.5 text-gauge text-[10px] uppercase tracking-wide text-muted-foreground">
+          {field.hasActions ? (
+            <Badge
+              variant="outline"
+              className="border-warning/50 px-1.5 py-0 text-[9px] uppercase text-warning"
+            >
+              JS
+            </Badge>
+          ) : null}
           {field.kind}
           {field.required ? " · required" : ""}
         </span>
@@ -157,11 +171,41 @@ export function AcroFormPanel({
         burned into the page — no longer editable fields.
       </p>
 
-      {report.warnings.map((warning) => (
-        <p key={warning} className="mt-3 text-xs leading-relaxed text-warning">
-          {warning}
-        </p>
-      ))}
+      {report.hasXfa && (
+        <div
+          role="alert"
+          data-testid="acro-xfa-warning"
+          className="mt-3 flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 px-3 py-2.5"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <div>
+            <p className="text-sm font-semibold">XFA / LiveCycle is not supported</p>
+            <p className="mt-1 text-xs leading-relaxed text-foreground">{XFA_PACKET_WARNING}</p>
+          </div>
+        </div>
+      )}
+
+      {report.hasFieldJavaScript && (
+        <div
+          role="alert"
+          data-testid="acro-js-warning"
+          className="mt-3 flex items-start gap-2 rounded-md border border-warning/50 bg-warning/10 px-3 py-2.5"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <div>
+            <p className="text-sm font-semibold">Field JavaScript will not run</p>
+            <p className="mt-1 text-xs leading-relaxed text-foreground">{FIELD_JS_WARNING}</p>
+          </div>
+        </div>
+      )}
+
+      {report.warnings
+        .filter((warning) => warning !== FIELD_JS_WARNING && warning !== XFA_PACKET_WARNING)
+        .map((warning) => (
+          <p key={warning} className="mt-3 text-xs leading-relaxed text-warning">
+            {warning}
+          </p>
+        ))}
 
       {!report.hasAcroForm ? (
         <div className="py-8 text-center">
@@ -189,8 +233,8 @@ export function AcroFormPanel({
           </div>
           {!flatten && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Fields stay interactive. Most Acrobat replacements flatten so printers and other
-              readers see the typed values.
+              Fields stay interactive. Export still writes appearance streams and sets
+              NeedAppearances so Preview and Chrome show the typed values.
             </p>
           )}
           <ul className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto pr-1">

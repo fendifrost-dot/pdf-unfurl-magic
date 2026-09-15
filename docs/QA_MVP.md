@@ -43,7 +43,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Drop `image-and-text.pdf`. Edit the caption. The blue image is still an image, not a smeared bitmap of the whole page.
 - [ ] Drop `multi-page.pdf`. Step **1 / 3 → 3 / 3**. Edit page 1 only, export, re-open: pages 2 and 3 still show `PAGE_MARKER_2` and `PAGE_MARKER_3`.
 - [ ] Drop `comma-amounts.pdf`. Click `2,500.00`, change it, export. The comma and neighbouring text stay intact. Font picker lists the embedded font as Safe.
-- [ ] **Form.** Load sample form (or any AcroForm). Toolbar **Form**. Fill name / city / size / agree. **Export**. Re-open: typed values are visible, fields are no longer interactive. XFA files should warn, not pretend to fill.
+- [ ] **Form.** Load `fixtures/acroform-blank.pdf` (or **Load sample form**). Toolbar **Form**. The JS warning must be unmistakable (totals will not recalculate). Fill name / email / city / size / agree. **Export** with flatten on: typed values are visible, fields are no longer interactive. Toggle flatten off once, export, re-open in Preview/Chrome: typed values still show (appearance streams / NeedAppearances). XFA files should warn, not pretend to fill.
 
 - [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned** (not Helvetica Unsafe). Enhance panel is expanded. **Enhance page & OCR**. Click an OCR line in the side list (the synthetic 5×7 bitmap may OCR as fragments; a real statement scan yields amounts/labels), edit it, **Apply to page**, **Export**. Re-open: the new text is in the file as a text layer; the page picture remains unless **Replace with cleaned image** is on. Leave that toggle off once, then on once. **Text** or **Done / Back to text editing** must close Enhance even after OCR. Confirm `simple-text.pdf` still has **Safe in-place rewrite**, native text picking, and a collapsed Enhance entry (no scan banner).
 
@@ -83,5 +83,6 @@ Use the committed files in `fixtures/` — not a real client PDF.
 | `fixtures/multi-page.pdf` | 3 | Split, extract, merge, untouched pages |
 | `fixtures/scan-image-only.pdf` | 1 | Scan-aware Enhance / OCR (no text operators) |
 | `fixtures/redact-secret.pdf` | 1 | Permanent redact: `SECRET` must vanish; Cover box must not |
+| `fixtures/acroform-blank.pdf` | 1 | Form fill + flatten; JS warning; non-flatten values visible |
 
 Regenerate fixtures with `npm run fixtures:generate` only if you change `fixtures/generate.mjs`.

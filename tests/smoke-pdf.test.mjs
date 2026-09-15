@@ -26,6 +26,7 @@ const manifest = await readManifest();
 test("manifest lists the committed fixtures", () => {
   const files = manifest.files.map((f) => f.file).sort();
   assert.deepEqual(files, [
+    "acroform-blank.pdf",
     "comma-amounts.pdf",
     "image-and-text.pdf",
     "lines-and-text.pdf",
