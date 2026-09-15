@@ -3,7 +3,8 @@
  * the original file on disk is never touched and nothing is uploaded.
  */
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { fitFontSize } from "./text-helpers";
+export type { TextPatch, TextEditReport, TextEditInspection } from "./pdf-text-edit";
+export { applyTextPatches, applyTextPatchesWithReport, inspectTextPatch } from "./pdf-text-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
@@ -73,65 +74,17 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
   return doc.getPageCount();
 }
 
-export type TextPatch = {
-  page: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  fontSize: number;
-  text: string;
-};
-
 /**
- * Writes only the edited boxes. Every other object on the page is left exactly
- * as the original author wrote it — no full-page redraw.
- * Type shrinks (never past 4pt) so replacement copy stays inside the old box.
+ * Multi-font quote: Helvetica / Helvetica-Bold amounts, Times terms, Courier SKU,
+ * plus a second page that must stay byte-stable when page 1 is edited.
  */
-export async function applyTextPatches(
-  bytes: ArrayBuffer,
-  patches: TextPatch[],
-): Promise<Uint8Array> {
-  const doc = await load(bytes);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const pages = doc.getPages();
-
-  for (const patch of patches) {
-    const page = pages[patch.page - 1];
-    if (!page) continue;
-    const pad = Math.max(1, patch.fontSize * 0.18);
-
-    // Cover the old glyphs only, then draw the replacement in the same slot.
-    page.drawRectangle({
-      x: patch.x - pad,
-      y: patch.y - pad * 1.1,
-      width: patch.width + pad * 4,
-      height: patch.height + pad * 1.6,
-      color: rgb(1, 1, 1),
-    });
-
-    let size = fitFontSize(patch.text, patch.fontSize, patch.width);
-    while (size > 4 && font.widthOfTextAtSize(patch.text, size) > patch.width) size -= 0.25;
-
-    // Single line, no wrapping: the replacement must stay inside the old slot.
-    page.drawText(patch.text.replace(/\s*\n\s*/g, " "), {
-      x: patch.x,
-      y: patch.y + Math.max(0, (patch.height - size) * 0.28),
-      size,
-      font,
-      color: rgb(0.08, 0.08, 0.1),
-    });
-  }
-
-  return doc.save();
-}
-
-/** A quote with a deliberately wrong total, so Check numbers has something real to catch. */
 export async function buildSamplePdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const body = await doc.embedFont(StandardFonts.Helvetica);
+  const serif = await doc.embedFont(StandardFonts.TimesRoman);
+  const mono = await doc.embedFont(StandardFonts.Courier);
   const ink = rgb(0.1, 0.11, 0.13);
   const soft = rgb(0.42, 0.44, 0.48);
 
@@ -155,7 +108,10 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 34;
   write("Prepared for: R. Alvarez, 14 Wren Street", { size: 10 });
   y -= 14;
-  write("Valid for 30 days. Please kindly note that timber prices really move weekly.", { size: 10, color: soft });
+  write("Valid for 30 days. Please kindly note that timber prices really move weekly.", {
+    size: 10,
+    color: soft,
+  });
 
   y -= 32;
   write("Description", { font: bold, size: 10 });
@@ -202,7 +158,41 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 40;
   write("3 x 12 = 35 for the worktop run (per-metre pricing).", { size: 10, color: soft });
   y -= 16;
-  write("Deposit of 40% is due before before the timber order is placed.", { size: 10, color: soft });
+  write("Deposit of 40% is due before before the timber order is placed.", {
+    size: 10,
+    color: soft,
+  });
+  y -= 28;
+  write("Terms follow the Joinery Supply Agreement, clause 4.", {
+    size: 10,
+    font: serif,
+    color: soft,
+  });
+  y -= 16;
+  write("SKU  NG-BENCH-40-OAK", { size: 10, font: mono });
+
+  const page2 = doc.addPage([595, 842]);
+  page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });
+  page2.drawText("Reference code REF-4421. Do not amend this page.", {
+    x: 56,
+    y: 742,
+    size: 10,
+    font: body,
+    color: soft,
+  });
+  page2.drawLine({
+    start: { x: 56, y: 720 },
+    end: { x: 539, y: 720 },
+    thickness: 1,
+    color: rgb(0.75, 0.76, 0.78),
+  });
+  page2.drawText("Vector rule and original text objects must survive an edit on page 1.", {
+    x: 56,
+    y: 698,
+    size: 10,
+    font: serif,
+    color: ink,
+  });
 
   return doc.save();
 }
