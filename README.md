@@ -29,7 +29,11 @@ on Windows, **Open PDF Relief.bat**.
 | `npm run build` | Production web build |
 | `npm run desktop` | Build, then open the desktop app |
 | `npm run desktop:dev` | Desktop app against the dev server (127.0.0.1:47321) |
-| `npm run pack` | Package installers with electron-builder |
+| `npm run pack` | Package installers with electron-builder (current platform) |
+| `npm run pack:mac` | Build unsigned Apple Silicon `.dmg` and `.zip` into `release/` |
+
+After a feature merge, rebuild the Dock app with `npm run pack:mac`. See
+[docs/DESKTOP_RELEASE.md](docs/DESKTOP_RELEASE.md) for install, Gatekeeper, and Dock pin.
 
 The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
 server's port.

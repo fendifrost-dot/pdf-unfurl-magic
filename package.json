@@ -1,5 +1,11 @@
 {
   "name": "tanstack_start_ts",
+  "version": "0.1.0",
+  "description": "PDF Relief — a local PDF workshop for split, extract, merge, and click-to-edit text. Files stay on your computer.",
+  "author": {
+    "name": "PDF Relief",
+    "url": "https://github.com/fendifrost-dot/pdf-unfurl-magic"
+  },
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -15,7 +21,8 @@
     "postinstall": "node desktop/copy-worker.cjs",
     "desktop": "npm run build && electron .",
     "desktop:dev": "node desktop/dev.cjs",
-    "pack": "npm run build && electron-builder --publish never"
+    "pack": "npm run build && electron-builder --publish never",
+    "pack:mac": "npm run build && electron-builder --mac --arm64 --publish never"
   },
   "build": {
     "appId": "app.pdfrelief.desktop",
@@ -32,9 +39,20 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "desktop/icon.png",
+      "identity": null,
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ]
     },
     "win": {
