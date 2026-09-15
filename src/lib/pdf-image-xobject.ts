@@ -407,6 +407,71 @@ function dropStaleMasks(doc: PDFDocument, ref: PDFRef) {
   }
 }
 
+function filterName(dict: PDFDict | null): string {
+  if (!dict) return "";
+  const filter = dict.lookup(PDFName.of("Filter"));
+  if (filter instanceof PDFName) return filter.decodeText();
+  if (filter instanceof PDFArray && filter.size() > 0) {
+    const first = filter.get(0);
+    if (first instanceof PDFName) return first.decodeText();
+  }
+  return "";
+}
+
+export type DecodedImagePixels = {
+  width: number;
+  height: number;
+  rgba: Uint8Array;
+};
+
+/**
+ * Decode a simple 8-bit RGB/Gray image XObject to RGBA.
+ * JPEG / DCTDecode and exotic color spaces return null (caller must not leak
+ * pixels — replace the whole object instead).
+ */
+export function decodeImageXObjectRgba(doc: PDFDocument, ref: PDFRef): DecodedImagePixels | null {
+  const stream = asStream(doc, ref);
+  const dict = streamDict(stream);
+  if (!stream || !dict) return null;
+  if (filterName(dict) === "DCTDecode") return null;
+  const width = asNumber(dict.lookup(PDFName.of("Width")));
+  const height = asNumber(dict.lookup(PDFName.of("Height")));
+  const bpc = asNumber(dict.lookup(PDFName.of("BitsPerComponent"))) || 8;
+  if (width <= 0 || height <= 0 || bpc !== 8) return null;
+  let decoded: Uint8Array;
+  try {
+    decoded = decodeStream(stream);
+  } catch {
+    return null;
+  }
+  const pixels = width * height;
+  const rgba = new Uint8Array(pixels * 4);
+  if (decoded.length >= pixels * 3 && decoded.length < pixels * 4) {
+    for (let i = 0, j = 0; i < pixels; i++, j += 3) {
+      rgba[i * 4] = decoded[j] ?? 0;
+      rgba[i * 4 + 1] = decoded[j + 1] ?? 0;
+      rgba[i * 4 + 2] = decoded[j + 2] ?? 0;
+      rgba[i * 4 + 3] = 255;
+    }
+    return { width, height, rgba };
+  }
+  if (decoded.length >= pixels && decoded.length < pixels * 3) {
+    for (let i = 0; i < pixels; i++) {
+      const v = decoded[i] ?? 0;
+      rgba[i * 4] = v;
+      rgba[i * 4 + 1] = v;
+      rgba[i * 4 + 2] = v;
+      rgba[i * 4 + 3] = 255;
+    }
+    return { width, height, rgba };
+  }
+  if (decoded.length >= pixels * 4) {
+    rgba.set(decoded.subarray(0, pixels * 4));
+    return { width, height, rgba };
+  }
+  return null;
+}
+
 async function embedIntoRef(
   doc: PDFDocument,
   ref: PDFRef,
@@ -438,4 +503,15 @@ export async function replaceImageXObject(
   dropStaleMasks(doc, hit.ref);
   await embedIntoRef(doc, hit.ref, patch.bytes, mime);
   return true;
+}
+
+/** Reassign an existing image XObject stream (same object number). */
+export async function replaceImageXObjectBytes(
+  doc: PDFDocument,
+  ref: PDFRef,
+  bytes: Uint8Array,
+  mime: "image/jpeg" | "image/png" = "image/png",
+): Promise<void> {
+  dropStaleMasks(doc, ref);
+  await embedIntoRef(doc, ref, bytes, mime);
 }

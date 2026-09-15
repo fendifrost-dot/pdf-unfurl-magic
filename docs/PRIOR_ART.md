@@ -18,7 +18,7 @@ Ordered by impact on headaches we still have, not by GitHub stars.
 
 **Do not do in the next two weeks:** OpenCV.js / jscanify as a dependency (~30 MB unpacked), scribe.js (AGPL), MuPDF.js (AGPL), Stirling as a vendored app, OCRmyPDF inside the browser, or any DocuSign-clone (OpenSign / Documenso / DocuSeal — all AGPL).
 
-**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run. #5 highlight/note save uses pdf.js `saveDocument()` (`src/lib/pdf-annotate-js.ts`); visual redact remains a labeled burn. **AcroForm fill + flatten** uses pdf-lib `getForm()` / `flatten()` (`src/lib/pdf-acroform.ts`) — no OpenSign / Documenso / AGPL. XFA and field JavaScript are explicitly unsupported.
+**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run. #5 highlight/note save uses pdf.js `saveDocument()` (`src/lib/pdf-annotate-js.ts`); Cover box remains a labeled burn; permanent redact (`src/lib/pdf-redact.ts`) strips operators so `SECRET` is not extractable. **AcroForm fill + flatten** uses pdf-lib `getForm()` / `flatten()` (`src/lib/pdf-acroform.ts`) — no OpenSign / Documenso / AGPL. XFA and field JavaScript are explicitly unsupported.
 
 ---
 
@@ -389,11 +389,11 @@ Visual black boxes are **not** redaction. Underlying operators remain.
 | [firstlookmedia/pdf-redact-tools](https://github.com/firstlookmedia/pdf-redact-tools) | archived | **skip** |
 | Stirling redaction (MIT parts) | mixed open-core | **port algorithms** from MIT files only after reading `LICENSE` carve-outs |
 
-Honest redact for this app: render page to canvas, fill black in **pixel space**, embed JPEG, **drop original content stream**. Label the UI “flatten + burn” until content-stream erasure exists.
+Honest redact for this app (MVP landed): walk page content streams, drop or rewrite intersecting `Tj`/`TJ`/`'`/`"`, punch Flate RGB image XObjects in place (reuse #19), strip overlapping annots, then burn a black appearance. Cover box (`kind: "redact"`) remains visual-only. Gaps are listed in `src/lib/pdf-redact.ts` (`PERMANENT_REDACT_GAPS`) — JPEG is replaced entirely, Form XObject text is form-space only, vectors are covered not erased. Never label a path “redaction” if `SECRET` is still extractable.
 
-| **Action** | **port algorithms** (raster flatten). |
-| **Integration** | `src/lib/pdf-marks.ts` `kind === "redact"` export path. |
-| **Effort** | **1–2 days** for flatten-on-export; **days–week** for true operator erasure. |
+| **Action** | **port algorithms** (content-stream erasure + image punch). |
+| **Integration** | `src/lib/pdf-redact.ts` `kind === "erase"`; Cover box stays `kind === "redact"` in `pdf-marks.ts`. |
+| **Effort** | MVP landed; Form-XObject CTM and CID glyph-split remain. |
 
 **2-week verdict:** signature_pad + pdf.js editor for live marks; flatten-on-export for redact; no AGPL e-sign suite.
 

@@ -7,7 +7,9 @@
  * We do not mount AnnotationEditorLayer in the React viewer (minimal UI).
  * Keys must use `pdfjs_internal_editor_` so the worker's getNewAnnotationsMap
  * picks them up. Underline / rectangle have no 4.10 editor type — those are
- * native annot dicts. Redact stays a visual burn in pdf-marks.ts.
+ * native annot dicts. Cover box (`redact`) stays a visual burn in
+ * pdf-marks.ts. Permanent redaction (`erase`) is content-stream erasure
+ * in pdf-redact.ts.
  */
 import { PDFDict, PDFDocument, PDFName, type PDFPage } from "pdf-lib";
 import type { AnnotationBurn } from "./pdf-images";
@@ -59,16 +61,19 @@ export function partitionMarks(marks: AnnotationBurn[]): {
   burn: AnnotationBurn[];
   editor: AnnotationBurn[];
   native: AnnotationBurn[];
+  erase: AnnotationBurn[];
 } {
   const burn: AnnotationBurn[] = [];
   const editor: AnnotationBurn[] = [];
   const native: AnnotationBurn[] = [];
+  const erase: AnnotationBurn[] = [];
   for (const mark of marks) {
-    if (mark.kind === "redact") burn.push(mark);
+    if (mark.kind === "erase") erase.push(mark);
+    else if (mark.kind === "redact") burn.push(mark);
     else if (mark.kind === "highlight" || mark.kind === "note") editor.push(mark);
     else native.push(mark);
   }
-  return { burn, editor, native };
+  return { burn, editor, native, erase };
 }
 
 export function markRect(mark: AnnotationBurn): [number, number, number, number] {

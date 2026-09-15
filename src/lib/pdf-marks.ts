@@ -1,12 +1,15 @@
 /**
  * Overlay marks. Highlight / note become real PDF annotations via the pdf.js
  * editor save path (pdf-annotate-js.ts). Underline / rectangle are native
- * annot dicts. Visual redact still burns a black box into the page stream —
- * underlying operators stay extractable. Does not touch applyTextPatches.
+ * annot dicts. Cover box (`redact`) still burns a black box into the page
+ * stream — underlying operators stay extractable. Permanent redaction
+ * (`erase`) is handled by pdf-redact.ts before the burn. Does not touch
+ * applyTextPatches.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { partitionMarks, saveEditorAnnotations, writeNativeAnnotations } from "./pdf-annotate-js";
 import type { AnnotationBurn } from "./pdf-images";
+import { applyPermanentRedaction, editorMarksForSave, markOverlapsErase } from "./pdf-redact";
 
 export type { AnnotationBurn, AnnotationKind } from "./pdf-images";
 export type PageMark = AnnotationBurn;
@@ -18,6 +21,7 @@ export function exportFileName(
   marks: AnnotationBurn[],
   formFlattened = false,
 ): string {
+  if (marks.some((m) => m.kind === "erase")) return `${base}-redacted.pdf`;
   if (marks.length) return `${base}-marked.pdf`;
   if (formFlattened && !hasEdits) return `${base}-filled.pdf`;
   if (hasEdits || formFlattened) return `${base}-edited.pdf`;
@@ -115,6 +119,11 @@ export function burnMarkOnPage(page: PDFPage, mark: AnnotationBurn, font: PDFFon
     return;
   }
 
+  if (mark.kind === "erase") {
+    // Appearance is painted by applyPermanentRedaction after operators are gone.
+    return;
+  }
+
   page.drawRectangle({
     x,
     y,
@@ -140,12 +149,14 @@ export async function burnMarksOnPages(pages: PDFPage[], marks: AnnotationBurn[]
 }
 
 export async function applyBurnAndNativeMarks(doc: PDFDocument, marks: AnnotationBurn[]) {
-  const { burn, native } = partitionMarks(marks);
+  await applyPermanentRedaction(doc, marks);
+  const { burn, native, erase } = partitionMarks(marks);
   if (burn.length) {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     await burnMarksOnPages(doc.getPages(), burn, font);
   }
-  if (native.length) writeNativeAnnotations(doc, native);
+  const nativeSafe = native.filter((m) => !markOverlapsErase(m, erase));
+  if (nativeSafe.length) writeNativeAnnotations(doc, nativeSafe);
 }
 
 export async function applyPageMarks(
@@ -156,7 +167,7 @@ export async function applyPageMarks(
   const doc = await PDFDocument.load(src.slice(), { ignoreEncryption: true });
   await applyBurnAndNativeMarks(doc, marks);
   let out = await doc.save();
-  const { editor } = partitionMarks(marks);
+  const editor = editorMarksForSave(marks);
   if (editor.length) {
     out = (await saveEditorAnnotations(out, editor)).bytes;
   }
