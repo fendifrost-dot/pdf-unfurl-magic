@@ -16,6 +16,7 @@ npm run fixtures:generate
 | `image-and-text.pdf` | 1 | Embedded PNG + caption. The image object must not flatten when text is edited. |
 | `comma-amounts.pdf` | 1 | Amounts with commas (`2,500.00`) plus a multi-run POS line. Text-extract / font-mimic QA. |
 | `multi-page.pdf` | 3 | Split / extract / merge, page-count badge, untouched-page regression. Markers `PAGE_MARKER_1`…`3`. |
+| `scan-image-only.pdf` | 1 | Full-page bitmap, no text operators. Scan-aware Enhance / OCR. |
 
 Sizes are capped in `manifest.json` (`maxBytes`). The smoke harness fails if a fixture grows past that cap.
 

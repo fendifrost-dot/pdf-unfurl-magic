@@ -19,5 +19,6 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [ ] Next 2 weeks (see PRIOR_ART top 5): `@pdf-lib/fontkit` + Liberation/Noto (stop `?` glyphs); OCR `/Tr 3` layer; `signature_pad`; in-place image XObject replace; pdf.js annotation save
 - [ ] Do not npm AGPL (scribe.js, OpenSign, Documenso, MuPDF.js) or ship OpenCV.js (~30 MB) without a lazy Electron-only path
 - [ ] Later (not this workshop): brushes, generative fill, CMYK print
-- [ ] Deferred: multi-signer routing, email invites, DocuSign API, PKI certificates (`node-signpdf` MIT, Electron-only)
 - [x] Phone / PWA shell: `/split` `/merge` `/scan` `/edit`, bottom nav, 44px targets, share sheet
+- [x] Scan-aware Edit: detect image-only / OCR-ghost pages, Enhance + local OCR, export a text layer without Acrobat whiteout
+- [ ] Deferred: multi-signer routing, email invites, DocuSign API, PKI certificates (`node-signpdf` MIT, Electron-only)

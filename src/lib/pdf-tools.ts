@@ -10,6 +10,7 @@ import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
 import { burnMarksOnPages } from "./pdf-marks";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
+import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 export type {
   TextPatch,
   TextEditReport,
@@ -24,6 +25,7 @@ export {
   listPageTextShows,
   listPageEmbeddedFonts,
 } from "./pdf-text-edit";
+export { inspectPageScan, applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
@@ -94,17 +96,22 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
 }
 
 /**
- * Apply in-place text rewrites first, then overlay image replacements and
- * annotation burns so photos and marks never flatten the rest of the page.
+ * Apply in-place text rewrites first, then rebuild any scan-aware pages
+ * (image + OCR text layer), then overlay image replacements and annotation
+ * burns so photos and marks never flatten the rest of the page.
  */
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
   textPatches: TextPatch[],
   imagePatches: ImagePatch[],
   marks: AnnotationBurn[],
+  scanPatches: ScanPageExport[] = [],
 ): Promise<Uint8Array> {
   const afterText = textPatches.length ? await applyTextPatches(bytes, textPatches) : null;
-  const doc = await load(afterText ? bytesToArrayBuffer(afterText) : bytes);
+  const afterScan = scanPatches.length
+    ? await applyScanPagePatches(afterText ? bytesToArrayBuffer(afterText) : bytes, scanPatches)
+    : afterText;
+  const doc = await load(afterScan ? bytesToArrayBuffer(afterScan) : bytes);
   const pages = doc.getPages();
 
   for (const patch of imagePatches) {

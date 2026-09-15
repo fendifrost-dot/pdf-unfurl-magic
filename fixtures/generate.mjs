@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { encodePng } from "../src/lib/tiny-png.ts";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -216,6 +217,83 @@ async function multiPage() {
   return doc.save();
 }
 
+/** 5×7 caps + digits so the scan fixture has high-contrast type for local OCR. */
+const GLYPHS = {
+  " ": [0, 0, 0, 0, 0, 0, 0],
+  ".": [0, 0, 0, 0, 0, 4, 4],
+  ",": [0, 0, 0, 0, 4, 4, 8],
+  0: [14, 17, 19, 21, 25, 17, 14],
+  1: [4, 12, 4, 4, 4, 4, 14],
+  2: [14, 17, 1, 2, 4, 8, 31],
+  3: [14, 17, 1, 6, 1, 17, 14],
+  4: [2, 6, 10, 18, 31, 2, 2],
+  5: [31, 16, 30, 1, 1, 17, 14],
+  6: [6, 8, 16, 30, 17, 17, 14],
+  7: [31, 1, 2, 4, 4, 4, 4],
+  8: [14, 17, 17, 14, 17, 17, 14],
+  9: [14, 17, 17, 15, 1, 2, 12],
+  A: [14, 17, 17, 31, 17, 17, 17],
+  C: [14, 17, 16, 16, 16, 17, 14],
+  E: [31, 16, 16, 30, 16, 16, 31],
+  F: [31, 16, 16, 30, 16, 16, 16],
+  I: [14, 4, 4, 4, 4, 4, 14],
+  L: [16, 16, 16, 16, 16, 16, 31],
+  M: [17, 27, 21, 21, 17, 17, 17],
+  N: [17, 25, 21, 19, 17, 17, 17],
+  O: [14, 17, 17, 17, 17, 17, 14],
+  P: [30, 17, 17, 30, 16, 16, 16],
+  R: [30, 17, 17, 30, 20, 18, 17],
+  S: [14, 17, 16, 14, 1, 17, 14],
+  T: [31, 4, 4, 4, 4, 4, 4],
+  U: [17, 17, 17, 17, 17, 17, 14],
+  X: [17, 17, 10, 4, 10, 17, 17],
+};
+
+function blitText(rgba, width, x, y, text, scale, ink) {
+  let cx = x;
+  for (const ch of text) {
+    const glyph = GLYPHS[ch] ?? GLYPHS[" "];
+    for (let row = 0; row < 7; row++) {
+      for (let col = 0; col < 5; col++) {
+        if (((glyph[row] >> (4 - col)) & 1) === 0) continue;
+        for (let dy = 0; dy < scale; dy++) {
+          for (let dx = 0; dx < scale; dx++) {
+            const px = cx + col * scale + dx;
+            const py = y + row * scale + dy;
+            const i = (py * width + px) * 4;
+            rgba[i] = ink[0];
+            rgba[i + 1] = ink[1];
+            rgba[i + 2] = ink[2];
+          }
+        }
+      }
+    }
+    cx += 6 * scale;
+  }
+}
+
+async function scanImageOnly() {
+  const doc = await PDFDocument.create();
+  await stamp(doc, "scan-image-only");
+  const width = 220;
+  const height = 120;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0; i < rgba.length; i += 4) {
+    rgba[i] = 245;
+    rgba[i + 1] = 240;
+    rgba[i + 2] = 230;
+    rgba[i + 3] = 255;
+  }
+  blitText(rgba, width, 12, 18, "SCAN FIXTURE", 2, [28, 26, 24]);
+  blitText(rgba, width, 12, 48, "AMOUNT 1987.00", 2, [28, 26, 24]);
+  blitText(rgba, width, 12, 78, "POS DEBIT 6205", 2, [28, 26, 24]);
+  const png = encodePng(width, height, rgba);
+  const page = doc.addPage(A4);
+  const image = await doc.embedPng(png);
+  page.drawImage(image, { x: 0, y: 0, width: A4[0], height: A4[1] });
+  return doc.save();
+}
+
 const BUILDERS = [
   {
     file: "simple-text.pdf",
@@ -264,6 +342,14 @@ const BUILDERS = [
     summary: "Three labeled pages for split / extract / merge and untouched-page checks.",
     build: multiPage,
     maxBytes: 16_000,
+  },
+  {
+    file: "scan-image-only.pdf",
+    pages: 1,
+    kind: "scan-image",
+    summary: "Full-page bitmap, no text operators. Scan-aware edit / OCR target.",
+    build: scanImageOnly,
+    maxBytes: 90_000,
   },
 ];
 
