@@ -56,7 +56,7 @@ JPEG page stays the picture. Processing is one page at a time.
 
 ## Scan-aware edit
 
-Open `/edit` on a scanned or image-only PDF. If the page has no reliable text operators, the editor shows **This page looks scanned** instead of Helvetica Unsafe. Enhance the page (upscale + denoise/contrast, one page at a time) and run local OCR, then edit the OCR lines. Export writes a text layer on the page image — the original picture stays unless you choose **Replace with cleaned image**. Real text PDFs still use in-place rewrite.
+Open `/edit` and use **Enhance** (toolbar chip or the **Enhance & OCR this page** panel) whenever a page is a scan, blurry, or hard to pick. Auto-detect still expands the panel on image-only / OCR-ghost pages; native text PDFs keep click-to-edit and show Enhance collapsed so it is optional. Enhance upscales + denoise/contrast one page at a time and runs local OCR. Export writes a text layer on the page image — the original picture stays unless you choose **Replace with cleaned image**. Real text PDFs still use in-place rewrite. OCR does not run until you press the button.
 
 ## Phone / PWA
 

@@ -28,6 +28,6 @@ npm run dev
 npx playwright test tests/e2e/smoke.spec.ts
 ```
 
-`tests/e2e/smoke.spec.ts` is a documented spec: home bench load + page-count badge, `/edit` load of `multi-page.pdf`, and a download-size sanity check. Wire `PLAYWRIGHT_BASE_URL` (default `http://localhost:5173`) when the dev server uses another host.
+`tests/e2e/smoke.spec.ts` is a documented spec: home bench load + page-count badge, `/edit` load of `multi-page.pdf`, native-text Enhance entry (collapsed until the Enhance chip is clicked), and a download-size sanity check. Wire `PLAYWRIGHT_BASE_URL` (default `http://localhost:5173`) when the dev server uses another host.
 
 These optional runners are not installed on `main` so feature PRs can adopt them without a lockfile fight.
