@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { bytesToLatin1 } from "../pdf-content-stream";
-import { listPageShownText } from "../pdf-text-edit";
+import { decodePageContentRaw, listPageShownText } from "../pdf-text-edit";
 import { setInvisibleOcrTextMode } from "./pdf";
 
 describe("invisible OCR text layer", () => {
@@ -18,9 +18,9 @@ describe("invisible OCR text layer", () => {
       color: rgb(0, 0, 0),
     });
     const bytes = await doc.save({ useObjectStreams: false });
-    const raw = bytesToLatin1(bytes);
+    const raw = await decodePageContentRaw(bytes.slice().buffer as ArrayBuffer, 1);
     expect(raw).toMatch(/\b3\s+Tr\b/);
-    expect(raw).not.toMatch(/\/ca\s+0/);
+    expect(bytesToLatin1(bytes)).not.toMatch(/\/ca\s+0/);
     const shown = await listPageShownText(bytes.slice().buffer as ArrayBuffer, 1);
     expect(shown).toContain("SCAN FIXTURE");
   });
