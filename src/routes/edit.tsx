@@ -67,7 +67,6 @@ import {
   textPageFooter,
 } from "@/lib/edit-apply";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
-import { OcrVerifyPanel } from "@/components/ocr-verify-panel";
 import {
   applyMarqueeToLines,
   coverBoxesFromLine,
@@ -1932,25 +1931,12 @@ function Editor() {
                     onSelectLine={select}
                     onDone={exitEnhanceToText}
                     onClearOcr={clearOcrForPage}
+                    onVerifyDecide={decideOcrVerify}
+                    onEnhanceAgain={() => {
+                      setEnhancePanelOpen(true);
+                      void enhanceAndOcr();
+                    }}
                   />
-                  {scanSession.ocrLines.length > 0 && (
-                    <div className="mt-4">
-                      <OcrVerifyPanel
-                        snippets={ocrVerify}
-                        ocrLineCount={scanSession.ocrLines.length}
-                        busy={scanBusy}
-                        onDecide={decideOcrVerify}
-                        onEnhanceAgain={() => {
-                          setEnhancePanelOpen(true);
-                          window.requestAnimationFrame(() => {
-                            const panel = document.getElementById("enhance-page-panel");
-                            panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-                          });
-                          void enhanceAndOcr();
-                        }}
-                      />
-                    </div>
-                  )}
                   <Separator className="my-5" />
                   {!selected ? (
                     <div className="py-8 text-center">

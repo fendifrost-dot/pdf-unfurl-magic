@@ -13,6 +13,8 @@ import {
 import { ocrReadyNextStep } from "@/lib/edit-apply";
 import type { PageScanReport, ScanPageSession } from "@/lib/pdf-scan-edit";
 import type { TextLine } from "@/lib/pdf-runtime";
+import { OcrVerifyPanel } from "@/components/ocr-verify-panel";
+import type { OcrVerifyDecision } from "@/lib/ocr-verify";
 
 export function ScanAwarePanel({
   report,
@@ -28,6 +30,8 @@ export function ScanAwarePanel({
   onSelectLine,
   onDone,
   onClearOcr,
+  onVerifyDecide,
+  onEnhanceAgain,
 }: {
   report: PageScanReport;
   session: ScanPageSession;
@@ -42,6 +46,8 @@ export function ScanAwarePanel({
   onSelectLine: (line: TextLine) => void;
   onDone: () => void;
   onClearOcr?: () => void;
+  onVerifyDecide?: (snippetId: string, decision: OcrVerifyDecision) => void;
+  onEnhanceAgain?: () => void;
 }) {
   const ocrCount = session.ocrLines.length;
   const emphasized = shouldAutoExpandEnhance({
@@ -154,6 +160,16 @@ export function ScanAwarePanel({
               )}
               {busy ?? "Enhance page & OCR"}
             </Button>
+
+            {ocrCount > 0 && onVerifyDecide && onEnhanceAgain ? (
+              <OcrVerifyPanel
+                snippets={session.ocrVerify ?? []}
+                ocrLineCount={ocrCount}
+                busy={busy}
+                onDecide={onVerifyDecide}
+                onEnhanceAgain={onEnhanceAgain}
+              />
+            ) : null}
 
             {ocrCount > 0 ? (
               <div>
