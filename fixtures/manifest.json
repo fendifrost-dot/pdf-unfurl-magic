@@ -54,7 +54,7 @@
       "pages": 1,
       "kind": "scan-image",
       "summary": "Full-page bitmap, no text operators. Scan-aware edit / OCR target.",
-      "bytes": 1673,
+      "bytes": 2607,
       "maxBytes": 90000
     }
   ]
