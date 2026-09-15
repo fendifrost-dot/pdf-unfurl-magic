@@ -143,6 +143,7 @@ import {
   loadSystemFontBytes,
   mergeFontCatalog,
   querySystemFonts,
+  suggestClosestFont,
   type CatalogFont,
 } from "@/lib/pdf-font-catalog";
 import {
@@ -434,6 +435,7 @@ function Editor() {
   const [selectedFieldName, setSelectedFieldName] = useState<string | null>(null);
   const [fontCatalog, setFontCatalog] = useState<CatalogFont[]>([]);
   const [fontChoiceId, setFontChoiceId] = useState("");
+  const [closestFontReason, setClosestFontReason] = useState("");
   const [textSelectMode, setTextSelectMode] = useState<TextSelectMode>("line");
   const [draftMarquee, setDraftMarquee] = useState<PdfRect | null>(null);
   const holderRef = useRef<HTMLDivElement>(null);
@@ -450,6 +452,9 @@ function Editor() {
   enhanceOpenRef.current = enhanceOpen;
   const patchedPreviewRef = useRef<PDFDocumentProxy | null>(null);
   const canvasGenRef = useRef(0);
+  const fontChoiceLineRef = useRef<string | null>(null);
+  const editsRef = useRef(edits);
+  editsRef.current = edits;
 
   const selected = selectedId ? findLineOrMember(lines, selectedId) : undefined;
   const selectedImage = selectedImageId
@@ -936,6 +941,7 @@ function Editor() {
     if (!doc || !selected || selected.source === "ocr") {
       setInspection(null);
       setInspecting(false);
+      setClosestFontReason("");
       return;
     }
     let cancelled = false;
@@ -975,23 +981,26 @@ function Editor() {
             system,
           });
           setFontCatalog(catalog);
-          const preferBundled =
-            result.method === "redraw-unicode" ||
-            !!result.embeddedFonts?.some(
-              (font) => font.cid && font.key === (result.resourceKey || selected.fontName),
-            );
+          const hint = {
+            selectedKey: result.resourceKey || selected.fontName,
+            fontName: selected.fontName,
+            fontFamily: selected.fontFamily,
+            baseFont: result.baseFont,
+            draft,
+            originalText: selected.text,
+          };
+          const suggestion = suggestClosestFont(catalog, hint);
+          setClosestFontReason(suggestion?.reason ?? "");
+          const storedChoice = editsRef.current[selected.id]?.fontChoiceId;
           setFontChoiceId((prev) => {
-            const current = catalog.find((item) => item.id === prev);
-            const fallback = defaultFontChoiceId(
-              catalog,
-              result.resourceKey || selected.fontName,
-              preferBundled,
-            );
-            if (preferBundled) {
-              if (current?.source === "bundled" || current?.source === "system") return prev;
-              return fallback;
+            const lineChanged = fontChoiceLineRef.current !== selected.id;
+            fontChoiceLineRef.current = selected.id;
+            if (lineChanged && storedChoice && catalog.some((item) => item.id === storedChoice)) {
+              return storedChoice;
             }
-            if (current) return prev;
+            const fallback =
+              suggestion?.id ?? defaultFontChoiceId(catalog, hint.selectedKey, false, hint);
+            if (!lineChanged && catalog.some((item) => item.id === prev)) return prev;
             return fallback;
           });
         })
@@ -1035,6 +1044,9 @@ function Editor() {
       return;
     }
     setDraft(stored?.text ?? line.text);
+    fontChoiceLineRef.current = null;
+    setFontChoiceId(stored?.fontChoiceId ?? "");
+    setClosestFontReason("");
     const fields = columnFieldsForLine(line);
     const nextDrafts: Record<string, string> = {};
     for (const field of fields) {
@@ -2539,12 +2551,17 @@ function Editor() {
                       </p>
                       {!selectedIsOcr && (
                         <>
-                          <FontMatchIndicator inspection={inspection} loading={inspecting} />
+                          <FontMatchIndicator
+                            inspection={inspection}
+                            loading={inspecting}
+                            closestMatchReason={closestFontReason}
+                          />
                           <FontPicker
                             options={fontCatalog}
                             value={fontChoiceId}
                             onChange={setFontChoiceId}
                             disabled={!!inspection?.deferToScan}
+                            closestMatchReason={closestFontReason}
                           />
                         </>
                       )}
