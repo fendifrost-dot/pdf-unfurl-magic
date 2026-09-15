@@ -199,7 +199,7 @@ export function ocrVerifyNextStep(pending: number, ocrLineCount: number): string
     return `${noun}. Accept, correct, or skip each before Apply. Damaged pages go Enhance → Verify → Edit — not silent bad OCR.`;
   }
   const noun = ocrLineCount === 1 ? "1 OCR line" : `${ocrLineCount} OCR lines`;
-  return `${noun} verified. Click a line, edit it, Apply to page, then Export.`;
+  return `${noun} verified. Click a line, edit it, Apply to page, then Save As….`;
 }
 
 /**

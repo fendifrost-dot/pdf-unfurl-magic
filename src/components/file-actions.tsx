@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { canOfferShare, saveBytes, shareBytes, type ExportBytes } from "@/lib/file-export";
+import { SAVE_AS_HINT, SAVE_AS_LABEL } from "@/lib/file-session";
 
 type Props = {
   bytes: ExportBytes;
@@ -24,9 +25,10 @@ export function FileActions({ bytes, filename, disabled, compact }: Props) {
         variant="secondary"
         className="min-h-11 touch-manipulation"
         disabled={disabled}
+        title={SAVE_AS_HINT}
         onClick={() => void saveBytes(bytes, filename)}
       >
-        <Download /> Save
+        <Download /> {SAVE_AS_LABEL}
       </Button>
       {shareReady && (
         <Button

@@ -9,6 +9,7 @@ import {
   Download,
   Eraser,
   FileText,
+  FolderOpen,
   Highlighter,
   ImageIcon,
   Loader2,
@@ -20,6 +21,7 @@ import {
   Type,
   Underline,
   Undo2,
+  X,
   ListChecks,
   MousePointer2,
   BoxSelect,
@@ -38,7 +40,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
-  downloadBytes,
   expandToFullLine,
   extractLines,
   onSameVisualRow,
@@ -54,7 +55,16 @@ import {
   type TextPatch,
 } from "@/lib/pdf-tools";
 import { exportFileName } from "@/lib/pdf-marks";
-import { toDesktopBytes } from "@/lib/desktop";
+import { isDesktopApp, pickDesktopPdf, toDesktopBytes } from "@/lib/desktop";
+import { saveBytesWithResult } from "@/lib/file-export";
+import {
+  APPLY_SESSION_HINT,
+  CLOSE_DOCUMENT_LABEL,
+  OPEN_ANOTHER_PDF_LABEL,
+  SAVE_AS_HINT,
+  SAVE_AS_LABEL,
+  ensureNewPdfName,
+} from "@/lib/file-session";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { FontPicker } from "@/components/font-picker";
 import { AlignSelectionPanel } from "@/components/align-selection-panel";
@@ -440,6 +450,7 @@ function Editor() {
   const [draftMarquee, setDraftMarquee] = useState<PdfRect | null>(null);
   const holderRef = useRef<HTMLDivElement>(null);
   const pageBoxRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const marqueeRef = useRef<PdfRect | null>(null);
   const previewUrlRef = useRef<string | null>(null);
@@ -455,6 +466,10 @@ function Editor() {
   const fontChoiceLineRef = useRef<string | null>(null);
   const editsRef = useRef(edits);
   editsRef.current = edits;
+  const docRef = useRef<Doc | null>(null);
+  const pendingCountRef = useRef(0);
+  const exportPdfRef = useRef<() => Promise<void>>(async () => {});
+  const closeDocumentRef = useRef<() => void>(() => {});
 
   const selected = selectedId ? findLineOrMember(lines, selectedId) : undefined;
   const selectedImage = selectedImageId
@@ -474,6 +489,8 @@ function Editor() {
     formReport.fillableCount > 0 && formFlatten ? Math.max(1, formDirtyCount) : formDirtyCount;
   const pendingCount =
     editedIds.length + imageEditIds.length + marks.length + scanExportReady + formPending;
+  pendingCountRef.current = pendingCount;
+  docRef.current = doc;
   const scanSession = scanByPage[page] ?? emptyScanSession();
   const looksScanned = !!scanReport?.looksScanned;
   const previewLayers = editPreviewLayers({
@@ -558,6 +575,10 @@ function Editor() {
   };
 
   const loadBytes = useCallback(async (name: string, bytes: ArrayBuffer) => {
+    const previous = docRef.current;
+    if (previous?.proxy) {
+      void previous.proxy.destroy().catch(() => undefined);
+    }
     setError(null);
     setFindings(null);
     setStatus("Opening the file in this tab");
@@ -606,6 +627,76 @@ function Editor() {
       setStatus(null);
     }
   }, []);
+
+  const closeDocument = useCallback(() => {
+    if (!docRef.current) return;
+    if (pendingCountRef.current > 0) {
+      const ok = window.confirm(
+        "Close this PDF? Applied edits live only in this tab. Closing discards them. Save As… first if you want a new file.",
+      );
+      if (!ok) return;
+    }
+    const current = docRef.current;
+    if (current?.proxy) {
+      void current.proxy.destroy().catch(() => undefined);
+    }
+    setDoc(null);
+    setEdits({});
+    setImageEdits({});
+    setMarks([]);
+    setSelectedId(null);
+    setSelectedImageId(null);
+    setSourceCanvas(null);
+    setInspection(null);
+    setScanReport(null);
+    setNativeLines([]);
+    setLines([]);
+    setImages([]);
+    setApplyNotice(null);
+    setShowOriginalHint(false);
+    setPageHasPatchedPreview(false);
+    if (patchedPreviewRef.current) {
+      void patchedPreviewRef.current.destroy();
+      patchedPreviewRef.current = null;
+    }
+    enhanceDismissedRef.current = false;
+    setEnhanceOpen(false);
+    setScanByPage((prev) => {
+      Object.values(prev).forEach(releaseScanSession);
+      return {};
+    });
+    setFormReport(emptyAcroFormReport());
+    setFormValues({});
+    setFormOriginal({});
+    setSelectedFieldName(null);
+    setFindings(null);
+    setError(null);
+    setPage(1);
+    setDraft("");
+    setMemberDrafts({});
+    setDraftMark(null);
+    setStatus(null);
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setPreviewUrl(null);
+    holderRef.current?.replaceChildren();
+    void window.pdfReliefDesktop?.documentClosed?.();
+  }, []);
+
+  const openAnotherPdf = useCallback(async () => {
+    if (isDesktopApp()) {
+      const picked = await pickDesktopPdf();
+      if (!picked) return;
+      const copy = picked.bytes.slice(0);
+      await loadBytes(picked.name, copy.buffer as ArrayBuffer);
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [loadBytes]);
+
+  closeDocumentRef.current = closeDocument;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -688,6 +779,15 @@ function Editor() {
       unsubscribe();
     };
   }, [loadBytes]);
+
+  useEffect(() => {
+    const api = typeof window === "undefined" ? undefined : window.pdfReliefDesktop;
+    if (!api?.onEditorCommand) return;
+    return api.onEditorCommand((command) => {
+      if (command === "save-as") void exportPdfRef.current();
+      if (command === "close-document") closeDocumentRef.current();
+    });
+  }, []);
 
   // Render the current page and collect its text lines and embedded images.
   useEffect(() => {
@@ -1035,6 +1135,9 @@ function Editor() {
     setSelectedImageId(null);
     setSelectedId(line.id);
     const stored = storedOverride ?? edits[line.id];
+    fontChoiceLineRef.current = null;
+    setFontChoiceId(stored?.fontChoiceId ?? "");
+    setClosestFontReason("");
     const rows = chunkRowsForSelection(line);
     if (rows.length > 1) {
       const nextDrafts = seedChunkDrafts(rows, stored?.memberTexts);
@@ -1044,9 +1147,6 @@ function Editor() {
       return;
     }
     setDraft(stored?.text ?? line.text);
-    fontChoiceLineRef.current = null;
-    setFontChoiceId(stored?.fontChoiceId ?? "");
-    setClosestFontReason("");
     const fields = columnFieldsForLine(line);
     const nextDrafts: Record<string, string> = {};
     for (const field of fields) {
@@ -1718,8 +1818,8 @@ function Editor() {
         scanPatches,
         formFill,
       );
-      downloadBytes(
-        bytes,
+      const filename = ensureNewPdfName(
+        doc.name,
         exportFileName(
           doc.base,
           patches.length + imagePatches.length + scanPatches.length > 0,
@@ -1727,16 +1827,27 @@ function Editor() {
           !!formFill,
         ),
       );
+      setStatus("Saving a new PDF");
+      const outcome = await saveBytesWithResult(bytes, filename);
+      if (outcome.saved) {
+        setApplyNotice(
+          outcome.desktop && outcome.path
+            ? `Saved a new PDF as ${outcome.path.split(/[\\/]/).pop()}. The original file is unchanged.`
+            : `Downloading ${filename}. The original file is unchanged.`,
+        );
+      }
     } catch (e) {
       setError(
         e instanceof Error
           ? e.message
-          : "The export failed. Nothing was changed on your original file.",
+          : "The save failed. Nothing was changed on your original file.",
       );
     } finally {
       setStatus(null);
     }
   };
+
+  exportPdfRef.current = exportPdf;
 
   const textOverlay = useMemo(
     () =>
@@ -1891,10 +2002,10 @@ function Editor() {
             </h1>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
               Original pages stay as PDF objects — fonts, rules, and images you do not touch are not
-              rasterized. Click a run, rewrite it in a font already in the file, and export. No
-              white-out layer. Form mode fills AcroForm fields and flattens them on export. Image
-              studio is a document workshop, not Photoshop. Marks burn in only after you confirm
-              them.
+              rasterized. Click a run, rewrite it, then Apply to preview in this tab. Save As…
+              always writes a new PDF and never overwrites the file you opened. No white-out layer.
+              Form mode fills AcroForm fields and flattens them on Save As. Image studio is a
+              document workshop, not Photoshop. Marks burn in only after you confirm them.
             </p>
           </div>
           {doc && (
@@ -1912,10 +2023,12 @@ function Editor() {
               </Button>
               <Button
                 className="min-h-11 touch-manipulation"
-                onClick={exportPdf}
-                disabled={!!status || pendingCount === 0}
+                data-testid="save-as"
+                title={SAVE_AS_HINT}
+                onClick={() => void exportPdf()}
+                disabled={!!status}
               >
-                <Download className="mr-1.5 size-3.5" /> Export
+                <Download className="mr-1.5 size-3.5" /> {SAVE_AS_LABEL}
               </Button>
             </div>
           )}
@@ -1969,7 +2082,42 @@ function Editor() {
           <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
             <div className="bench-panel p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="truncate text-sm font-medium">{doc.name}</p>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-medium">{doc.name}</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/pdf"
+                    className="sr-only"
+                    aria-hidden
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      void file.arrayBuffer().then((bytes) => loadBytes(file.name, bytes));
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="min-h-11 touch-manipulation"
+                    data-testid="close-document"
+                    disabled={!!status}
+                    onClick={closeDocument}
+                  >
+                    <X className="size-3.5" /> {CLOSE_DOCUMENT_LABEL}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="min-h-11 touch-manipulation"
+                    data-testid="open-another-pdf"
+                    disabled={!!status}
+                    onClick={() => void openAnotherPdf()}
+                  >
+                    <FolderOpen className="size-3.5" /> {OPEN_ANOTHER_PDF_LABEL}
+                  </Button>
+                </div>
                 <div className="flex items-center gap-1">
                   <Button
                     size="icon"
@@ -2115,7 +2263,7 @@ function Editor() {
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                         {pendingOcrSnippets(ocrVerify).length > 0
                           ? "Verify uncertain OCR in the side panel (Accept, Correct, or Skip) before Apply. Enhance → Verify → Edit."
-                          : "Click a line, edit it, Apply to page, then Export. Or leave Enhance to return to native PDF lines."}
+                          : "Click a line, edit it, Apply to page (preview only), then Save As…. Or leave Enhance to return to native PDF lines."}
                       </p>
                     </div>
                   </div>
@@ -2150,8 +2298,14 @@ function Editor() {
                       />
                       {SHOW_EDIT_HIGHLIGHT_LABEL}
                     </label>
-                    <Button size="sm" onClick={() => void exportPdf()} disabled={!!status}>
-                      <Download className="size-3.5" /> Export
+                    <Button
+                      size="sm"
+                      data-testid="save-as-banner"
+                      title={SAVE_AS_HINT}
+                      onClick={() => void exportPdf()}
+                      disabled={!!status}
+                    >
+                      <Download className="size-3.5" /> {SAVE_AS_LABEL}
                     </Button>
                   </div>
                 </div>
@@ -2337,7 +2491,7 @@ function Editor() {
                   "Drag a highlight, underline, note, cover box, or permanent redaction rectangle. Highlights and notes save as real PDF annotations. A cover box draws an opaque box — the text or image underneath is still in the file. Redact (permanent) removes intersecting text operators and punches image pixels in the exported copy; that cannot be undone."}
                 {mode === "form" &&
                   (formReport.fillableCount
-                    ? `${formReport.fillableCount} fillable AcroForm field${formReport.fillableCount === 1 ? "" : "s"}. Click a box or use the list. Export fills, then flattens to a static PDF.`
+                    ? `${formReport.fillableCount} fillable AcroForm field${formReport.fillableCount === 1 ? "" : "s"}. Click a box or use the list. Save As fills, then flattens to a static PDF.`
                     : "No AcroForm widgets on this file. XFA / LiveCycle packets are not supported.")}
               </p>
             </div>
@@ -2434,7 +2588,7 @@ function Editor() {
                       <AlertTriangle className="size-4" />
                       <AlertTitle>Cannot be undone</AlertTitle>
                       <AlertDescription>
-                        Export removes text operators and image pixels under this box from the copy.
+                        Save As removes text operators and image pixels under this box from the copy.
                         Cover box only hides them. The original file on disk is never changed.
                       </AlertDescription>
                     </Alert>
@@ -2740,6 +2894,7 @@ function Editor() {
                           size="sm"
                           className="flex-1"
                           data-testid="apply-edit"
+                          title={APPLY_SESSION_HINT}
                           onClick={commit}
                           disabled={!applyEnabled}
                         >
@@ -2765,6 +2920,9 @@ function Editor() {
                           <Undo2 className="size-3.5" />
                         </Button>
                       </div>
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                        {APPLY_SESSION_HINT}
+                      </p>
                       {selectedVerifyPending && (
                         <p className="mt-3 text-sm text-warning" data-testid="ocr-verify-gate">
                           Accept, correct, or skip this OCR snippet before Apply.
@@ -2874,10 +3032,12 @@ function Editor() {
                     </p>
                     <Button
                       className="mt-3 w-full min-h-11"
+                      data-testid="save-as-sidebar"
+                      title={SAVE_AS_HINT}
                       onClick={() => void exportPdf()}
                       disabled={!!status}
                     >
-                      <Download className="mr-1.5 size-3.5" /> Export
+                      <Download className="mr-1.5 size-3.5" /> {SAVE_AS_LABEL}
                     </Button>
                   </div>
                   <p className="eyebrow mt-5">Pending edits</p>
@@ -2924,7 +3084,7 @@ function Editor() {
                     {formFlatten && formReport.fillableCount > 0 && formDirtyCount === 0 && (
                       <li className="text-xs">
                         <span className="text-gauge text-muted-foreground">form</span>{" "}
-                        <span className="text-success">flatten on export</span>
+                        <span className="text-success">flatten on Save As</span>
                       </li>
                     )}
                   </ul>

@@ -65,7 +65,7 @@ test.describe("PDF Relief fixture smoke", () => {
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByRole("button", { name: /^Export$/i }).click(),
+      page.getByRole("button", { name: /Save As/i }).first().click(),
     ]);
     const stream = await download.createReadStream();
     const chunks: Buffer[] = [];

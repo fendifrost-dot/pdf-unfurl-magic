@@ -24,8 +24,7 @@ export function exportFileName(
   if (marks.some((m) => m.kind === "erase")) return `${base}-redacted.pdf`;
   if (marks.length) return `${base}-marked.pdf`;
   if (formFlattened && !hasEdits) return `${base}-filled.pdf`;
-  if (hasEdits || formFlattened) return `${base}-edited.pdf`;
-  return `${base}-copy.pdf`;
+  return `${base}-edited.pdf`;
 }
 
 function wrapNote(text: string, font: PDFFont, size: number, maxWidth: number): string[] {

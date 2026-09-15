@@ -3,6 +3,8 @@ export type DesktopPdfFile = {
   data: Uint8Array | ArrayBuffer | number[] | { type: "Buffer"; data: number[] };
 };
 
+export type DesktopEditorCommand = "save-as" | "close-document";
+
 export type PdfReliefDesktop = {
   isDesktop: true;
   pickPdf: () => Promise<DesktopPdfFile | null>;
@@ -17,6 +19,10 @@ export type PdfReliefDesktop = {
     data: Uint8Array;
   }) => Promise<string | null>;
   onPdfReady: (callback: () => void) => () => void;
+  /** File menu: Save As… / Export / Close document. */
+  onEditorCommand?: (callback: (command: DesktopEditorCommand) => void) => () => void;
+  /** Clears the tracked source path so a later Save As cannot confuse files. */
+  documentClosed?: () => Promise<void> | void;
 };
 
 declare global {
