@@ -2515,17 +2515,19 @@ function Editor() {
                         </Button>
                       </div>
 
-                      {fullLine && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="mt-3 w-full"
-                          onClick={expandSelectedLine}
-                          title="Include every run on this baseline, including the amount column"
-                        >
-                          Expand to full line
-                        </Button>
-                      )}
+                      {fullLine &&
+                        (fullLine.text !== selected.text ||
+                          Math.abs(fullLine.width - selected.width) >= 1) && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="mt-3 w-full"
+                            onClick={expandSelectedLine}
+                            title="Include every run on this baseline, including the amount column"
+                          >
+                            Expand to full line
+                          </Button>
+                        )}
 
                       {showAlignControls({ selected, lines, textSelectMode }) && (
                         <AlignSelectionPanel

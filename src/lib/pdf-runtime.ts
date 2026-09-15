@@ -401,17 +401,36 @@ export function mergeLinesByBaseline(runs: TextLine[]): TextLine[] {
   return out;
 }
 
-/** Join every run on the selected baseline, including a far-right amount column. */
+/**
+ * Join every run on the selected baseline, including a far-right amount column.
+ * Re-expanding an already-complete columnar row (multiple members / full width)
+ * returns that line — never null — so UI can call this again after a merge.
+ */
 export function expandToFullLine(lines: TextLine[], selected: TextLine): TextLine | null {
   const band = Math.max(3, selected.fontSize * 0.5);
   const mates = lines.filter(
     (line) => line.page === selected.page && Math.abs(line.y - selected.y) <= band,
   );
   const runs = mates.flatMap((line) => (line.members?.length ? line.members : [line]));
-  if (runs.length === 0) return null;
+  if (runs.length === 0) {
+    return (selected.members?.length ?? 0) >= 2 && lines.some((line) => line.id === selected.id)
+      ? selected
+      : null;
+  }
   const joined = joinRunsToLine(runs);
-  if (joined.text === selected.text && Math.abs(joined.width - selected.width) < 1) return null;
-  return joined;
+  const alreadyComplete =
+    joined.text === selected.text && Math.abs(joined.width - selected.width) < 1;
+  if (!alreadyComplete) return joined;
+
+  const alreadyColumnar =
+    (selected.members?.length ?? 0) >= 2 || (joined.members?.length ?? 0) >= 2 || mates.length > 1;
+  if (!alreadyColumnar) return null;
+
+  return (
+    mates.find((line) => line.id === selected.id) ??
+    mates.find((line) => line.text === joined.text && Math.abs(line.width - joined.width) < 1) ??
+    selected
+  );
 }
 
 function estimatedShowWidth(show: { text: string; fontSize: number }): number {
