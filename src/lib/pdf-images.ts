@@ -256,7 +256,8 @@ export type ImagePatch = {
   name?: string;
 };
 
-export type AnnotationKind = "rect" | "redact" | "highlight" | "underline" | "note";
+/** `redact` is Cover box (visual only). `erase` is permanent redaction. */
+export type AnnotationKind = "rect" | "redact" | "erase" | "highlight" | "underline" | "note";
 
 export type AnnotationBurn = {
   id: string;

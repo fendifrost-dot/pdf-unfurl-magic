@@ -56,6 +56,14 @@
       "summary": "Full-page bitmap, no text operators. Scan-aware edit / OCR target.",
       "bytes": 2607,
       "maxBytes": 90000
+    },
+    {
+      "file": "redact-secret.pdf",
+      "pages": 1,
+      "kind": "redact-secret",
+      "summary": "KEEP / SECRET / VISIBLE plus a magenta-cyan PNG for permanent redact QA.",
+      "bytes": 1268,
+      "maxBytes": 20000
     }
   ]
 }

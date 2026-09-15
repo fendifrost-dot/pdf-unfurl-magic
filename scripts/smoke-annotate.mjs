@@ -1,7 +1,8 @@
 /**
- * Smoke-check: highlight/note save as real PDF annotations; visual redact
- * burns a black box without removing extractable text; in-place text patches
- * can still run first via applyWorkshopPatches.
+ * Smoke-check: highlight/note save as real PDF annotations; Cover box
+ * burns a black box without removing extractable text; permanent redact
+ * drops SECRET from extractable text; in-place text patches can still run
+ * first via applyWorkshopPatches.
  */
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { applyPageMarks, exportFileName } from "../src/lib/pdf-marks.ts";
@@ -86,6 +87,18 @@ const secretStillThere = await listPageShownText(bytesToArrayBuffer(burned), 1);
 if (!secretStillThere.includes("SECRET")) {
   throw new Error("visual redact must not pretend extractable text is gone");
 }
+
+const erased = await applyPageMarks(probeBytes, [
+  { id: "e", page: 1, kind: "erase", x: 16, y: 90, width: 90, height: 24 },
+]);
+const secretGone = await listPageShownText(bytesToArrayBuffer(erased), 1);
+if (secretGone.some((line) => line.includes("SECRET"))) {
+  throw new Error("permanent redact left extractable SECRET");
+}
+const eraseName = exportFileName("quote", false, [
+  { id: "e", page: 1, kind: "erase", x: 0, y: 0, width: 10, height: 10 },
+]);
+if (eraseName !== "quote-redacted.pdf") throw new Error(`unexpected erase name ${eraseName}`);
 
 console.log("smoke-annotate ok", {
   sample: sample.byteLength,
