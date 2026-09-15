@@ -90,6 +90,8 @@ draw or type a mark, and export. Draw-to-sign uses `signature_pad` (see
 are unchanged. The signed PDF keeps the original page graphics. Single signer. This is
 not DocuSign and not a PKI digital signature.
 
+On `/edit` → Marks, **Cover box** only paints over content (still extractable). **Redact (permanent)** removes intersecting text operators and punches simple image pixels in the exported copy; that cannot be undone. Gaps (Form XObject CTM, JPEG punch, vectors) are listed in `src/lib/pdf-redact.ts`.
+
 ```bash
 npm test   # integrity hash + certificate-page checks
 ```

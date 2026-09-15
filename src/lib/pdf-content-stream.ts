@@ -28,6 +28,8 @@ export type Token = {
   bytes?: Uint8Array;
 };
 
+export type AffineMatrix = [number, number, number, number, number, number];
+
 export type TextShow = {
   /** Inclusive token index of the first operand (or "[" for TJ). */
   start: number;
@@ -42,6 +44,10 @@ export type TextShow = {
   x: number;
   y: number;
   fill: { r: number; g: number; b: number };
+  /** Graphics CTM at the show (for glyph boxes / redaction). */
+  ctm: AffineMatrix;
+  /** Text matrix at the start of the show. */
+  textMatrix: AffineMatrix;
 };
 
 const WS = new Set([0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20]);
@@ -468,7 +474,7 @@ export function hasTextOperators(tokens: Token[]): boolean {
   );
 }
 
-type Matrix = [number, number, number, number, number, number];
+type Matrix = AffineMatrix;
 
 const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
 
@@ -740,6 +746,8 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
         x: pos.x,
         y: pos.y,
         fill: { ...g.fill },
+        ctm: [...g.ctm] as AffineMatrix,
+        textMatrix: [...textMatrix] as AffineMatrix,
       });
       continue;
     }
