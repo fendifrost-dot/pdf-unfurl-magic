@@ -20,6 +20,8 @@ import {
   listPageEmbeddedFonts,
   listPageShownText,
   listPageTextShows,
+  looksLikeAmountText,
+  looksLikeMoneyColumn,
   pageHasWhiteCover,
   splitDraftAcrossColumns,
 } from "./pdf-text-edit";
@@ -131,6 +133,25 @@ describe("groupTextItems", () => {
   });
 });
 
+describe("looksLikeAmountText", () => {
+  it("treats trailing-minus and parenthetical accounting money as amounts", () => {
+    expect(looksLikeAmountText("250.00-")).toBe(true);
+    expect(looksLikeAmountText("250.00 -")).toBe(true);
+    expect(looksLikeAmountText("(250.00)")).toBe(true);
+    expect(looksLikeAmountText("($250.00)")).toBe(true);
+    expect(looksLikeAmountText("$250.00-")).toBe(true);
+    expect(looksLikeAmountText("1,834.34")).toBe(true);
+    expect(looksLikeAmountText("500.00")).toBe(true);
+    expect(looksLikeAmountText("05-22")).toBe(false);
+    expect(looksLikeAmountText("Paid To")).toBe(false);
+
+    expect(looksLikeMoneyColumn("250.00-")).toBe(true);
+    expect(looksLikeMoneyColumn("(250.00)")).toBe(true);
+    expect(looksLikeMoneyColumn("1,834.34")).toBe(true);
+    expect(looksLikeMoneyColumn("4220268")).toBe(false);
+  });
+});
+
 describe("clusterBoxesByColumn", () => {
   it("keeps description fragments together and locks amount x", () => {
     const groups = clusterBoxesByColumn([
@@ -156,6 +177,19 @@ describe("clusterBoxesByColumn", () => {
     expect(groups[0]?.[0]?.text).toMatch(/Paid To/);
     expect(groups[1]?.[0]?.x).toBe(400);
     expect(groups[2]?.[0]?.x).toBe(500);
+  });
+
+  it("splits a trailing-minus debit from the balance on a June-like row", () => {
+    const groups = clusterBoxesByColumn([
+      { x: 14, width: 220, fontSize: 8, text: "05-22 Paid To - Applecard" },
+      { x: 409, width: 48, fontSize: 8, text: "250.00-" },
+      { x: 517, width: 48, fontSize: 8, text: "1,834.34" },
+    ]);
+    expect(groups.map((group) => group.map((box) => box.text).join(" "))).toEqual([
+      "05-22 Paid To - Applecard",
+      "250.00-",
+      "1,834.34",
+    ]);
   });
 });
 

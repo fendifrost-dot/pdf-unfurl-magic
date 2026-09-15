@@ -412,6 +412,126 @@ describe("Apply / Enhance exit contracts", () => {
     expect(members?.find((member) => member.originalText === "4,972.29")?.x).toBe(500);
   });
 
+  it("labels a June Navy Federal debit with a trailing minus as Amount, not Column 2", () => {
+    const texts = ["05-22 Paid To - Applecard", "250.00-", "1,834.34"];
+    expect(memberColumnLabel(texts[0]!, 0, texts)).toBe("Description");
+    expect(memberColumnLabel(texts[1]!, 1, texts)).toBe("Amount");
+    expect(memberColumnLabel(texts[2]!, 2, texts)).toBe("Balance");
+    expect(memberColumnLabel("(250.00)", 1, ["05-22 Paid To - Applecard", "(250.00)", "1,834.34"])).toBe(
+      "Amount",
+    );
+    expect(memberColumnLabel("250.00 -", 1, ["05-22 Paid To - Applecard", "250.00 -", "1,834.34"])).toBe(
+      "Amount",
+    );
+
+    const line = {
+      id: "row",
+      x: 14,
+      y: 520,
+      width: 560,
+      height: 10,
+      fontSize: 8,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "05-22 Paid To - Applecard 250.00- 1,834.34",
+      members: [
+        {
+          id: "desc",
+          x: 14,
+          y: 520,
+          width: 220,
+          height: 10,
+          fontSize: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "05-22 Paid To - Applecard",
+        },
+        {
+          id: "amt",
+          x: 409,
+          y: 520,
+          width: 48,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          text: "250.00-",
+        },
+        {
+          id: "bal",
+          x: 517,
+          y: 520,
+          width: 48,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          text: "1,834.34",
+        },
+      ],
+    };
+    const fields = columnFieldsForLine(line);
+    expect(fields.map((field) => ({ label: field.label, text: field.text, x: field.x }))).toEqual([
+      { label: "Description", text: "05-22 Paid To - Applecard", x: 14 },
+      { label: "Amount", text: "250.00-", x: 409 },
+      { label: "Balance", text: "1,834.34", x: 517 },
+    ]);
+  });
+
+  it("labels a parenthetical debit amount and never leaves currency as Column 2", () => {
+    const line = {
+      id: "row",
+      x: 14,
+      y: 500,
+      width: 560,
+      height: 10,
+      fontSize: 8,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "05-22 Paid To - Applecard (250.00) 1,834.34",
+      members: [
+        {
+          id: "desc",
+          x: 14,
+          y: 500,
+          width: 220,
+          height: 10,
+          fontSize: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "05-22 Paid To - Applecard",
+        },
+        {
+          id: "amt",
+          x: 409,
+          y: 500,
+          width: 52,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          text: "(250.00)",
+        },
+        {
+          id: "bal",
+          x: 517,
+          y: 500,
+          width: 48,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          text: "1,834.34",
+        },
+      ],
+    };
+    const fields = columnFieldsForLine(line);
+    expect(fields.map((field) => field.label)).toEqual(["Description", "Amount", "Balance"]);
+    expect(fields[1]).toMatchObject({ text: "(250.00)", x: 409 });
+    expect(fields[2]).toMatchObject({ text: "1,834.34", x: 517 });
+    expect(fields.some((field) => /^Column \d+$/.test(field.label))).toBe(false);
+  });
+
   it("locates patch members at originX and sets targetX after overlay align", () => {
     const line = {
       id: "row",
