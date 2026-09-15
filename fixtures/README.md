@@ -19,6 +19,8 @@ npm run fixtures:generate
 | `scan-image-only.pdf` | 1 | Full-page bitmap, no text operators. Scan-aware Enhance / OCR. |
 | `redact-secret.pdf` | 1 | `KEEP` / `SECRET` / `VISIBLE` plus a magenta-cyan PNG. Permanent redact QA. |
 
+AcroForm fill/flatten tests generate their own sample via `buildSampleAcroFormPdf()` in `src/lib/pdf-acroform.ts` (text, checkbox, radio, dropdown). Run `fixtures:generate` after adding a committed `acroform-simple.pdf` builder if you want that file on disk for manual QA.
+
 Sizes are capped in `manifest.json` (`maxBytes`). The smoke harness fails if a fixture grows past that cap.
 
 Feature tests can import the loader without touching product code:
