@@ -6,8 +6,10 @@ import {
   findFuzzySpan,
   hasWhiteCoverRect,
   replaceShowText,
+  sameVisibleRun,
   softMatchKey,
   spliceHaystack,
+  streamTextMatchesVisual,
   tokenizeContentStream,
   tokensToBytes,
 } from "./pdf-content-stream";
@@ -86,5 +88,17 @@ describe("statement fragment matching", () => {
   it("maps a stripped thousands comma back onto 2,500.00", () => {
     expect(findFuzzySpan("2,500.00", "2 500.00")).toEqual({ start: 0, end: 8 });
     expect(spliceHaystack("POS 2,500.00 BILL", "2 500.00", "2,750.00")).toBe("POS 2,750.00 BILL");
+  });
+
+  it("treats comma-stripped PDF.js amounts as the same visible run", () => {
+    expect(sameVisibleRun("2,500.00", "2 500.00")).toBe(true);
+    expect(sameVisibleRun("3DLG 7R", "Paid To")).toBe(false);
+    expect(
+      streamTextMatchesVisual(
+        "06-06 POS Debit- Debit Card 6205 06-26 Amazon",
+        "06 POS Debit- Debit Card 6205",
+      ),
+    ).toBe(true);
+    expect(streamTextMatchesVisual("3DLG 7R", "Paid To")).toBe(false);
   });
 });

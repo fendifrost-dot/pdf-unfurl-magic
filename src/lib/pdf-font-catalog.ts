@@ -104,8 +104,8 @@ export function catalogEmbeddedFonts(
       reason = "Symbol / dingbat font — replacement would write .notdef glyphs.";
     } else if (info.cid && info.subset) {
       reason = originalText
-        ? `Embedded CID subset. Safe only for characters already in “${originalText}”. New glyphs need a system or Standard 14 stand-in.`
-        : "Embedded CID subset. Safe only for glyphs already in this run.";
+        ? `Embedded CID subset. Safe only for characters already in “${originalText}”. New glyphs use bundled Liberation/Noto — no Adobe Fonts purchase required.`
+        : "Embedded CID subset. Safe only for glyphs already in this run. New glyphs use bundled Liberation/Noto — no Adobe Fonts purchase required.";
     } else if (info.subset) {
       reason =
         "Embedded subset. Safe for characters already in this run; new letters need a stand-in.";
@@ -148,7 +148,7 @@ export function catalogBundledUnicodeFonts(match: FontMatch): CatalogFont[] {
       italic,
       safety: "safe",
       reason:
-        "Bundled metric-compatible Helvetica stand-in (PRIOR_ART #1). Embedded as a subset when Standard 14 cannot encode the text — never a Creative Cloud download.",
+        "Bundled metric-compatible Helvetica stand-in (PRIOR_ART #1). Embedded as a subset when the original custom/CID/WinAnsi font cannot encode the text — never an Adobe Fonts download.",
     },
     {
       id: "bundled:noto-sans",
@@ -177,7 +177,7 @@ export function catalogStandardFallbacks(match: FontMatch): CatalogFont[] {
       reason:
         match.kind === "unsafe"
           ? "Symbol stand-in is blocked."
-          : `Metric-matched ${match.label}. No Creative Cloud download.`,
+          : `Metric-matched ${match.label}. Bundled Liberation/Noto is used when the original cannot be rewritten in place. No Adobe Fonts purchase required.`,
       standard: match.standard,
     },
   ];
@@ -273,7 +273,19 @@ export function mergeFontCatalog(input: {
   return out;
 }
 
-export function defaultFontChoiceId(catalog: CatalogFont[], selectedKey?: string): string {
+export function defaultFontChoiceId(
+  catalog: CatalogFont[],
+  selectedKey?: string,
+  preferBundled = false,
+): string {
+  if (preferBundled) {
+    const bundled = catalog.find(
+      (item) => item.source === "bundled" && item.safety === "safe" && /liberation/i.test(item.id),
+    );
+    if (bundled) return bundled.id;
+    const anyBundled = catalog.find((item) => item.source === "bundled" && item.safety === "safe");
+    if (anyBundled) return anyBundled.id;
+  }
   const embedded = selectedKey
     ? catalog.find((item) => item.resourceKey === selectedKey && item.safety === "safe")
     : catalog.find((item) => item.source === "embedded" && item.safety === "safe");

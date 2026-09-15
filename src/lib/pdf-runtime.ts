@@ -7,6 +7,7 @@ import { installMapPolyfills } from "./map-polyfill";
 import { isDesktopApp } from "./desktop";
 import { saveBytes } from "./file-export";
 import { listPageTextShows } from "./pdf-text-edit";
+import { sameVisibleRun } from "./pdf-content-stream";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -43,7 +44,13 @@ export async function openDocument(bytes: ArrayBuffer): Promise<PDFDocumentProxy
 export type TextLine = {
   id: string;
   page: number;
+  /** Unicode / visual string the user reads — never raw CID bytes. */
   text: string;
+  /**
+   * Content-stream decode when it differs from `text` (custom / CID encodings).
+   * Used only to locate Tj operators; never shown in the textarea.
+   */
+  rawText?: string;
   /** PDF user-space coordinates, origin bottom-left. Baseline is `y`. */
   x: number;
   y: number;
@@ -56,6 +63,9 @@ export type TextLine = {
   source?: "pdf" | "ocr" | "content-stream" | "pdfjs";
   confidence?: number;
   hasTextOperator?: boolean;
+  /** `line` is a merged visual row; `run` is a tighter fragment (shift-click). */
+  kind?: "run" | "line";
+  members?: TextLine[];
 };
 
 export type RawTextItem = {
@@ -84,7 +94,8 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
   for (const item of raw) {
     const last = groups[groups.length - 1];
     const anchor = last?.[last.length - 1];
-    const sameBaseline = !!anchor && Math.abs(anchor.y - item.y) <= Math.max(2, item.h * 0.35);
+    const sameBaseline =
+      !!anchor && Math.abs(anchor.y - item.y) <= Math.max(3, Math.max(item.h, anchor.h) * 0.45);
     const sameFont = !!anchor && anchor.fontName === item.fontName;
     const gap = anchor ? item.x - (anchor.x + anchor.w) : 0;
     const glue =
@@ -92,8 +103,9 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       (PUNCT_ONLY.test(item.str) ||
         PUNCT_ONLY.test(anchor.str) ||
         (TRAILING_MONEY.test(anchor.str) && /^\d/.test(item.str)));
-    const wordGap = Math.max(10, Math.max(item.h, anchor?.h ?? 0) * 1.15);
-    if (last && sameBaseline && sameFont && gap >= -1 && (gap <= wordGap || glue)) {
+    const wordGap = Math.max(10, Math.max(item.h, anchor?.h ?? 0) * 1.65);
+    const overlapOk = gap >= -Math.max(1, Math.max(item.h, anchor?.h ?? 0) * 0.65);
+    if (last && sameBaseline && sameFont && overlapOk && (gap <= wordGap || glue)) {
       last.push(item);
     } else {
       groups.push([item]);
@@ -131,6 +143,7 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       fontFamily: first?.fontFamily ?? "",
       source: "pdfjs",
       hasTextOperator: true,
+      kind: "run",
     };
   });
 }
@@ -158,6 +171,204 @@ function shouldInsertJoinSpace(
   if (TRAILING_MONEY.test(prevText) && /^\d/.test(next.str)) return false;
   if (PUNCT_ONLY.test(next.str) && next.str.trim() !== "") return false;
   return next.x - cursor > fontSize * 0.22;
+}
+
+/**
+ * Content-stream bytes decoded as WinAnsi/latin1 for a custom or CID font
+ * look like this — not like the ToUnicode string PDF.js paints.
+ */
+export function looksGarbled(text: string): boolean {
+  const s = text.replace(/\s+/g, " ").trim();
+  if (!s) return true;
+  const chars = [...s];
+  if ((s.match(/\\/g) || []).length >= 2) return true;
+  if (/\\[A-Za-z]/.test(s)) return true;
+  const printable = chars.filter((ch) => {
+    const cp = ch.codePointAt(0) ?? 0;
+    return (cp >= 0x20 && cp <= 0x7e) || cp === 0x09 || cp >= 0xa0;
+  }).length;
+  return printable / chars.length < 0.8;
+}
+
+/**
+ * UI / textarea value: PDF.js ToUnicode when the stream decode is mojibake
+ * or a different encoding. Prefer the stream only when both strings are the
+ * same visible run (so thousands commas survive).
+ */
+export function preferReadableText(streamText: string, visualText: string): string {
+  const stream = streamText.replace(/[ \t]+/g, " ").trim();
+  const visual = visualText.replace(/[ \t]+/g, " ").trim();
+  if (!visual) return stream;
+  if (!stream) return visual;
+  if (stream === visual) return stream;
+  const streamBad = looksGarbled(stream);
+  const visualBad = looksGarbled(visual);
+  if (streamBad && !visualBad) return visual;
+  if (!streamBad && visualBad) return stream;
+  if (!streamBad && !visualBad && sameVisibleRun(stream, visual)) {
+    if (/[,$€£¥]/.test(stream) && !/[,$€£¥]/.test(visual)) return stream;
+    return stream.length >= visual.length ? stream : visual;
+  }
+  return visualBad ? stream : visual;
+}
+
+const COLUMN_EM = 3.2;
+
+function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: number): string {
+  const fake: RawTextItem = {
+    str: next.text,
+    x: next.x,
+    y: next.y,
+    w: next.width,
+    h: next.fontSize,
+    fontName: next.fontName,
+    fontFamily: next.fontFamily,
+  };
+  const recovered = recoverThousandsComma(prevText, fake, prev.x + prev.width, fontSize);
+  if (recovered) return recovered;
+  if (shouldInsertJoinSpace(prevText, fake, prev.x + prev.width, fontSize)) return " ";
+  return "";
+}
+
+export function joinRunsToLine(runs: TextLine[]): TextLine {
+  const sorted = [...runs].sort((a, b) => a.x - b.x);
+  const first = sorted[0];
+  if (!first) {
+    return {
+      id: "empty",
+      page: 1,
+      text: "",
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      fontSize: 10,
+      fontName: "",
+      fontFamily: "",
+      kind: "line",
+      members: [],
+    };
+  }
+  if (sorted.length === 1) {
+    return { ...first, kind: "line", members: first.members ?? [first] };
+  }
+  const x = Math.min(...sorted.map((r) => r.x));
+  const right = Math.max(...sorted.map((r) => r.x + r.width));
+  const y = Math.min(...sorted.map((r) => r.y));
+  const fontSize = Math.max(...sorted.map((r) => r.fontSize));
+  let text = "";
+  const rawParts: string[] = [];
+  let prev: TextLine | null = null;
+  for (const run of sorted) {
+    if (prev) text += joinRunGap(prev, run, text, fontSize);
+    text += run.text;
+    rawParts.push(run.rawText ?? run.text);
+    prev = run;
+  }
+  const display = text.replace(/[ \t]+/g, " ").trim();
+  const rawJoined = rawParts
+    .join("")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+  return {
+    id: `p${first.page}-l${Math.round(x)}-${Math.round(y)}`,
+    page: first.page,
+    text: display,
+    ...(rawJoined && rawJoined !== display ? { rawText: rawJoined } : {}),
+    x,
+    y,
+    width: Math.max(right - x, fontSize * 0.6),
+    height: fontSize * 1.18,
+    fontSize,
+    fontName: first.fontName,
+    fontFamily: first.fontFamily,
+    source: first.source,
+    hasTextOperator: sorted.some((r) => r.hasTextOperator !== false),
+    kind: "line",
+    members: sorted.flatMap((run) => (run.members?.length ? run.members : [run])),
+  };
+}
+
+/**
+ * Merge adjacent runs on one baseline into a clickable row. A large gutter
+ * (amount column) stays a separate box so a total can still be edited alone.
+ * Use `expandToFullLine` to include those columns.
+ */
+export function mergeLinesByBaseline(runs: TextLine[]): TextLine[] {
+  if (runs.length === 0) return [];
+  if (runs.length === 1) return [joinRunsToLine(runs)];
+  const sorted = [...runs].sort((a, b) => b.y - a.y || a.x - b.x);
+  const bands: TextLine[][] = [];
+  for (const run of sorted) {
+    const band = bands[bands.length - 1];
+    const anchor = band?.[0];
+    const yTol = Math.max(3, Math.max(run.fontSize, anchor?.fontSize ?? run.fontSize) * 0.5);
+    if (band && anchor && Math.abs(anchor.y - run.y) <= yTol) band.push(run);
+    else bands.push([run]);
+  }
+  const out: TextLine[] = [];
+  for (const band of bands) {
+    band.sort((a, b) => a.x - b.x);
+    let current: TextLine[] = [];
+    for (const run of band) {
+      const prev = current[current.length - 1];
+      if (!prev) {
+        current = [run];
+        continue;
+      }
+      const gap = run.x - (prev.x + prev.width);
+      const em = Math.max(run.fontSize, prev.fontSize, 8);
+      const columnGap = Math.max(COLUMN_EM * em, 36);
+      if (gap > columnGap) {
+        out.push(joinRunsToLine(current));
+        current = [run];
+      } else {
+        current.push(run);
+      }
+    }
+    if (current.length) out.push(joinRunsToLine(current));
+  }
+  return out;
+}
+
+/** Join every run on the selected baseline, including a far-right amount column. */
+export function expandToFullLine(lines: TextLine[], selected: TextLine): TextLine | null {
+  const band = Math.max(3, selected.fontSize * 0.5);
+  const mates = lines.filter(
+    (line) => line.page === selected.page && Math.abs(line.y - selected.y) <= band,
+  );
+  const runs = mates.flatMap((line) => (line.members?.length ? line.members : [line]));
+  if (runs.length === 0) return null;
+  const joined = joinRunsToLine(runs);
+  if (joined.text === selected.text && Math.abs(joined.width - selected.width) < 1) return null;
+  return joined;
+}
+
+function attachStreamHints(
+  run: TextLine,
+  shows: Array<{ text: string; x: number; y: number; fontSize: number }>,
+): TextLine {
+  const band = Math.max(3, run.fontSize * 0.5);
+  const hits = shows.filter((show) => {
+    if (Math.abs(show.y - run.y) > band) return false;
+    const showW = Math.max(show.fontSize * 0.6, show.text.length * show.fontSize * 0.5);
+    const overlap = Math.min(show.x + showW, run.x + run.width) - Math.max(show.x, run.x);
+    return overlap > Math.min(showW, run.width) * 0.25;
+  });
+  if (hits.length === 0) return run;
+  const streamText = hits
+    .slice()
+    .sort((a, b) => a.x - b.x)
+    .map((show) => show.text)
+    .join("");
+  const display = preferReadableText(streamText, run.text);
+  return {
+    ...run,
+    text: display,
+    ...(streamText && streamText !== display ? { rawText: streamText } : {}),
+    source: "content-stream",
+    hasTextOperator: true,
+  };
 }
 
 function collectPdfjsItems(
@@ -195,9 +406,10 @@ function collectPdfjsItems(
 }
 
 /**
- * Group PDF.js text items into visual runs with a bounding box in PDF space.
- * When `sourceBytes` is provided, content-stream shows win: one Tj/TJ = one
- * clickable run, with commas taken from the stream rather than PDF.js.
+ * Group PDF.js text items into visual lines with a bounding box in PDF space.
+ * `item.str` from getTextContent (ToUnicode) is the textarea value. Content-
+ * stream bytes are attached as `rawText` when they differ so rewrite can
+ * still find the Tj; they are never shown as the primary edit string.
  */
 export async function extractLines(
   doc: PDFDocumentProxy,
@@ -219,52 +431,18 @@ export async function extractLines(
     }>,
     content.styles as Record<string, { fontFamily?: string } | undefined>,
   );
-  const pdfjsLines = groupTextItems(raw, pageNumber);
+  const pdfjsRuns = groupTextItems(raw, pageNumber);
 
-  if (!sourceBytes) return pdfjsLines;
+  if (!sourceBytes) return mergeLinesByBaseline(pdfjsRuns);
 
   try {
     const shows = await listPageTextShows(sourceBytes, pageNumber);
     if (shows.length === 0) return [];
-    const showItems: RawTextItem[] = shows.map((show) => {
-      const fontSize = show.fontSize || 10;
-      return {
-        str: show.text,
-        x: show.x,
-        y: show.y,
-        w: Math.max(fontSize * 0.6, show.text.length * fontSize * 0.52),
-        h: fontSize,
-        fontName: show.fontName || "",
-        fontFamily: "",
-      };
-    });
-    return groupTextItems(showItems, pageNumber).map((line, index) => {
-      const mapped = raw.filter((item) => {
-        if (Math.abs(item.y - line.y) > Math.max(3, line.fontSize * 0.4)) return false;
-        const itemRight = item.x + item.w;
-        const lineRight = line.x + line.width;
-        const overlap = Math.min(itemRight, lineRight) - Math.max(item.x, line.x);
-        return overlap > Math.min(item.w, line.width) * 0.35;
-      });
-      const x = mapped.length ? Math.min(...mapped.map((g) => g.x), line.x) : line.x;
-      const right = mapped.length
-        ? Math.max(...mapped.map((g) => g.x + g.w), line.x + line.width)
-        : line.x + line.width;
-      const pdfjsHint = mapped[0];
-      return {
-        ...line,
-        id: `p${pageNumber}-s${index}-${Math.round(x)}-${Math.round(line.y)}`,
-        x,
-        width: Math.max(right - x, line.fontSize * 0.6),
-        fontName: line.fontName || pdfjsHint?.fontName || "",
-        fontFamily: pdfjsHint?.fontFamily || line.fontFamily,
-        source: "content-stream" as const,
-        hasTextOperator: true,
-      };
-    });
+    const hinted = pdfjsRuns.map((run) => attachStreamHints(run, shows));
+    return mergeLinesByBaseline(hinted);
   } catch (error) {
     console.error("content-stream text extract failed; using PDF.js runs", error);
-    return pdfjsLines;
+    return mergeLinesByBaseline(pdfjsRuns);
   }
 }
 

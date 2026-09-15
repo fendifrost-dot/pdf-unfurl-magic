@@ -22,7 +22,7 @@ import { collectTextShows, normalizePdfText, tokenizeContentStream } from "./pdf
 import { loadPdfDocument } from "./pdf-io";
 import { fitFontSize } from "./text-helpers";
 import { canvasToJpeg } from "./image-process";
-import { renderPageToImageData, type TextLine } from "./pdf-runtime";
+import { renderPageToImageData, looksGarbled, type TextLine } from "./pdf-runtime";
 import { enhanceImage } from "./scan/enhance";
 import { canvasFromImageData } from "./scan/image";
 import { recognizePageLines, groupOcrWords } from "./scan/ocr";
@@ -192,8 +192,9 @@ export function classifyPageScan(input: {
   imageCount: number;
   pdfJsLineCount: number;
   matchRatio: number;
+  garbledRatio?: number;
 }): Pick<PageScanReport, "looksScanned" | "reason" | "message"> {
-  const { showCount, imageCount, pdfJsLineCount, matchRatio } = input;
+  const { showCount, imageCount, pdfJsLineCount, matchRatio, garbledRatio = 0 } = input;
 
   if (showCount === 0 && imageCount > 0) {
     return {
@@ -213,7 +214,7 @@ export function classifyPageScan(input: {
     };
   }
 
-  if (imageCount > 0 && pdfJsLineCount >= 1 && matchRatio < 0.35) {
+  if (imageCount > 0 && pdfJsLineCount >= 1 && matchRatio < 0.35 && garbledRatio < 0.45) {
     return {
       looksScanned: true,
       reason: "ocr-ghost",
@@ -257,11 +258,16 @@ export async function inspectPageScan(
     acc.shows,
     pdfJsLineTexts,
   );
+  const garbledRatio =
+    acc.shows.length === 0
+      ? 0
+      : acc.shows.filter((show) => looksGarbled(show)).length / acc.shows.length;
   const classified = classifyPageScan({
     showCount: acc.shows.length,
     imageCount: acc.images,
     pdfJsLineCount,
     matchRatio,
+    garbledRatio,
   });
 
   return {

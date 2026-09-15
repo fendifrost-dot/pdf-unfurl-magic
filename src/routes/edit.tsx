@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
   downloadBytes,
+  expandToFullLine,
   extractLines,
   openDocument,
   renderPage,
@@ -126,6 +127,20 @@ type MarkTool = AnnotationBurn["kind"];
 
 const CANVAS_WIDTH = 720;
 
+function findLineOrMember(lines: TextLine[], id: string): TextLine | undefined {
+  for (const line of lines) {
+    if (line.id === id) return line;
+    const member = line.members?.find((run) => run.id === id);
+    if (member) return member;
+  }
+  return undefined;
+}
+
+function parentLineFor(lines: TextLine[], selected: TextLine): TextLine | undefined {
+  if (lines.some((line) => line.id === selected.id)) return selected;
+  return lines.find((line) => line.members?.some((run) => run.id === selected.id));
+}
+
 function CommittedImageOverlay({
   edit,
   scale,
@@ -216,7 +231,7 @@ function Editor() {
   const scanByPageRef = useRef(scanByPage);
   scanByPageRef.current = scanByPage;
 
-  const selected = selectedId ? lines.find((l) => l.id === selectedId) : undefined;
+  const selected = selectedId ? findLineOrMember(lines, selectedId) : undefined;
   const selectedImage = selectedImageId
     ? images.find((img) => img.id === selectedImageId)
     : undefined;
@@ -231,6 +246,9 @@ function Editor() {
   const scanSession = scanByPage[page] ?? emptyScanSession();
   const scanMode = !!scanReport?.looksScanned || scanSession.ocrLines.length > 0;
   const selectedIsOcr = selected?.source === "ocr";
+  const selectedParent = selected ? parentLineFor(lines, selected) : undefined;
+  const editingRun = !!selected && !!selectedParent && selectedParent.id !== selected.id;
+  const fullLine = selected && !selectedIsOcr ? expandToFullLine(lines, selected) : null;
 
   const clearPreview = () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -476,6 +494,7 @@ function Editor() {
       fontSize: selected.fontSize,
       text: draft,
       originalText: selected.text,
+      ...(selected.rawText ? { rawText: selected.rawText } : {}),
       fontName: selected.fontName,
       fontFamily: selected.fontFamily,
     };
@@ -497,7 +516,14 @@ function Editor() {
           setFontChoiceId((prev) =>
             catalog.some((item) => item.id === prev)
               ? prev
-              : defaultFontChoiceId(catalog, result.resourceKey || selected.fontName),
+              : defaultFontChoiceId(
+                  catalog,
+                  result.resourceKey || selected.fontName,
+                  result.method === "redraw-unicode" ||
+                    !!result.embeddedFonts?.some(
+                      (font) => font.cid && font.key === (result.resourceKey || selected.fontName),
+                    ),
+                ),
           );
         })
         .catch(() => {
@@ -525,6 +551,20 @@ function Editor() {
     setSelectedId(line.id);
     setDraft(edits[line.id]?.text ?? line.text);
     setMode("text");
+  };
+
+  const expandSelectedLine = () => {
+    if (!selected) return;
+    const joined = expandToFullLine(lines, selected);
+    if (!joined) return;
+    const band = Math.max(3, selected.fontSize * 0.5);
+    setLines((prev) => {
+      const kept = prev.filter(
+        (line) => !(line.page === selected.page && Math.abs(line.y - selected.y) <= band),
+      );
+      return [...kept, joined].sort((a, b) => b.y - a.y || a.x - b.x);
+    });
+    select(joined);
   };
 
   const selectImage = (image: PdfImageRegion) => {
@@ -772,6 +812,7 @@ function Editor() {
           fontSize: line.fontSize,
           text,
           originalText: line.text,
+          ...(line.rawText ? { rawText: line.rawText } : {}),
           fontName: line.fontName,
           fontFamily: line.fontFamily,
           ...(option
@@ -855,13 +896,25 @@ function Editor() {
           <button
             key={line.id}
             type="button"
-            onClick={() => select(line)}
+            onClick={(event) => {
+              if (event.shiftKey && line.members && line.members.length > 1) {
+                const rect = event.currentTarget.getBoundingClientRect();
+                const rel = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+                const pdfX = line.x + rel * line.width;
+                const member = [...line.members]
+                  .reverse()
+                  .find((run) => pdfX >= run.x - 1 && pdfX <= run.x + run.width + 1);
+                select(member ?? line);
+                return;
+              }
+              select(line);
+            }}
             title={line.text}
             data-text={line.text}
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
               "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors [@media(pointer:fine)]:min-h-0",
-              selectedId === line.id
+              selectedId === line.id || line.members?.some((run) => run.id === selectedId)
                 ? "border-primary bg-primary/25"
                 : isEdited
                   ? "border-success/70 bg-success/20"
@@ -1151,7 +1204,7 @@ function Editor() {
                     ? scanSession.ocrLines.length
                       ? `${scanSession.ocrLines.length} OCR lines on this page. Click one to edit; export writes a text layer on the page image.`
                       : "This page looks scanned. Ghost boxes are not real text operators — use Enhance page & OCR in the side panel."
-                    : `${lines.length} text runs on this page. Hover to see the boxes; click one to edit that run only.`)}
+                    : `${lines.length} text line${lines.length === 1 ? "" : "s"} on this page. Click a row to edit the whole line; Shift-click a fragment for one run.`)}
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
@@ -1332,7 +1385,11 @@ function Editor() {
                   ) : (
                     <>
                       <p className="eyebrow">
-                        {selectedIsOcr ? "Editing one OCR line" : "Editing one run"}
+                        {selectedIsOcr
+                          ? "Editing one OCR line"
+                          : editingRun
+                            ? "Editing one run"
+                            : "Editing one line"}
                       </p>
                       <p className="text-gauge mt-2 text-xs text-muted-foreground">
                         page {selected.page} · {selected.fontSize.toFixed(1)}pt ·{" "}
@@ -1390,6 +1447,18 @@ function Editor() {
                           <Scissors className="mr-1.5 size-3.5" /> Shorten to fit
                         </Button>
                       </div>
+
+                      {fullLine && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="mt-3 w-full"
+                          onClick={expandSelectedLine}
+                          title="Include every run on this baseline, including the amount column"
+                        >
+                          Expand to full line
+                        </Button>
+                      )}
 
                       <div className="mt-4 flex gap-2">
                         <Button

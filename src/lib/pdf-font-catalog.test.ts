@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { StandardFonts } from "pdf-lib";
-import { catalogEmbeddedFonts, mergeFontCatalog } from "./pdf-font-catalog";
+import { catalogEmbeddedFonts, defaultFontChoiceId, mergeFontCatalog } from "./pdf-font-catalog";
 import { matchFont } from "./pdf-font-match";
 
 describe("font catalog", () => {
@@ -53,6 +53,8 @@ describe("font catalog", () => {
     expect(embedded[0]?.label).toBe("MyriadPro-Regular");
     expect(embedded[0]?.reason).not.toMatch(/Creative Cloud|download/i);
     expect(embedded[0]?.reason).toMatch(/subset/i);
+    expect(embedded[0]?.reason).toMatch(/Liberation\/Noto/);
+    expect(embedded[0]?.reason).toMatch(/no Adobe Fonts purchase required/i);
   });
 
   it("offers Helvetica as a Standard 14 stand-in", () => {
@@ -62,5 +64,24 @@ describe("font catalog", () => {
     });
     expect(catalog.some((item) => item.standard === StandardFonts.Helvetica)).toBe(true);
     expect(catalog.some((item) => item.source === "bundled")).toBe(true);
+  });
+
+  it("defaults CID / Unicode redraws to bundled Liberation instead of the embedded face", () => {
+    const catalog = mergeFontCatalog({
+      embedded: [
+        {
+          key: "F1",
+          baseFont: "CWCINO+HelveticaNeueWorld-55R",
+          encoding: "Identity-H",
+          subset: true,
+          standard: false,
+          cid: true,
+        },
+      ],
+      selectedKey: "F1",
+      originalText: "Paid To",
+      match: matchFont({ baseFont: "HelveticaNeueWorld-55R" }),
+    });
+    expect(defaultFontChoiceId(catalog, "F1", true)).toBe("bundled:liberation-sans");
   });
 });

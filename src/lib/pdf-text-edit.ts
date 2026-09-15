@@ -44,6 +44,7 @@ import {
   replaceShowText,
   softMatchKey,
   spliceHaystack,
+  streamTextMatchesVisual,
   textMatchKey,
   tokenizeContentStream,
   tokensToBytes,
@@ -75,6 +76,8 @@ export type TextPatch = {
   fontSize: number;
   text: string;
   originalText?: string;
+  /** Content-stream decode when it differs from originalText (CID / custom encoding). */
+  rawText?: string;
   fontName?: string;
   fontFamily?: string;
   fontChoice?: FontChoice;
@@ -220,15 +223,25 @@ function writeStream(doc: PDFDocument, entry: PageStream, page: PDFPage) {
 
 type FontInfo = EmbeddedFontInfo;
 
+function readEncodingName(doc: PDFDocument, fontDict: PDFDict): string {
+  const raw = fontDict.get(PDFName.of("Encoding"));
+  const obj = raw instanceof PDFRef ? doc.context.lookup(raw) : raw;
+  if (obj instanceof PDFName) return obj.decodeText();
+  if (obj instanceof PDFDict) {
+    const base = obj.lookupMaybe(PDFName.of("BaseEncoding"), PDFName);
+    return base?.decodeText() || "Custom";
+  }
+  return "";
+}
+
 function readFontDict(doc: PDFDocument, fonts: PDFDict, into: Map<string, FontInfo>) {
   for (const [name, value] of fonts.entries()) {
     const dict = doc.context.lookup(value);
     if (!(dict instanceof PDFDict)) continue;
     const base = dict.lookupMaybe(PDFName.of("BaseFont"), PDFName);
-    const encoding = dict.lookupMaybe(PDFName.of("Encoding"), PDFName);
     const subtype = dict.lookupMaybe(PDFName.of("Subtype"), PDFName);
     const baseFont = base?.decodeText() ?? "";
-    const encodingName = encoding?.decodeText() ?? "";
+    const encodingName = readEncodingName(doc, dict);
     const subtypeName = subtype?.decodeText() ?? "";
     into.set(name.decodeText(), {
       key: name.decodeText(),
@@ -301,8 +314,46 @@ function scoreShows(shows: TextShow[], patch: TextPatch, original: string): numb
   return textScore - Math.hypot(first.x - patch.x, first.y - patch.y);
 }
 
+function patchNeedles(patch: TextPatch, original: string): string[] {
+  const out: string[] = [];
+  for (const candidate of [original, patch.rawText]) {
+    const trimmed = candidate?.trim();
+    if (trimmed && !out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
+}
+
 function sameBaseline(a: TextShow, b: TextShow): boolean {
-  return Math.abs(a.y - b.y) <= Math.max(2, Math.max(a.fontSize, b.fontSize) * 0.35);
+  return Math.abs(a.y - b.y) <= Math.max(2, Math.max(a.fontSize, b.fontSize) * 0.5);
+}
+
+function showWidth(show: TextShow): number {
+  return Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5);
+}
+
+function showOverlapsPatch(show: TextShow, patch: TextPatch): boolean {
+  const band = Math.max(4, Math.max(show.fontSize, patch.fontSize || 10) * 0.55);
+  if (Math.abs(show.y - patch.y) > band) return false;
+  const pad = Math.max(4, (patch.fontSize || 10) * 0.3);
+  const overlap =
+    Math.min(show.x + showWidth(show), patch.x + patch.width + pad) -
+    Math.max(show.x, patch.x - pad);
+  return overlap > 0;
+}
+
+function findShowsByBox(streams: PageStream[], patch: TextPatch): LocatedShows | null {
+  let best: LocatedShows | null = null;
+  for (const stream of streams) {
+    const hits = collectTextShows(stream.tokens).filter((show) => showOverlapsPatch(show, patch));
+    if (hits.length === 0) continue;
+    hits.sort((a, b) => a.x - b.x);
+    const first = hits[0];
+    if (!first) continue;
+    const score =
+      520 - Math.hypot(first.x - patch.x, first.y - patch.y) + Math.min(hits.length, 40);
+    if (!best || score > best.score) best = { stream, shows: hits, score };
+  }
+  return best;
 }
 
 function findShows(
@@ -311,34 +362,44 @@ function findShows(
   original: string,
 ): { stream: PageStream; shows: TextShow[] } | null {
   let best: LocatedShows | null = null;
-  const consider = (stream: PageStream, shows: TextShow[], current: LocatedShows | null) => {
-    const score = scoreShows(shows, patch, original);
+  const consider = (
+    stream: PageStream,
+    shows: TextShow[],
+    needle: string,
+    current: LocatedShows | null,
+  ) => {
+    const score = scoreShows(shows, patch, needle);
     if (score === null) return current;
     if (!current || score > current.score) return { stream, shows, score };
     return current;
   };
 
-  for (const stream of streams) {
-    const shows = collectTextShows(stream.tokens);
-    for (let i = 0; i < shows.length; i++) {
-      const first = shows[i];
-      if (!first) continue;
-      best = consider(stream, [first], best);
-      const group = [first];
-      for (let j = i + 1; j < shows.length && group.length < 16; j++) {
-        const next = shows[j];
-        if (!next || !sameBaseline(first, next)) break;
-        if (next.x + 4 < group[group.length - 1]!.x) break;
-        group.push(next);
-        best = consider(stream, [...group], best);
+  for (const needle of patchNeedles(patch, original)) {
+    for (const stream of streams) {
+      const shows = collectTextShows(stream.tokens);
+      for (let i = 0; i < shows.length; i++) {
+        const first = shows[i];
+        if (!first) continue;
+        best = consider(stream, [first], needle, best);
+        const group = [first];
+        for (let j = i + 1; j < shows.length && group.length < 80; j++) {
+          const next = shows[j];
+          if (!next || !sameBaseline(first, next)) break;
+          if (next.x + 4 < group[group.length - 1]!.x) break;
+          group.push(next);
+          best = consider(stream, [...group], needle, best);
+        }
       }
     }
   }
 
   if (best) return { stream: best.stream, shows: best.shows };
 
+  const boxed = findShowsByBox(streams, patch);
+  if (boxed) return { stream: boxed.stream, shows: boxed.shows };
+
   // Position fallback: same baseline, nearby x, similar digits/letters.
-  const origLoose = looseAmountKey(original);
+  const origLoose = looseAmountKey(original) || looseAmountKey(patch.rawText ?? "");
   if (!origLoose) return null;
   let positional: LocatedShows | null = null;
   for (const stream of streams) {
@@ -418,8 +479,10 @@ function canReuseEmbeddedFont(
   original: string,
   next: string,
   show?: TextShow,
+  visual?: string,
 ): boolean {
   if (!info) return false;
+  if (visual && visual.trim() && !streamTextMatchesVisual(original, visual)) return false;
   if (info.cid) {
     return !!(show && encodeReusingGlyphs(original, show.bytes, next));
   }
@@ -695,20 +758,30 @@ export async function inspectTextPatch(
     baseFont: fontInfo?.baseFont,
   });
   const write = located ? resolveWrite(located, original, patch.text) : null;
+  const encodingMismatch =
+    !!write && !!original.trim() && !streamTextMatchesVisual(write.glyphSource, original);
   const reuse =
-    located && write ? canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head) : false;
+    located && write
+      ? canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head, original)
+      : false;
   const winAnsiMissing = charsMissingFromWinAnsi(write?.text ?? patch.text);
   let missingGlyphs = reuse ? [] : winAnsiMissing;
   let unicodeRedraw = false;
   let unicodeLabel: string | undefined;
-  if (!reuse && winAnsiMissing.length > 0 && match.kind !== "unsafe") {
+  const preferUnicodeStandin =
+    !reuse &&
+    match.kind !== "unsafe" &&
+    (winAnsiMissing.length > 0 || !!fontInfo?.cid || encodingMismatch);
+  if (preferUnicodeStandin) {
     const fallback = await resolveUnicodeFallback(write?.text ?? patch.text, match);
     if (fallback.ok) {
       missingGlyphs = [];
       unicodeRedraw = true;
       unicodeLabel = fallback.face.label;
-    } else {
+    } else if (winAnsiMissing.length > 0) {
       missingGlyphs = fallback.missing;
+    } else {
+      missingGlyphs = [];
     }
   }
   const systemRedraw = patch.fontChoice?.source === "system" && !!patch.fontChoice.embedBytes;
@@ -794,12 +867,15 @@ export async function applyTextPatchesWithReport(
       }
 
       const write = resolveWrite(located, original, nextText);
-      const reuse = canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head);
+      const encodingMismatch =
+        !!original.trim() && !streamTextMatchesVisual(write.glyphSource, original);
+      const reuse = canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head, original);
       const winAnsiMissing = charsMissingFromWinAnsi(write.text);
       const systemBytes =
         patch.fontChoice?.source === "system" ? patch.fontChoice.embedBytes : undefined;
       const preferSystem = !!systemBytes && patch.fontChoice?.source === "system";
-      const preferBundled = patch.fontChoice?.source === "bundled";
+      const preferBundled =
+        patch.fontChoice?.source === "bundled" || (!preferSystem && encodingMismatch);
       const writeWidth = Math.max(
         patch.width,
         write.dropRest
