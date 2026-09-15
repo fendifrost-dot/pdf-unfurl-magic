@@ -341,12 +341,12 @@ export function describeFontMatch(
     return `Uses the page’s ${match.label} (Standard 14, already in the file).`;
   }
   if (match.kind === "standard-same-family") {
-    return `Will write ${match.label} — same family as the original, no Creative Cloud font needed.`;
+    return `Will write ${match.label} as a metric stand-in. A bundled Liberation/Noto face is used when the original is a custom or CID font — no Adobe Fonts purchase required.`;
   }
   if (match.kind === "unsafe") {
     return "This run uses a symbol / dingbat font. Replacement is blocked so we do not write .notdef glyphs.";
   }
-  return `Will write ${match.label} as a Standard 14 stand-in. Metrics may differ slightly.`;
+  return `Will write ${match.label} as a Standard 14 stand-in. Metrics may differ slightly. No Adobe Fonts purchase required.`;
 }
 
 export function isSymbolFontName(name: string): boolean {

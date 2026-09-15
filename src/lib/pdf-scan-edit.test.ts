@@ -110,6 +110,17 @@ describe("scan page classification", () => {
     expect(classified.looksScanned).toBe(false);
   });
 
+  it("does not treat a CID encoding mismatch as an OCR ghost", () => {
+    const classified = classifyPageScan({
+      showCount: 40,
+      imageCount: 1,
+      pdfJsLineCount: 12,
+      matchRatio: 0,
+      garbledRatio: 0.8,
+    });
+    expect(classified.looksScanned).toBe(false);
+  });
+
   it("matches PDF.js lines only on exact operator strings", () => {
     const stats = matchPdfJsLines(["POS", "DEBIT", "6205"], ["POS DEBIT 6205"]);
     expect(stats.matchedLineCount).toBe(0);

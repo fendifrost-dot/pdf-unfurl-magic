@@ -362,6 +362,31 @@ export function softMatchKey(text: string): string {
   return textMatchKey(text).replace(/\s*-\s*/g, "-");
 }
 
+/**
+ * True when a content-stream decode and a PDF.js / ToUnicode string are the
+ * same visible run (commas and hyphen spacing may differ). Used by extract
+ * to keep thousands commas — not a substring / fuzzy check.
+ */
+export function sameVisibleRun(stream: string, visual: string): boolean {
+  if (!stream.trim() || !visual.trim()) return false;
+  if (textMatchKey(stream) === textMatchKey(visual)) return true;
+  const streamLoose = looseAmountKey(stream);
+  const visualLoose = looseAmountKey(visual);
+  if (streamLoose && streamLoose === visualLoose) return true;
+  if (softMatchKey(stream) === softMatchKey(visual)) return true;
+  return false;
+}
+
+/**
+ * True when rewrite can treat the stream operator as this visual string:
+ * same run, or the visual is a fragment inside a longer show.
+ */
+export function streamTextMatchesVisual(stream: string, visual: string): boolean {
+  if (sameVisibleRun(stream, visual)) return true;
+  if (!stream.trim() || !visual.trim()) return false;
+  return !!(findFuzzySpan(stream, visual) || findFuzzySpan(visual, stream));
+}
+
 function isThousandsComma(text: string, index: number): boolean {
   return (
     text[index] === "," && /\d/.test(text[index - 1] ?? "") && /\d/.test(text[index + 1] ?? "")

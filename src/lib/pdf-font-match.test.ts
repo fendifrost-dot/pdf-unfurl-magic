@@ -65,8 +65,16 @@ describe("WinAnsi coverage", () => {
     expect(decodeShowBytes(bytes)).toBe("2,500.00");
   });
 
-  it("describes the OFL Unicode embed instead of a question-mark warning", () => {
-    const match = matchFont({ baseFont: "Helvetica" });
+  it("describes HelveticaNeueWorld without requiring an Adobe Fonts purchase", () => {
+    const match = matchFont({
+      baseFont: "HelveticaNeueWorld-55R",
+      fontName: "CWCINO+HelveticaNeueWorld-55R",
+    });
+    expect(match.kind).toBe("standard-same-family");
+    expect(match.standard).toBe(StandardFonts.Helvetica);
+    const message = describeFontMatch(match, []);
+    expect(message).toMatch(/Liberation\/Noto|stand-in/i);
+    expect(message).not.toMatch(/must buy|Creative Cloud font needed$/i);
     expect(describeFontMatch(match, [], "Liberation Sans")).toMatch(/PRIOR_ART #1/);
     expect(describeFontMatch(match, ["你"])).toMatch(/would write “\?”/);
   });
