@@ -134,21 +134,42 @@ const COLUMN_MIN_GAP = 36;
 /** When PDF.js over-reports width, gutter looks like 0 — still split far x starts. */
 const COLUMN_X_DELTA_FALLBACK = 200;
 
-/** Strip statement wrappers so `250.00-` and `(250.00)` still count as money. */
-function amountToken(text: string): string {
-  return text.replace(/\s+/g, "").replace(/^\((.+)\)$/, "$1");
+/** Accounting minus glyphs (hyphen, en/em dash, minus sign) → ASCII `-`. */
+function compactMoneyText(text: string): string {
+  return text.replace(/\s+/g, "").replace(/[–—−]/g, "-");
+}
+
+/**
+ * Strip wrapping `(…)` used for debits, e.g. `(250.00)` / `($250.00)`.
+ * Returns null when parentheses are unbalanced or nested.
+ */
+function unwrapAccountingParens(text: string): string | null {
+  if (text.startsWith("(") && text.endsWith(")") && text.length > 2) {
+    const inner = text.slice(1, -1);
+    if (inner.includes("(") || inner.includes(")")) return null;
+    return inner;
+  }
+  if (text.includes("(") || text.includes(")")) return null;
+  return text;
+}
+
+function looksLikeAccountingAmount(text: string, centsOnly: boolean): boolean {
+  const compact = compactMoneyText(text);
+  if (!/\d/.test(compact)) return false;
+  const body = unwrapAccountingParens(compact);
+  if (body == null) return false;
+  return centsOnly
+    ? /^-?\$?-?[\d,]+\.\d{2}%?-?$/.test(body)
+    : /^-?\$?-?[\d,]+(?:\.\d+)?%?-?$/.test(body);
 }
 
 export function looksLikeAmountText(text: string): boolean {
-  const t = amountToken(text);
-  if (!/\d/.test(t)) return false;
-  return /^-?\$?-?[\d,]+(?:\.\d+)?%?-?$/.test(t);
+  return looksLikeAccountingAmount(text, false);
 }
 
 /** Amount/Balance cells use cents. Check numbers like 4220268 must stay in the description. */
 export function looksLikeMoneyColumn(text: string): boolean {
-  const t = amountToken(text);
-  return /^-?\$?-?[\d,]+\.\d{2}%?-?$/.test(t);
+  return looksLikeAccountingAmount(text, true);
 }
 
 export function shouldStartNewColumn(

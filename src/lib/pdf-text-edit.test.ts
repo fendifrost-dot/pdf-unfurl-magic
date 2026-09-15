@@ -14,14 +14,14 @@ import {
   applyTextPatches,
   applyTextPatchesWithReport,
   clusterBoxesByColumn,
-  looksLikeAmountText,
-  looksLikeMoneyColumn,
   decodePageContent,
   inspectTextLayer,
   inspectTextPatch,
   listPageEmbeddedFonts,
   listPageShownText,
   listPageTextShows,
+  looksLikeAmountText,
+  looksLikeMoneyColumn,
   pageHasWhiteCover,
   splitDraftAcrossColumns,
 } from "./pdf-text-edit";
@@ -133,6 +133,26 @@ describe("groupTextItems", () => {
   });
 });
 
+describe("looksLikeAmountText", () => {
+  it("treats trailing-minus and parenthetical accounting money as amounts", () => {
+    expect(looksLikeAmountText("250.00-")).toBe(true);
+    expect(looksLikeAmountText("250.00 -")).toBe(true);
+    expect(looksLikeAmountText("(250.00)")).toBe(true);
+    expect(looksLikeAmountText("($250.00)")).toBe(true);
+    expect(looksLikeAmountText("$250.00-")).toBe(true);
+    expect(looksLikeAmountText("1,834.34")).toBe(true);
+    expect(looksLikeAmountText("500.00")).toBe(true);
+    expect(looksLikeAmountText("05-22")).toBe(false);
+    expect(looksLikeAmountText("Paid To")).toBe(false);
+
+    expect(looksLikeMoneyColumn("250.00-")).toBe(true);
+    expect(looksLikeMoneyColumn("(250.00)")).toBe(true);
+    expect(looksLikeMoneyColumn("1,834.34")).toBe(true);
+    expect(looksLikeMoneyColumn("4220268")).toBe(false);
+    expect(looksLikeMoneyColumn("12408508")).toBe(false);
+  });
+});
+
 describe("clusterBoxesByColumn", () => {
   it("keeps description fragments together and locks amount x", () => {
     const groups = clusterBoxesByColumn([
@@ -161,10 +181,6 @@ describe("clusterBoxesByColumn", () => {
   });
 
   it("treats trailing-minus statement amounts as their own money columns", () => {
-    expect(looksLikeAmountText("250.00-")).toBe(true);
-    expect(looksLikeMoneyColumn("250.00-")).toBe(true);
-    expect(looksLikeMoneyColumn("1,834.34")).toBe(true);
-    expect(looksLikeMoneyColumn("12408508")).toBe(false);
     const groups = clusterBoxesByColumn([
       {
         x: 14,
@@ -177,6 +193,19 @@ describe("clusterBoxesByColumn", () => {
     ]);
     expect(groups.map((group) => group.map((box) => box.text).join(" "))).toEqual([
       "05-22 Paid To - Applecard Gsbank Payment Chk 12408508",
+      "250.00-",
+      "1,834.34",
+    ]);
+  });
+
+  it("splits a trailing-minus debit from the balance on a June-like row", () => {
+    const groups = clusterBoxesByColumn([
+      { x: 14, width: 220, fontSize: 8, text: "05-22 Paid To - Applecard" },
+      { x: 409, width: 48, fontSize: 8, text: "250.00-" },
+      { x: 517, width: 48, fontSize: 8, text: "1,834.34" },
+    ]);
+    expect(groups.map((group) => group.map((box) => box.text).join(" "))).toEqual([
+      "05-22 Paid To - Applecard",
       "250.00-",
       "1,834.34",
     ]);
