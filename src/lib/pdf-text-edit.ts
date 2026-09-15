@@ -81,6 +81,18 @@ export type TextPatch = {
   fontName?: string;
   fontFamily?: string;
   fontChoice?: FontChoice;
+  /**
+   * Extra boxes from a joined / expanded line (description + amount columns).
+   * Rewrite must cover every overlapping show in these boxes, not only the
+   * first description operator.
+   */
+  memberBoxes?: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    text?: string;
+  }>;
 };
 
 export type TextEditMethod =
@@ -341,6 +353,103 @@ function showOverlapsPatch(show: TextShow, patch: TextPatch): boolean {
   return overlap > 0;
 }
 
+function showCoveredByPatch(show: TextShow, patch: TextPatch): boolean {
+  if (showOverlapsPatch(show, patch)) return true;
+  for (const box of patch.memberBoxes ?? []) {
+    if (
+      showOverlapsPatch(show, {
+        ...patch,
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+      })
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function showTextInOriginal(show: TextShow, original: string): boolean {
+  const orig = textMatchKey(original);
+  const t = textMatchKey(show.text);
+  if (t.length >= 2 && orig.includes(t)) return true;
+  const loose = looseAmountKey(show.text);
+  const origLoose = looseAmountKey(original);
+  if (loose.length >= 2 && origLoose.includes(loose)) return true;
+  return !!findFuzzySpan(original, show.text);
+}
+
+/**
+ * A joined-line match often hits the description show first (PDF.js rawText is
+ * the left run). Pull in every same-baseline operator the draft actually
+ * covered — far-right amounts included — so dropRest can delete them.
+ */
+function expandLocatedShows(
+  located: LocatedShows,
+  streams: PageStream[],
+  patch: TextPatch,
+  original: string,
+): LocatedShows {
+  const head = located.shows[0];
+  if (!head) return located;
+  const origKey = textMatchKey(original);
+  const headKey = textMatchKey(head.text);
+  const originalLooksJoined = origKey.length > headKey.length + 2;
+  const patchLooksWide = patch.width > showWidth(head) * 1.35;
+  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1;
+  if (!originalLooksJoined && !patchLooksWide && !hasMembers) return located;
+
+  const seen = new Set(
+    located.shows.map((show) => `${show.start}:${show.x.toFixed(2)}:${show.y.toFixed(2)}`),
+  );
+  const extra: TextShow[] = [];
+  for (const stream of streams) {
+    if (stream !== located.stream) continue;
+    for (const show of collectTextShows(stream.tokens)) {
+      const id = `${show.start}:${show.x.toFixed(2)}:${show.y.toFixed(2)}`;
+      if (seen.has(id)) continue;
+      if (!sameBaseline(head, show)) continue;
+      if (!showCoveredByPatch(show, patch)) continue;
+      if (!hasMembers && !showTextInOriginal(show, original)) continue;
+      seen.add(id);
+      extra.push(show);
+    }
+  }
+  if (extra.length === 0) return located;
+  const shows = [...located.shows, ...extra].sort((a, b) => a.x - b.x || a.start - b.start);
+  return { ...located, shows, score: located.score + extra.length };
+}
+
+function dropCoveredShowsOnOtherStreams(
+  streams: PageStream[],
+  located: LocatedShows,
+  patch: TextPatch,
+  original: string,
+) {
+  const head = located.shows[0];
+  if (!head) return;
+  const origKey = textMatchKey(original);
+  const headKey = textMatchKey(head.text);
+  const originalLooksJoined = origKey.length > headKey.length + 2;
+  const patchLooksWide = patch.width > showWidth(head) * 1.35;
+  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1;
+  if (!originalLooksJoined && !patchLooksWide && !hasMembers) return;
+
+  for (const stream of streams) {
+    if (stream === located.stream) continue;
+    const extras = collectTextShows(stream.tokens).filter((show) => {
+      if (!sameBaseline(head, show)) return false;
+      if (!showCoveredByPatch(show, patch)) return false;
+      return hasMembers || showTextInOriginal(show, original);
+    });
+    if (extras.length === 0) continue;
+    dropTrailingShows(stream, extras);
+    stream.dirty = true;
+  }
+}
+
 function findShowsByBox(streams: PageStream[], patch: TextPatch): LocatedShows | null {
   let best: LocatedShows | null = null;
   for (const stream of streams) {
@@ -370,7 +479,13 @@ function findShows(
   ) => {
     const score = scoreShows(shows, patch, needle);
     if (score === null) return current;
-    if (!current || score > current.score) return { stream, shows, score };
+    if (
+      !current ||
+      score > current.score ||
+      (score === current.score && shows.length > current.shows.length)
+    ) {
+      return { stream, shows, score };
+    }
     return current;
   };
 
@@ -393,10 +508,16 @@ function findShows(
     }
   }
 
-  if (best) return { stream: best.stream, shows: best.shows };
+  if (best) {
+    const expanded = expandLocatedShows(best, streams, patch, original);
+    return { stream: expanded.stream, shows: expanded.shows };
+  }
 
   const boxed = findShowsByBox(streams, patch);
-  if (boxed) return { stream: boxed.stream, shows: boxed.shows };
+  if (boxed) {
+    const expanded = expandLocatedShows(boxed, streams, patch, original);
+    return { stream: expanded.stream, shows: expanded.shows };
+  }
 
   // Position fallback: same baseline, nearby x, similar digits/letters.
   const origLoose = looseAmountKey(original) || looseAmountKey(patch.rawText ?? "");
@@ -411,7 +532,9 @@ function findShows(
       if (!positional || score > positional.score) positional = { stream, shows: [show], score };
     }
   }
-  return positional ? { stream: positional.stream, shows: positional.shows } : null;
+  if (!positional) return null;
+  const expanded = expandLocatedShows(positional, streams, patch, original);
+  return { stream: expanded.stream, shows: expanded.shows };
 }
 
 function resolveWrite(
@@ -872,6 +995,13 @@ export async function applyTextPatchesWithReport(
         reports.push(blockedReport(patch, match, describeFontMatch(match, [])));
         continue;
       }
+
+      dropCoveredShowsOnOtherStreams(
+        streams,
+        { stream: located.stream, shows: located.shows, score: 0 },
+        patch,
+        original,
+      );
 
       const write = resolveWrite(located, original, nextText);
       const encodingMismatch =

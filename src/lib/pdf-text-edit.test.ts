@@ -512,6 +512,92 @@ describe("safe text replace", () => {
     expect(after).toContain("POS Debit");
   });
 
+  it("rewrites every member on a joined baseline, including a far-right amount the draft dropped", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    // Column-major order: descriptions first, then amounts — typical statement layout.
+    page.drawText("06-06 Paid To - Synchrony card Syf Paymnt Chk 4220268", {
+      x: 40,
+      y: 640,
+      size: 8,
+      font,
+    });
+    page.drawText("06-07 POS Debit Card 6205", { x: 40, y: 624, size: 8, font });
+    page.drawText("500.00", { x: 480, y: 640, size: 8, font: bold });
+    page.drawText("4,972.29", { x: 540, y: 640, size: 8, font: bold });
+    page.drawText("12.00", { x: 480, y: 624, size: 8, font: bold });
+    const bytes = await doc.save();
+    const before = bytes.slice().buffer as ArrayBuffer;
+
+    const shownBefore = await listPageShownText(before, 1);
+    expect(shownBefore).toContain("500.00");
+    expect(shownBefore).toContain("4,972.29");
+
+    const originalText = "06-06 Paid To - Synchrony card Syf Paymnt Chk 4220268 500.00 4,972.29";
+    const nextText = "06-06 Paid From - Synchrony card Syf Paymnt Chk 4220268";
+    const { bytes: out, reports } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 40,
+        y: 640,
+        width: 560,
+        height: 12,
+        fontSize: 8,
+        text: nextText,
+        originalText,
+        // PDF.js join often stores a description-only stream hint; locating
+        // that first show must still drop the amount operators the draft covered.
+        rawText: "06-06 Paid To - Synchrony card Syf Paymnt Chk 4220268",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    expect(reports[0]?.found).toBe(true);
+    expect(reports[0]?.method).not.toBe("blocked");
+    const after = await listPageShownText(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.join(" ")).toMatch(/Paid From/);
+    expect(after.join(" ")).not.toMatch(/Paid To/);
+    expect(after).not.toContain("500.00");
+    expect(after).not.toContain("4,972.29");
+    expect(after).toContain("12.00");
+    expect(after.join(" ")).toMatch(/06-07 POS Debit/);
+    expect(
+      await pageHasWhiteCover(out.slice().buffer as ArrayBuffer, 1, {
+        x: 40,
+        y: 640,
+        width: 560,
+        height: 12,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not delete a far amount when the draft is description-only", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("06-06 Paid To merchant", { x: 40, y: 640, size: 8, font });
+    page.drawText("500.00", { x: 480, y: 640, size: 8, font });
+    const bytes = await doc.save();
+    const before = bytes.slice().buffer as ArrayBuffer;
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 40,
+        y: 640,
+        width: 160,
+        height: 12,
+        fontSize: 8,
+        text: "06-06 Paid From merchant",
+        originalText: "06-06 Paid To merchant",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    const after = await listPageShownText(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.join(" ")).toMatch(/Paid From/);
+    expect(after).toContain("500.00");
+  });
+
   it("lists embedded fonts before any stand-in in the picker catalog", async () => {
     const sample = await buildSamplePdf();
     const fonts = await listPageEmbeddedFonts(sample.slice().buffer as ArrayBuffer, 1);
