@@ -64,10 +64,7 @@ export function nextEnhanceOpen(input: {
   return input.looksScanned;
 }
 
-export function preferOcrOverlay(input: {
-  enhanceOpen: boolean;
-  ocrLineCount: number;
-}): boolean {
+export function preferOcrOverlay(input: { enhanceOpen: boolean; ocrLineCount: number }): boolean {
   return input.enhanceOpen && input.ocrLineCount > 0;
 }
 
@@ -115,6 +112,87 @@ export function overlayApplyState(input: {
     isLivePreview,
     displayText: isLivePreview ? input.draft : (applied ?? input.originalText),
   };
+}
+
+export const SHOW_EDIT_HIGHLIGHT_LABEL = "Show edit highlight";
+
+export const MARK_CHANGES_FOR_REVIEWER_HINT = "Mark changes for reviewer";
+
+export const EDIT_HIGHLIGHT_STORAGE_KEY = "pdf-relief-show-edit-highlight";
+
+export type OverlayFillMode = "none" | "highlight";
+
+const OVERLAY_BASE =
+  "absolute min-h-[22px] cursor-text touch-manipulation overflow-hidden rounded-[2px] border text-left transition-colors [@media(pointer:fine)]:min-h-0";
+
+/** Opaque / paper fills that cover watermarks. Default preview must not use these. */
+const OPAQUE_OVERLAY_FILL = /\bbg-paper\b|\bbg-white\b|\bbg-background\b|\bbg-\[#fff|#ffffff/i;
+
+export function overlayFillMode(input: {
+  isEdited: boolean;
+  isLivePreview: boolean;
+  showHighlight: boolean;
+}): OverlayFillMode {
+  if (input.showHighlight && (input.isEdited || input.isLivePreview)) return "highlight";
+  return "none";
+}
+
+export function overlayHasOpaqueFill(className: string): boolean {
+  return OPAQUE_OVERLAY_FILL.test(className);
+}
+
+/**
+ * Hit-target chrome for a text overlay. Default applied/preview text is
+ * transparent (watermark shows through) with a thin outline when selected
+ * and a soft green underline when applied. The reviewer toggle restores
+ * the opaque paper slab.
+ */
+export function textOverlayChromeClass(input: {
+  isSelected: boolean;
+  isEdited: boolean;
+  isLivePreview: boolean;
+  showHighlight: boolean;
+  source?: string | undefined;
+  looksScanned?: boolean | undefined;
+  showingOcr?: boolean | undefined;
+}): string {
+  const replaced = input.isLivePreview || input.isEdited;
+  const fill = overlayFillMode(input);
+  const parts = [OVERLAY_BASE];
+
+  if (input.isSelected) {
+    if (replaced) {
+      parts.push(
+        fill === "highlight"
+          ? "border-success bg-paper text-foreground shadow-sm"
+          : "border-primary bg-transparent text-foreground",
+      );
+    } else {
+      parts.push("border-primary bg-primary/25");
+    }
+  } else if (replaced) {
+    parts.push(
+      fill === "highlight"
+        ? "border-success bg-paper text-foreground shadow-sm"
+        : "border-success/45 bg-transparent text-foreground shadow-[inset_0_-1.5px_0_0_color-mix(in_oklch,var(--success)_70%,transparent)]",
+    );
+  } else if (input.source === "ocr") {
+    parts.push("border-dashed border-primary/55 bg-primary/10");
+  } else if (input.looksScanned && !input.showingOcr) {
+    parts.push("border-dashed border-warning/70 bg-warning/15");
+  } else {
+    parts.push(
+      "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
+    );
+  }
+
+  return parts.join(" ");
+}
+
+export function textOverlayLabelClass(fill: OverlayFillMode): string {
+  return fill === "highlight"
+    ? "block h-full w-full truncate px-0.5 font-medium leading-[1.15]"
+    : "block h-full w-full truncate px-0.5 font-normal leading-[1.15]";
 }
 
 export function shouldFlattenPageAsScan(input: {

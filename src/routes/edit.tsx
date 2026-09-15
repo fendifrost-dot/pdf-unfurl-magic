@@ -28,6 +28,8 @@ import { ImageStudioPanel } from "@/components/image-studio-panel";
 import { AcroFormPanel } from "@/components/acroform-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,14 +56,20 @@ import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
 import {
   APPLY_EDIT_LABEL,
   APPLY_SUCCESS_MESSAGE,
+  EDIT_HIGHLIGHT_STORAGE_KEY,
+  MARK_CHANGES_FOR_REVIEWER_HINT,
   ORIGINAL_UNCHANGED_HINT,
+  SHOW_EDIT_HIGHLIGHT_LABEL,
   canApplyTextEdit,
   enhanceOpenAfterTextChip,
   nextEnhanceOpen,
   overlayApplyState,
+  overlayFillMode,
   pendingExportBanner,
   preferOcrOverlay,
   shouldFlattenPageAsScan,
+  textOverlayChromeClass,
+  textOverlayLabelClass,
   textPageFooter,
 } from "@/lib/edit-apply";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
@@ -150,6 +158,22 @@ type Doc = {
 type Edit = { line: TextLine; text: string; fontChoiceId?: string };
 type Mode = "text" | "image" | "mark" | "form";
 type MarkTool = AnnotationBurn["kind"];
+
+function persistShowEditHighlight(on: boolean) {
+  try {
+    sessionStorage.setItem(EDIT_HIGHLIGHT_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    // Private mode / blocked storage — session memory still holds the toggle.
+  }
+}
+
+function readShowEditHighlight(): boolean {
+  try {
+    return sessionStorage.getItem(EDIT_HIGHLIGHT_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function markKindLabel(kind: AnnotationBurn["kind"]): string {
   if (kind === "redact") return "cover box";
@@ -258,6 +282,7 @@ function Editor() {
   const [nativeLines, setNativeLines] = useState<TextLine[]>([]);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [showOriginalHint, setShowOriginalHint] = useState(false);
+  const [showEditHighlight, setShowEditHighlight] = useState(false);
   const [formReport, setFormReport] = useState<AcroFormReport>(emptyAcroFormReport);
   const [formValues, setFormValues] = useState<Record<string, AcroFormValue>>({});
   const [formOriginal, setFormOriginal] = useState<Record<string, AcroFormValue>>({});
@@ -364,6 +389,11 @@ function Editor() {
     } finally {
       setStatus(null);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setShowEditHighlight(readShowEditHighlight());
   }, []);
 
   useEffect(() => {
@@ -1141,6 +1171,11 @@ function Editor() {
         const isEdited = overlay.isEdited || !!memberEdited;
         const isSelected =
           selectedId === line.id || line.members?.some((run) => run.id === selectedId);
+        const fill = overlayFillMode({
+          isEdited,
+          isLivePreview: overlay.isLivePreview,
+          showHighlight: showEditHighlight,
+        });
         const showLabel = overlay.isLivePreview || isEdited;
         return (
           <button
@@ -1148,6 +1183,7 @@ function Editor() {
             type="button"
             data-testid="text-overlay"
             data-edited={isEdited ? "true" : "false"}
+            data-overlay-fill={fill}
             data-overlay-text={overlay.displayText}
             onClick={(event) => {
               if (event.shiftKey && line.members && line.members.length > 1) {
@@ -1165,24 +1201,19 @@ function Editor() {
             title={overlay.displayText}
             data-text={overlay.displayText}
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
-            className={[
-              "absolute min-h-[22px] cursor-text touch-manipulation overflow-hidden rounded-[2px] border text-left transition-colors [@media(pointer:fine)]:min-h-0",
-              isSelected
-                ? overlay.isLivePreview || isEdited
-                  ? "border-success bg-paper text-foreground shadow-sm"
-                  : "border-primary bg-primary/25"
-                : isEdited
-                  ? "border-success bg-paper text-foreground shadow-sm"
-                  : line.source === "ocr"
-                    ? "border-dashed border-primary/55 bg-primary/10"
-                    : looksScanned && !showingOcr
-                      ? "border-dashed border-warning/70 bg-warning/15"
-                      : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
-            ].join(" ")}
+            className={textOverlayChromeClass({
+              isSelected,
+              isEdited,
+              isLivePreview: overlay.isLivePreview,
+              showHighlight: showEditHighlight,
+              source: line.source,
+              looksScanned,
+              showingOcr,
+            })}
           >
             {showLabel ? (
               <span
-                className="block h-full w-full truncate px-0.5 font-medium leading-[1.15]"
+                className={textOverlayLabelClass(fill)}
                 style={{ fontSize: `${Math.max(9, Math.min(22, line.fontSize * scale * 0.92))}px` }}
               >
                 {overlay.displayText}
@@ -1194,7 +1225,7 @@ function Editor() {
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, scale, viewSize, selectedId, edits, draft, looksScanned, showingOcr],
+    [lines, scale, viewSize, selectedId, edits, draft, looksScanned, showingOcr, showEditHighlight],
   );
 
   const imageOverlay = useMemo(
@@ -1377,7 +1408,11 @@ function Editor() {
                     }
                     className="flex-1"
                     data-testid={
-                      value === "form" ? "edit-mode-form" : value === "text" ? "edit-mode-text" : undefined
+                      value === "form"
+                        ? "edit-mode-form"
+                        : value === "text"
+                          ? "edit-mode-text"
+                          : undefined
                     }
                     onClick={() => {
                       setMode(value);
@@ -1439,9 +1474,24 @@ function Editor() {
                   data-testid="pending-export-banner"
                 >
                   <p className="text-sm font-semibold">{pendingExportBanner(editedIds.length)}</p>
-                  <Button size="sm" onClick={() => void exportPdf()} disabled={!!status}>
-                    <Download className="size-3.5" /> Export
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Switch
+                        id="show-edit-highlight-banner"
+                        checked={showEditHighlight}
+                        onCheckedChange={(value) => {
+                          const on = value === true;
+                          setShowEditHighlight(on);
+                          persistShowEditHighlight(on);
+                        }}
+                        data-testid="show-edit-highlight-banner"
+                      />
+                      {SHOW_EDIT_HIGHLIGHT_LABEL}
+                    </label>
+                    <Button size="sm" onClick={() => void exportPdf()} disabled={!!status}>
+                      <Download className="size-3.5" /> Export
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -1898,6 +1948,27 @@ function Editor() {
                       </p>
                     </>
                   )}
+                  <div className="mt-4 flex items-start gap-3 rounded-md border border-border/70 px-3 py-2.5">
+                    <Switch
+                      id="show-edit-highlight"
+                      checked={showEditHighlight}
+                      onCheckedChange={(value) => {
+                        const on = value === true;
+                        setShowEditHighlight(on);
+                        persistShowEditHighlight(on);
+                      }}
+                      data-testid="show-edit-highlight"
+                    />
+                    <div>
+                      <Label htmlFor="show-edit-highlight" className="text-sm font-semibold">
+                        {SHOW_EDIT_HIGHLIGHT_LABEL}
+                      </Label>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {MARK_CHANGES_FOR_REVIEWER_HINT}. Off keeps applied text flush with the page
+                        — no white box covering watermarks or rules.
+                      </p>
+                    </div>
+                  </div>
                 </>
               )}
 
