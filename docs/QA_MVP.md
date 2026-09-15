@@ -43,6 +43,8 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Drop `multi-page.pdf`. Step **1 / 3 → 3 / 3**. Edit page 1 only, export, re-open: pages 2 and 3 still show `PAGE_MARKER_2` and `PAGE_MARKER_3`.
 - [ ] Drop `comma-amounts.pdf`. Click `2,500.00`, change it, export. The comma and neighbouring text stay intact. Font picker lists the embedded font as Safe.
 
+- [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned**. Font is not Helvetica Unsafe. **Enhance page & OCR**, click `AMOUNT 1987.00` (or the OCR box Tesseract found), change the figure, **Keep this change**, **Export**. Re-open: new amount is there; no white-out rectangle over the rest of the page. Leave **Replace with cleaned image** off once, then on once.
+
 ## Scan (`/scan`) — skip if that PR is not merged
 
 - [ ] Header has **Scan**. Open `/scan`.
@@ -77,5 +79,6 @@ Use the committed files in `fixtures/` — not a real client PDF.
 | `fixtures/image-and-text.pdf` | 1 | Image object survives a caption edit |
 | `fixtures/comma-amounts.pdf` | 1 | Comma amounts + multi-run POS line |
 | `fixtures/multi-page.pdf` | 3 | Split, extract, merge, untouched pages |
+| `fixtures/scan-image-only.pdf` | 1 | Scan-aware Enhance / OCR (no text operators) |
 
 Regenerate fixtures with `npm run fixtures:generate` only if you change `fixtures/generate.mjs`.

@@ -10,6 +10,7 @@ import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
 import { burnMarksOnPages } from "./pdf-marks";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
+import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 export type {
   TextPatch,
   TextEditReport,
@@ -24,6 +25,7 @@ export {
   listPageTextShows,
   listPageEmbeddedFonts,
 } from "./pdf-text-edit";
+export { inspectPageScan, applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
@@ -94,17 +96,22 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
 }
 
 /**
- * Apply in-place text rewrites first, then overlay image replacements and
- * annotation burns so photos and marks never flatten the rest of the page.
+ * Apply in-place text rewrites first, then rebuild any scan-aware pages
+ * (image + OCR text layer), then overlay image replacements and annotation
+ * burns so photos and marks never flatten the rest of the page.
  */
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
   textPatches: TextPatch[],
   imagePatches: ImagePatch[],
   marks: AnnotationBurn[],
+  scanPatches: ScanPageExport[] = [],
 ): Promise<Uint8Array> {
   const afterText = textPatches.length ? await applyTextPatches(bytes, textPatches) : null;
-  const doc = await load(afterText ? bytesToArrayBuffer(afterText) : bytes);
+  const afterScan = scanPatches.length
+    ? await applyScanPagePatches(afterText ? bytesToArrayBuffer(afterText) : bytes, scanPatches)
+    : afterText;
+  const doc = await load(afterScan ? bytesToArrayBuffer(afterScan) : bytes);
   const pages = doc.getPages();
 
   for (const patch of imagePatches) {
@@ -258,6 +265,31 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 16;
   write("SKU  NG-BENCH-40-OAK", { size: 10, font: mono });
 
+  // Page 2 must stay untouched so in-place text tests can prove an edit on
+  // page 1 does not flatten or rewrite the next page.
+  const page2 = doc.addPage([595, 842]);
+  page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });
+  page2.drawText("Reference code REF-4421. Do not amend this page.", {
+    x: 56,
+    y: 742,
+    size: 10,
+    font: body,
+    color: soft,
+  });
+  page2.drawLine({
+    start: { x: 56, y: 720 },
+    end: { x: 539, y: 720 },
+    thickness: 1,
+    color: rgb(0.75, 0.76, 0.78),
+  });
+  page2.drawText("Vector rule and original text objects must survive an edit on page 1.", {
+    x: 56,
+    y: 698,
+    size: 10,
+    font: serif,
+    color: ink,
+  });
+
   const appendix = doc.addPage([595, 842]);
   appendix.drawText("Photo appendix", { x: 56, y: 780, size: 20, font: bold, color: ink });
   appendix.drawText("Washed-out site shot — pull exposure down, then compress.", {
@@ -279,29 +311,6 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
     y: 396,
     size: 10,
     font: body,
-    color: ink,
-  });
-
-  const page2 = doc.addPage([595, 842]);
-  page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });
-  page2.drawText("Reference code REF-4421. Do not amend this page.", {
-    x: 56,
-    y: 742,
-    size: 10,
-    font: body,
-    color: soft,
-  });
-  page2.drawLine({
-    start: { x: 56, y: 720 },
-    end: { x: 539, y: 720 },
-    thickness: 1,
-    color: rgb(0.75, 0.76, 0.78),
-  });
-  page2.drawText("Vector rule and original text objects must survive an edit on page 1.", {
-    x: 56,
-    y: 698,
-    size: 10,
-    font: serif,
     color: ink,
   });
 

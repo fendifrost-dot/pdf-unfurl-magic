@@ -20,6 +20,7 @@ export function FontMatchIndicator({
   const blocked = inspection.method === "blocked";
   const inPlace = inspection.method === "in-place";
   const system = inspection.method === "redraw-system";
+  const missingOperator = !inspection.found && !scan;
   const tone = scan
     ? "text-warning"
     : blocked
@@ -29,18 +30,20 @@ export function FontMatchIndicator({
         : "text-warning";
   const Icon = scan ? ScanSearch : blocked ? ShieldAlert : ShieldCheck;
   const label = scan
-    ? "Scan page — use Scan, not a fake Safe edit"
-    : blocked && inspection.blockReason === "not-found"
-      ? "Run not found"
-      : blocked && inspection.blockReason === "unsafe-font"
-        ? "Unsafe font"
-        : blocked
-          ? "Blocked"
-          : inPlace
-            ? "Safe in-place rewrite"
-            : system
-              ? "Safe local system font"
-              : "Safe standard stand-in";
+    ? "Scan page — Enhance or OCR instead of a fake Safe edit"
+    : missingOperator
+      ? "Not a text operator"
+      : blocked && inspection.blockReason === "not-found"
+        ? "Run not found"
+        : blocked && inspection.blockReason === "unsafe-font"
+          ? "Unsafe font"
+          : blocked
+            ? "Blocked"
+            : inPlace
+              ? "Safe in-place rewrite"
+              : system
+                ? "Safe local system font"
+                : "Safe standard stand-in";
 
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-surface/60 px-3 py-2.5">

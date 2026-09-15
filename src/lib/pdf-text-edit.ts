@@ -519,11 +519,15 @@ function buildInspection(
     blockReason = blockReason ?? "not-found";
   }
 
-  const fontLabel = extras.baseFont || match.label;
+  const fontLabel = extras.deferToScan
+    ? extras.baseFont || match.label
+    : !found
+      ? "No text operator"
+      : extras.baseFont || match.label;
   const message = extras.deferToScan
-    ? "This page has no text operators (likely a scan). Safe rewrite would invent an overlay. Use Scan to OCR it instead."
+    ? "This page has no text operators (likely a scan). Safe rewrite would invent an overlay. Use Enhance page or Scan to OCR it instead."
     : method === "blocked" && !found
-      ? "This run was not found as a text operator on the page. Export will refuse rather than paint over it."
+      ? "This run was not found as a text operator on the page. If the page is a scan or OCR ghost, use Enhance page instead of rewriting Helvetica over the image. Export will refuse rather than paint over it."
       : describeFontMatch(match, missingGlyphs);
 
   const inspection: TextEditInspection = {
