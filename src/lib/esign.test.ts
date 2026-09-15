@@ -69,8 +69,8 @@ test("signed export appends a certificate page and a three-hash sidecar", async 
   assert.match(json, /sourceSha256/);
   assert.match(json, /annotatedSha256/);
   assert.match(json, /signedFileSha256/);
+  assert.equal(exported.sidecar.signers.length, 1);
   assert.equal(exported.sidecar.signers[0]?.completed, true);
-  assert.equal(exported.sidecar.signers[1]?.completed, false);
   assert.ok(exported.sidecar.fields.some((field) => field.filled && field.method === "draw"));
 });
 

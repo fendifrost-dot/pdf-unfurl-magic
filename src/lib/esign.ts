@@ -215,22 +215,6 @@ const SAMPLE_DATE = {
   height: 24,
 } as const;
 
-const SAMPLE_INITIALS = {
-  page: 1,
-  x: 500,
-  y: 708,
-  width: 52,
-  height: 32,
-} as const;
-
-const SAMPLE_WITNESS = {
-  page: 2,
-  x: 56,
-  y: 560,
-  width: 200,
-  height: 48,
-} as const;
-
 /** Two-page internal service agreement with known signature-line coordinates. */
 export async function buildSampleContractPdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -274,14 +258,6 @@ export async function buildSampleContractPdf(): Promise<Uint8Array> {
     y -= 36;
   }
 
-  write(page1, "Initials", 716, { size: 8, x: 500, color: soft });
-  page1.drawLine({
-    start: { x: 500, y: 708 },
-    end: { x: 552, y: 708 },
-    thickness: 0.6,
-    color: rgb(0.55, 0.52, 0.48),
-  });
-
   write(page1, "Accepted by", 196, { size: 11, font: bold });
   page1.drawLine({
     start: { x: 56, y: 132 },
@@ -299,21 +275,11 @@ export async function buildSampleContractPdf(): Promise<Uint8Array> {
   });
   write(page1, "Date", 132, { size: 9, x: 360, color: soft });
 
-  write(page2, "Schedule A — second signer / witness", 780, { size: 16, font: bold });
-  write(
-    page2,
-    "Leave this page for a later signer if you are preparing a multi-person packet.",
-    752,
-    { size: 11, color: soft },
-  );
-  write(page2, "Witness or countersigner", 620, { size: 11, font: bold });
-  page2.drawLine({
-    start: { x: 56, y: 560 },
-    end: { x: 256, y: 560 },
-    thickness: 0.75,
-    color: rgb(0.25, 0.22, 0.2),
+  write(page2, "Schedule A — scope notes", 780, { size: 16, font: bold });
+  write(page2, "This sample is a single-signer packet. Multi-signer routing is deferred.", 752, {
+    size: 11,
+    color: soft,
   });
-  write(page2, "Signature", 546, { size: 9, color: soft });
 
   return doc.save();
 }
@@ -321,16 +287,9 @@ export async function buildSampleContractPdf(): Promise<Uint8Array> {
 export function sampleContractSetup(): { signers: Signer[]; fields: SignField[] } {
   const first = createSigner({
     name: "Alex Rivera",
-    email: "alex@workshop.local",
+    email: "",
     order: 1,
     index: 1,
-  });
-  const second = createSigner({
-    name: "Witness",
-    email: "",
-    role: "witness",
-    order: 2,
-    index: 2,
   });
   const fields: SignField[] = [
     {
@@ -347,22 +306,8 @@ export function sampleContractSetup(): { signers: Signer[]; fields: SignField[] 
       required: true,
       ...SAMPLE_DATE,
     },
-    {
-      id: newId("field"),
-      kind: "initials",
-      signerId: first.id,
-      required: true,
-      ...SAMPLE_INITIALS,
-    },
-    {
-      id: newId("field"),
-      kind: "signature",
-      signerId: second.id,
-      required: true,
-      ...SAMPLE_WITNESS,
-    },
   ];
-  return { signers: [first, second], fields };
+  return { signers: [first], fields };
 }
 
 async function embedMark(doc: PDFDocument, dataUrl: string) {

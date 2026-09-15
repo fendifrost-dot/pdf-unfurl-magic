@@ -9,8 +9,6 @@ import {
   Loader2,
   PenLine,
   Trash2,
-  Type,
-  UserPlus,
 } from "lucide-react";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { SignatureCapture } from "@/components/signature-capture";
@@ -28,13 +26,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toDesktopBytes } from "@/lib/desktop";
 import {
@@ -47,15 +38,10 @@ import {
   formatSignedDate,
   isFieldFilled,
   newId,
-  nextUnlockedSigner,
   sampleContractSetup,
-  sidecarJson,
-  signerIsComplete,
-  signerIsUnlocked,
   type FieldKind,
   type SignField,
   type Signer,
-  type SignerRole,
 } from "@/lib/esign";
 import { downloadBytes, openDocument, renderPage } from "@/lib/pdf-runtime";
 
@@ -72,6 +58,7 @@ type CaptureTarget =
   { kind: "signature" | "initials"; fieldId: string } | { kind: "date" | "text"; fieldId: string };
 
 const CANVAS_WIDTH = 720;
+const MVP_TOOLS: FieldKind[] = ["signature", "date"];
 
 function signerColor(index: number): string {
   return SIGNER_COLORS[index % SIGNER_COLORS.length] ?? "#9a4a24";
@@ -268,23 +255,14 @@ export function EsignWorkbench() {
   const openField = (field: SignField) => {
     setSelectedId(field.id);
     if (mode !== "sign" || isFieldFilled(field)) return;
-    const owner = signers.find((signer) => signer.id === field.signerId);
-    if (!owner || !signerIsUnlocked(owner, signers, fields)) {
-      setError("Earlier signers still have required fields. Finish their order first.");
-      return;
-    }
-    setActiveSignerId(field.signerId);
     if (field.kind === "date") {
       setTextDraft(formatSignedDate());
       setCapture({ kind: "date", fieldId: field.id });
       return;
     }
-    if (field.kind === "text") {
-      setTextDraft("");
-      setCapture({ kind: "text", fieldId: field.id });
-      return;
+    if (field.kind === "signature" || field.kind === "initials") {
+      setCapture({ kind: field.kind, fieldId: field.id });
     }
-    setCapture({ kind: field.kind, fieldId: field.id });
   };
 
   const lockField = (fieldId: string, value: SignField["value"]) => {
@@ -311,8 +289,6 @@ export function EsignWorkbench() {
         fields,
       });
       downloadBytes(exported.pdf, `${doc.base}-signed.pdf`);
-      const sidecar = new TextEncoder().encode(sidecarJson(exported.sidecar));
-      downloadBytes(sidecar, `${doc.base}-signed.esign.json`, "application/json");
     } catch {
       setError("The export failed. Nothing was changed on your original file.");
     } finally {
@@ -328,18 +304,6 @@ export function EsignWorkbench() {
       bytes.slice().buffer as ArrayBuffer,
       sampleContractSetup(),
     );
-  };
-
-  const addSigner = () => {
-    const next = createSigner({ index: signers.length + 1, order: signers.length + 1 });
-    setSigners((prev) => [...prev, next]);
-    setActiveSignerId(next.id);
-  };
-
-  const removeSigner = (id: string) => {
-    if (signers.length <= 1) return;
-    setSigners((prev) => prev.filter((signer) => signer.id !== id));
-    setFields((prev) => prev.filter((field) => field.signerId !== id));
   };
 
   const pageFields = fields.filter((field) => field.page === page);
@@ -456,16 +420,16 @@ export function EsignWorkbench() {
                 if (file) await loadBytes(file.name, await file.arrayBuffer());
               }}
               title="Drop a contract PDF to sign"
-              hint="Stays in this browser. Place fields, apply a mark, export a signed copy plus an audit sidecar."
+              hint="Stays in this browser. Place a signature and date, then export a signed copy with an audit page."
             >
               <Button variant="outline" onClick={() => void openSample()}>
                 <PenLine /> Load sample agreement
               </Button>
             </PdfDropZone>
             <div className="bench-panel mt-5 p-4 text-sm text-muted-foreground">
-              E-Sign is for documents you already have authority to sign. It is not DocuSign, and it
-              does not create a certificate-authority digital signature — it records who, when, and
-              a SHA-256 of the file bytes.
+              E-Sign is for documents you already have authority to sign. Single signer for this
+              MVP. It is not DocuSign and not a PKI certificate — the audit page records who, when,
+              and a SHA-256 of the file bytes.
             </div>
           </>
         )
@@ -509,20 +473,20 @@ export function EsignWorkbench() {
 
             {mode === "prepare" && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {(Object.keys(FIELD_DEFAULTS) as FieldKind[]).map((kind) => (
+                {MVP_TOOLS.map((kind) => (
                   <Button
                     key={kind}
                     size="sm"
                     variant={tool === kind ? "default" : "secondary"}
                     onClick={() => setTool(kind)}
                   >
-                    {kind === "date" ? <CalendarDays /> : kind === "text" ? <Type /> : <PenLine />}
+                    {kind === "date" ? <CalendarDays /> : <PenLine />}
                     {fieldLabel(kind)}
                   </Button>
                 ))}
                 <p className="w-full text-xs text-muted-foreground">
-                  Click the page to place a {fieldLabel(tool).toLowerCase()} for{" "}
-                  {activeSigner?.name ?? "the selected signer"}. Drag to move; corner to resize.
+                  Click the page to place a {fieldLabel(tool).toLowerCase()}. Drag to move; corner
+                  to resize.
                 </p>
               </div>
             )}
@@ -548,131 +512,26 @@ export function EsignWorkbench() {
           </div>
 
           <aside className="bench-panel flex flex-col p-4 sm:p-5">
-            <p className="eyebrow">Signers · order matters</p>
-            <div className="mt-3 space-y-3">
-              {signers
-                .slice()
-                .sort((a, b) => a.order - b.order)
-                .map((signer, index) => {
-                  const complete = signerIsComplete(signer.id, fields);
-                  const unlocked = signerIsUnlocked(signer, signers, fields);
-                  return (
-                    <div
-                      key={signer.id}
-                      className={[
-                        "rounded-md border p-3",
-                        activeSignerId === signer.id ? "border-primary" : "border-border",
-                      ].join(" ")}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 text-left text-sm font-medium"
-                          onClick={() => setActiveSignerId(signer.id)}
-                        >
-                          <span
-                            className="size-2.5 rounded-full"
-                            style={{ backgroundColor: signerColor(index) }}
-                          />
-                          {signer.name || `Signer ${signer.order}`}
-                        </button>
-                        <Badge variant="secondary">
-                          {complete ? "done" : unlocked ? `order ${signer.order}` : "waiting"}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 grid gap-2">
-                        <Input
-                          value={signer.name}
-                          onChange={(event) =>
-                            setSigners((prev) =>
-                              prev.map((item) =>
-                                item.id === signer.id
-                                  ? { ...item, name: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                          placeholder="Name"
-                        />
-                        <Input
-                          value={signer.email}
-                          onChange={(event) =>
-                            setSigners((prev) =>
-                              prev.map((item) =>
-                                item.id === signer.id
-                                  ? { ...item, email: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                          placeholder="Email (stays local)"
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <Select
-                            value={signer.role}
-                            onValueChange={(value) =>
-                              setSigners((prev) =>
-                                prev.map((item) =>
-                                  item.id === signer.id
-                                    ? { ...item, role: value as SignerRole }
-                                    : item,
-                                ),
-                              )
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="signer">Signer</SelectItem>
-                              <SelectItem value="approver">Approver</SelectItem>
-                              <SelectItem value="witness">Witness</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Input
-                            type="number"
-                            min={1}
-                            value={signer.order}
-                            onChange={(event) =>
-                              setSigners((prev) =>
-                                prev.map((item) =>
-                                  item.id === signer.id
-                                    ? { ...item, order: Number(event.target.value) || 1 }
-                                    : item,
-                                ),
-                              )
-                            }
-                            aria-label="Signing order"
-                          />
-                        </div>
-                      </div>
-                      {signers.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2"
-                          onClick={() => removeSigner(signer.id)}
-                        >
-                          <Trash2 className="size-3.5" /> Remove
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="mt-3"
-              onClick={addSigner}
-            >
-              <UserPlus className="size-3.5" /> Add signer
-            </Button>
+            <p className="eyebrow">Signer</p>
+            <Label htmlFor="signer-name" className="mt-3">
+              Name
+            </Label>
+            <Input
+              id="signer-name"
+              className="mt-1"
+              value={activeSigner?.name ?? ""}
+              onChange={(event) =>
+                setSigners((prev) =>
+                  prev.map((item, index) =>
+                    index === 0 ? { ...item, name: event.target.value } : item,
+                  ),
+                )
+              }
+              placeholder="Your name"
+            />
             <p className="mt-2 text-xs text-muted-foreground">
-              First version: complete signer 1 now. Extra signers keep their fields for a later pass
-              on this same file.
+              Single-signer MVP. Draw or type a mark, stamp the date, export. Multi-signer routing
+              is deferred.
             </p>
 
             <Separator className="my-5" />
@@ -684,29 +543,6 @@ export function EsignWorkbench() {
                   {fieldLabel(selected.kind)} on page {selected.page}
                   {isFieldFilled(selected) ? " · locked" : ""}
                 </p>
-                <Label className="mt-3 block">Assigned to</Label>
-                <Select
-                  value={selected.signerId}
-                  disabled={isFieldFilled(selected)}
-                  onValueChange={(value) =>
-                    setFields((prev) =>
-                      prev.map((field) =>
-                        field.id === selected.id ? { ...field, signerId: value } : field,
-                      ),
-                    )
-                  }
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {signers.map((signer) => (
-                      <SelectItem key={signer.id} value={signer.id}>
-                        {signer.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 {!isFieldFilled(selected) && (
                   <Button
                     type="button"
@@ -725,10 +561,8 @@ export function EsignWorkbench() {
             ) : (
               <p className="text-sm text-muted-foreground">
                 {mode === "prepare"
-                  ? "Select a tool, then click the page."
-                  : (nextUnlockedSigner(signers, fields)?.name
-                      ? `Next: ${nextUnlockedSigner(signers, fields)?.name}. `
-                      : "Packet complete. ") + "Click a field to fill it."}
+                  ? "Choose Signature or Date, then click the page."
+                  : "Click a field to fill it."}
               </p>
             )}
 
@@ -744,7 +578,8 @@ export function EsignWorkbench() {
               <Badge variant="secondary">{filledCount} filled</Badge>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Downloads the signed PDF and a `.esign.json` sidecar with who, when, and the hashes.
+              Export appends an audit page with the signer, timestamp, and SHA-256 of the file
+              bytes.
             </p>
           </aside>
         </div>

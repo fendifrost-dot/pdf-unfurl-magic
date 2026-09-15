@@ -10,7 +10,7 @@ export const Route = createFileRoute("/sign")({
       {
         name: "description",
         content:
-          "Place signature, initials, date, and text fields on a PDF. Draw, type, or upload a mark. Export a signed copy with a SHA-256 audit record. Files never leave this device.",
+          "Place a signature and date on a PDF. Draw or type a mark. Export a signed copy with a SHA-256 audit page. Files never leave this device.",
       },
       { property: "og:title", content: "E-Sign in PDF Relief — local signing, no DocuSign seat" },
       {
@@ -41,11 +41,9 @@ function SignPage() {
           Sign the contract. Leave the page graphics alone.
         </h1>
         <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
-          Place signature, initials, date, and text fields. Draw a mark, type one, or upload an
-          image. Prepare extra signers and an order even if only the first person signs today.
-          Export writes marks on top of the original pages, locks filled fields, and appends a
-          certificate plus a SHA-256 sidecar. Nothing is uploaded. This is PDF Relief E-Sign — not
-          DocuSign.
+          Place a signature and a date. Draw a mark or type one. Export writes the mark on top of
+          the original pages and appends an audit page with who, when, and a SHA-256 hash. Single
+          signer. Nothing is uploaded. This is PDF Relief E-Sign — not DocuSign.
         </p>
         <div className="mt-8">
           <EsignWorkbench />

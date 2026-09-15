@@ -54,11 +54,10 @@ JPEG page stays the picture. Processing is one page at a time.
 
 ## E-Sign
 
-Open `/sign` (or **E-Sign** in the header). Drop a contract, place fields, apply a mark
-(draw / type / upload), and export. The signed PDF keeps the original page graphics and
-adds a certificate page. A sidecar `{name}-signed.esign.json` records who, when, and
-three SHA-256 hashes (source file, annotated pages, complete signed file). This is not
-DocuSign and not a PKI digital signature.
+Open `/sign` (or **E-Sign** in the header). Drop a contract, place a signature and date,
+draw or type a mark, and export. The signed PDF keeps the original page graphics and
+adds an audit page (who, when, SHA-256). Single signer. This is not DocuSign and not a
+PKI digital signature.
 
 ```bash
 npm test   # integrity hash + certificate-page checks

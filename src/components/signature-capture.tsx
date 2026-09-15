@@ -108,16 +108,15 @@ export function SignatureCapture({ open, kind, signerName, onClose, onApply }: P
         <DialogHeader>
           <DialogTitle>Add your {title.toLowerCase()}</DialogTitle>
           <DialogDescription>
-            Draw, type, or upload a mark. It stays on this device and is burned into the PDF on
-            export — not sent to a signing service.
+            Draw or type a mark. It stays on this device and is burned into the PDF on export — not
+            sent to a signing service.
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="draw">Draw</TabsTrigger>
             <TabsTrigger value="type">Type</TabsTrigger>
-            <TabsTrigger value="upload">Upload</TabsTrigger>
           </TabsList>
 
           <TabsContent value="draw" className="mt-4">

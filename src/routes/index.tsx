@@ -196,10 +196,8 @@ function Home() {
             Replace the signing membership for documents that never need to leave the building
           </h2>
           <p className="mt-4 max-w-3xl text-muted-foreground">
-            Place signature, initials, date, and text fields. Draw or upload a mark, or type one.
-            Prepare roles and a signing order even if only the first person completes today. Export
-            locks filled fields, appends a certificate page, and writes a SHA-256 sidecar. Offline.
-            Not branded as DocuSign.
+            Place a signature and date, draw or type a mark, and export a signed PDF with an audit
+            page (hash + timestamp). Single signer. Offline. Not branded as DocuSign.
           </p>
           <div className="mt-8 grid gap-3 md:grid-cols-3">
             {[
@@ -207,13 +205,10 @@ function Home() {
                 "Marks on the original page",
                 "Signatures are drawn on top of existing page objects. The rest of the artwork is not rasterized.",
               ],
+              ["Draw or type", "One signer. Draw a mark or type a name. Date stamp on the page."],
               [
-                "Order and roles",
-                "Add signers, assign fields, and block later people until earlier required fields are done.",
-              ],
-              [
-                "Audit record",
-                "Certificate page plus .esign.json: who, when, source hash, signed-content hash, file hash.",
+                "Audit page",
+                "Export appends who, when, and SHA-256 of the file bytes. Not a PKI certificate.",
               ],
             ].map(([title, body]) => (
               <div key={title} className="bench-panel p-5">
