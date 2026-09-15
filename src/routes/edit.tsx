@@ -233,6 +233,18 @@ function CommittedImageOverlay({
   );
 }
 
+function memberBoxesForPatch(line: TextLine): TextPatch["memberBoxes"] {
+  const runs = line.members?.length ? line.members : [];
+  if (runs.length <= 1) return undefined;
+  return runs.map((run) => ({
+    x: run.x,
+    y: run.y,
+    width: run.width,
+    height: run.height,
+    ...(run.text ? { text: run.text } : {}),
+  }));
+}
+
 function boxStyle(
   x: number,
   y: number,
@@ -594,6 +606,7 @@ function Editor() {
             text,
             originalText: line.text,
             ...(line.rawText ? { rawText: line.rawText } : {}),
+            ...(memberBoxesForPatch(line) ? { memberBoxes: memberBoxesForPatch(line) } : {}),
             fontName: line.fontName,
             fontFamily: line.fontFamily,
             ...(option
@@ -1178,6 +1191,7 @@ function Editor() {
           text,
           originalText: line.text,
           ...(line.rawText ? { rawText: line.rawText } : {}),
+          ...(memberBoxesForPatch(line) ? { memberBoxes: memberBoxesForPatch(line) } : {}),
           fontName: line.fontName,
           fontFamily: line.fontFamily,
           ...(option
