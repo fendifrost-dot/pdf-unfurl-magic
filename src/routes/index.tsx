@@ -51,6 +51,7 @@ function Home() {
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button asChild size="lg"><Link to="/edit">Open the editor <ArrowRight /></Link></Button>
+                <Button asChild size="lg" variant="outline"><Link to="/scan">Scan pages <ScanLine /></Link></Button>
                 <Button asChild size="lg" variant="outline"><a href="#bench">Split a large file <Scissors /></a></Button>
               </div>
             </div>

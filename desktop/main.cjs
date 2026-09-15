@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, session } = require("electron");
 const { spawn } = require("node:child_process");
 const http = require("node:http");
 const fs = require("node:fs");
@@ -102,6 +102,18 @@ async function openPdfPath(filePath) {
   notifyPdfReady();
 }
 
+function isImagePath(filePath) {
+  return (
+    typeof filePath === "string" &&
+    /\.(png|jpe?g|webp)$/i.test(filePath) &&
+    fs.existsSync(filePath)
+  );
+}
+
+function readImageFile(filePath) {
+  return { name: path.basename(filePath), data: fs.readFileSync(filePath) };
+}
+
 async function pickPdfDialog(multi = false) {
   const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
     title: multi ? "Open PDFs" : "Open PDF",
@@ -111,6 +123,16 @@ async function pickPdfDialog(multi = false) {
   if (result.canceled || result.filePaths.length === 0) return null;
   if (multi) return result.filePaths.filter(isPdfPath).map(readPdfFile);
   return readPdfFile(result.filePaths[0]);
+}
+
+async function pickImageDialog() {
+  const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
+    title: "Import scan photos",
+    filters: [{ name: "Photos", extensions: ["png", "jpg", "jpeg", "webp"] }],
+    properties: ["openFile", "multiSelections"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths.filter(isImagePath).map(readImageFile);
 }
 
 async function openPdfFromMenu() {
@@ -157,8 +179,12 @@ function buildMenu() {
           },
         },
         {
+          label: "Scan pages",
+          click: () => mainWindow?.loadURL(joinAppPath("/scan")),
+        },
+        {
           label: "Split a file",
-          click: () => mainWindow?.loadURL(joinAppPath("/#split")),
+          click: () => mainWindow?.loadURL(joinAppPath("/#bench")),
         },
         { type: "separator" },
         isMac ? { role: "close" } : { role: "quit" },
@@ -219,6 +245,7 @@ async function createWindow() {
 
 ipcMain.handle("desktop:pick-pdf", async () => pickPdfDialog(false));
 ipcMain.handle("desktop:pick-pdfs", async () => pickPdfDialog(true));
+ipcMain.handle("desktop:pick-images", async () => pickImageDialog());
 ipcMain.handle("desktop:take-pending-pdf", async () => {
   const next = pendingPdf;
   pendingPdf = null;
@@ -276,6 +303,12 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(permission === "media" || permission === "camera" || permission === "mediaKeySystem");
+    });
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+      return permission === "media" || permission === "camera";
+    });
     void createWindow().catch((error) => {
       dialog.showErrorBox("PDF Relief", error instanceof Error ? error.message : String(error));
       app.quit();
