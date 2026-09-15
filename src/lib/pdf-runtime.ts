@@ -6,7 +6,12 @@ import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { installMapPolyfills } from "./map-polyfill";
 import { isDesktopApp } from "./desktop";
 import { saveBytes } from "./file-export";
-import { listPageTextShows } from "./pdf-text-edit";
+import {
+  listPageTextShows,
+  looksLikeAmountText,
+  looksLikeMoneyColumn,
+  shouldStartNewColumn,
+} from "./pdf-text-edit";
 import { sameVisibleRun } from "./pdf-content-stream";
 
 type PdfJs = typeof import("pdfjs-dist");
@@ -112,8 +117,29 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
         PUNCT_ONLY.test(anchor.str) ||
         (TRAILING_MONEY.test(anchor.str) && /^\d/.test(item.str)));
     const wordGap = Math.max(10, Math.max(item.h, anchor?.h ?? 0) * 1.65);
+    const xDelta = anchor ? item.x - anchor.x : 0;
+    const farColumn = !!anchor && xDelta > Math.max(200, Math.max(item.h, anchor.h) * 8);
+    const amountColumn =
+      !!anchor &&
+      looksLikeAmountText(anchor.str) &&
+      looksLikeAmountText(item.str) &&
+      xDelta > Math.max(24, Math.max(item.h, anchor.h) * 2.5);
+    const moneyColumn =
+      !!anchor &&
+      looksLikeMoneyColumn(item.str) &&
+      !looksLikeMoneyColumn(anchor.str) &&
+      xDelta > Math.max(24, Math.max(item.h, anchor.h) * 2.5);
     const overlapOk = gap >= -Math.max(1, Math.max(item.h, anchor?.h ?? 0) * 0.65);
-    if (last && sameBaseline && sameFont && overlapOk && (gap <= wordGap || glue)) {
+    if (
+      last &&
+      sameBaseline &&
+      sameFont &&
+      overlapOk &&
+      (gap <= wordGap || glue) &&
+      !farColumn &&
+      !amountColumn &&
+      !moneyColumn
+    ) {
       last.push(item);
     } else {
       groups.push([item]);
@@ -131,7 +157,7 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
     let cursor: number | null = null;
     for (const g of group) {
       if (cursor !== null && !text.endsWith(" ") && !text.endsWith(",")) {
-        const recovered = recoverThousandsComma(text, g, cursor, fontSize);
+        const recovered = recoverThousandsComma(text, g, cursor, fontSize, first?.x);
         if (recovered) text += recovered;
         else if (shouldInsertJoinSpace(text, g, cursor, fontSize)) text += " ";
       }
@@ -163,9 +189,11 @@ function recoverThousandsComma(
   next: RawTextItem,
   cursor: number,
   fontSize: number,
+  prevX?: number,
 ): "," | "" {
   if (!/\d$/.test(prevText) || !/^\d{3}(?:\D|$)/.test(next.str)) return "";
   if (prevText.endsWith(",") || next.str.startsWith(",")) return "";
+  if (typeof prevX === "number" && next.x - prevX > Math.max(36, fontSize * 4)) return "";
   const gap = next.x - cursor;
   if (gap < -1 || gap > fontSize * 0.55) return "";
   return ",";
@@ -222,8 +250,6 @@ export function preferReadableText(streamText: string, visualText: string): stri
   return visualBad ? stream : visual;
 }
 
-const COLUMN_EM = 3.2;
-
 function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: number): string {
   const fake: RawTextItem = {
     str: next.text,
@@ -234,7 +260,7 @@ function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: 
     fontName: next.fontName,
     fontFamily: next.fontFamily,
   };
-  const recovered = recoverThousandsComma(prevText, fake, prev.x + prev.width, fontSize);
+  const recovered = recoverThousandsComma(prevText, fake, prev.x + prev.width, fontSize, prev.x);
   if (recovered) return recovered;
   if (shouldInsertJoinSpace(prevText, fake, prev.x + prev.width, fontSize)) return " ";
   // PDF.js sometimes over-reports width so a far amount looks like it abuts
@@ -358,10 +384,12 @@ export function mergeLinesByBaseline(runs: TextLine[]): TextLine[] {
         current = [run];
         continue;
       }
-      const gap = run.x - (prev.x + prev.width);
-      const em = Math.max(run.fontSize, prev.fontSize, 8);
-      const columnGap = Math.max(COLUMN_EM * em, 36);
-      if (gap > columnGap) {
+      if (
+        shouldStartNewColumn(
+          { x: prev.x, width: prev.width, fontSize: prev.fontSize, text: prev.text },
+          { x: run.x, fontSize: run.fontSize, text: run.text },
+        )
+      ) {
         out.push(joinRunsToLine(current));
         current = [run];
       } else {
@@ -432,10 +460,17 @@ export function splitLineByColumnShows(
       current = [show];
       continue;
     }
-    const gap = show.x - (prev.x + estimatedShowWidth(prev));
-    const em = Math.max(show.fontSize, prev.fontSize, line.fontSize, 8);
-    const columnGap = Math.max(COLUMN_EM * em, 36);
-    if (gap > columnGap) {
+    if (
+      shouldStartNewColumn(
+        {
+          x: prev.x,
+          width: estimatedShowWidth(prev),
+          fontSize: prev.fontSize,
+          text: prev.text,
+        },
+        { x: show.x, fontSize: show.fontSize, text: show.text },
+      )
+    ) {
       groups.push(current);
       current = [show];
     } else {

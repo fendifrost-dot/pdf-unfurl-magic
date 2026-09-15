@@ -16,6 +16,7 @@
 import type { TextLine } from "./pdf-runtime";
 import { expandToFullLine } from "./pdf-runtime";
 import type { TextPatch } from "./pdf-text-edit";
+import { membersForLinePatch } from "./edit-apply";
 import { coverBoxesFromLine } from "./text-select";
 
 export type AlignKind = "left" | "center" | "right" | "justify";
@@ -223,6 +224,7 @@ export type PositionEdit = {
   line: TextLine;
   text: string;
   fontChoiceId?: string;
+  memberTexts?: Record<string, string>;
 };
 
 function memberBoxesForPatch(line: TextLine): TextPatch["memberBoxes"] {
@@ -287,6 +289,9 @@ function patchForRun(
  * emit one patch per moved member so each operator keeps its own x
  * (same spirit as column-locked rewrite). A joined text rewrite without
  * a move still uses a single patch so #31 marquee Apply stays intact.
+ *
+ * Locate uses extract-time origin (`x`); destination after align/nudge is
+ * `targetX` / `targetY`. Column drafts from #32 ride along as `memberTexts`.
  */
 export function patchesFromEdit(
   edit: PositionEdit,
@@ -294,6 +299,40 @@ export function patchesFromEdit(
 ): TextPatch[] {
   const line = withExtractOrigin(edit.line);
   const members = line.members?.length ? line.members : [line];
+  const drafts =
+    edit.memberTexts ?? (edit.text !== line.text ? { [line.id]: edit.text } : undefined);
+  const segmented = membersForLinePatch(line, drafts);
+  if (segmented?.length) {
+    const changed = segmented.filter((member) => {
+      const textChanged = (member.text ?? "") !== (member.originalText ?? "");
+      const moved =
+        (typeof member.targetX === "number" &&
+          Math.abs(member.targetX - member.x) > POSITION_EPS) ||
+        (typeof member.targetY === "number" && Math.abs(member.targetY - member.y) > POSITION_EPS);
+      return textChanged || moved;
+    });
+    if (changed.length === 0) return [];
+    return changed.map((member) => ({
+      page: line.page,
+      x: member.x,
+      y: member.y,
+      width: member.width || line.width,
+      height: member.height || line.height,
+      fontSize: member.fontSize ?? line.fontSize,
+      text: member.text,
+      originalText: member.originalText ?? member.text,
+      ...(member.rawText
+        ? { rawText: member.rawText }
+        : line.rawText
+          ? { rawText: line.rawText }
+          : {}),
+      fontName: member.fontName ?? line.fontName,
+      fontFamily: member.fontFamily ?? line.fontFamily,
+      ...(typeof member.targetX === "number" ? { targetX: member.targetX } : {}),
+      ...(typeof member.targetY === "number" ? { targetY: member.targetY } : {}),
+      ...extras,
+    }));
+  }
   const textChanged = edit.text.trim() !== line.text;
   const movedMembers = members.filter((member) => positionMoved(member));
 
@@ -308,6 +347,12 @@ export function editIsPending(edit: PositionEdit): boolean {
   const line = withExtractOrigin(edit.line);
   const members = line.members?.length ? line.members : [line];
   if (edit.text.trim() !== line.text) return true;
+  if (edit.memberTexts) {
+    for (const [id, text] of Object.entries(edit.memberTexts)) {
+      const member = members.find((run) => run.id === id);
+      if (member && text.trim() !== member.text.trim()) return true;
+    }
+  }
   return members.some((member) => positionMoved(member)) || positionMoved(line);
 }
 

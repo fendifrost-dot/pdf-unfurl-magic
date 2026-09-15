@@ -89,8 +89,8 @@ export type TextPatch = {
   coverBoxes?: Array<{ x: number; y: number; width: number; height: number }>;
   /**
    * Extra boxes from a joined / expanded line (description + amount columns).
-   * Rewrite must cover every overlapping show in these boxes, not only the
-   * first description operator.
+   * Used to locate overlapping shows; rewrite still happens per member when
+   * `members` is set or the shows sit in distinct columns.
    */
   memberBoxes?: Array<{
     x: number;
@@ -105,7 +105,151 @@ export type TextPatch = {
    */
   targetX?: number;
   targetY?: number;
+  /**
+   * Segmented rewrite: one entry per positioned operator (description vs
+   * amount vs balance). Apply/Export write each member at its original (x,y)
+   * instead of collapsing the row into one Tj at x0.
+   */
+  members?: TextPatchMember[];
 };
+
+export type TextPatchMember = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  originalText?: string;
+  fontSize?: number;
+  fontName?: string;
+  fontFamily?: string;
+  rawText?: string;
+  targetX?: number;
+  targetY?: number;
+};
+
+const COLUMN_EM = 3.2;
+const COLUMN_MIN_GAP = 36;
+/** When PDF.js over-reports width, gutter looks like 0 — still split far x starts. */
+const COLUMN_X_DELTA_FALLBACK = 200;
+
+export function looksLikeAmountText(text: string): boolean {
+  const t = text.replace(/\s+/g, "");
+  if (!/\d/.test(t)) return false;
+  return /^-?\$?-?[\d,]+(?:\.\d+)?%?$/.test(t);
+}
+
+/** Amount/Balance cells use cents. Check numbers like 4220268 must stay in the description. */
+export function looksLikeMoneyColumn(text: string): boolean {
+  const t = text.replace(/\s+/g, "");
+  return /^-?\$?-?[\d,]+\.\d{2}%?$/.test(t);
+}
+
+export function shouldStartNewColumn(
+  prev: { x: number; width: number; fontSize?: number; text?: string },
+  next: { x: number; fontSize?: number; text?: string },
+): boolean {
+  const em = Math.max(next.fontSize ?? 8, prev.fontSize ?? 8, 8);
+  const columnGap = Math.max(COLUMN_EM * em, COLUMN_MIN_GAP);
+  const gap = next.x - (prev.x + prev.width);
+  const xDelta = next.x - prev.x;
+  const prevText = prev.text ?? "";
+  const nextText = next.text ?? "";
+  const prevMoney = looksLikeMoneyColumn(prevText);
+  const nextMoney = looksLikeMoneyColumn(nextText);
+  const twoAmounts =
+    looksLikeAmountText(prevText) &&
+    looksLikeAmountText(nextText) &&
+    xDelta > Math.max(24, em * 2.5);
+  const descriptionThenMoney = nextMoney && !prevMoney && xDelta > Math.max(24, em * 2.5);
+  const farStart = xDelta > Math.max(columnGap * 3, COLUMN_X_DELTA_FALLBACK);
+  const gutterSplit = gap > columnGap && (prevMoney || nextMoney || gap > columnGap * 2);
+  return gutterSplit || farStart || twoAmounts || descriptionThenMoney;
+}
+
+export function clusterBoxesByColumn<
+  T extends { x: number; width: number; fontSize?: number; text?: string },
+>(boxes: T[]): T[][] {
+  const sorted = [...boxes].sort((a, b) => a.x - b.x);
+  const groups: T[][] = [];
+  let current: T[] = [];
+  for (const box of sorted) {
+    const prev = current[current.length - 1];
+    if (!prev) {
+      current = [box];
+      continue;
+    }
+    if (shouldStartNewColumn(prev, box)) {
+      groups.push(current);
+      current = [box];
+    } else {
+      current.push(box);
+    }
+  }
+  if (current.length) groups.push(current);
+  return groups;
+}
+
+/** Assign a joined draft onto original columns (amounts read from the right). */
+export function splitDraftAcrossColumns(
+  columns: Array<{ text: string }>,
+  nextText: string,
+): string[] {
+  if (columns.length === 0) return [];
+  if (columns.length === 1) return [nextText];
+  const out = columns.map(() => "");
+  const tokens = nextText.trim() ? nextText.trim().split(/\s+/) : [];
+  let end = tokens.length;
+  for (let i = columns.length - 1; i >= 1; i--) {
+    const col = columns[i];
+    if (!col) continue;
+    if (end === 0) {
+      out[i] = "";
+      continue;
+    }
+    if (looksLikeAmountText(col.text)) {
+      const tok = tokens[end - 1] ?? "";
+      if (looksLikeAmountText(tok) || textMatchKey(tok) === textMatchKey(col.text)) {
+        out[i] = tok;
+        end -= 1;
+      } else {
+        out[i] = "";
+      }
+      continue;
+    }
+    const origTokens = col.text.trim().split(/\s+/).filter(Boolean);
+    const take = Math.min(origTokens.length || 1, end);
+    const slice = tokens.slice(end - take, end);
+    out[i] = slice.join(" ");
+    end -= slice.length;
+  }
+  out[0] = tokens.slice(0, end).join(" ");
+  return out;
+}
+
+/** Split one column's draft back onto the original operators in that column. */
+export function splitDraftAcrossRuns(runs: Array<{ text: string }>, nextText: string): string[] {
+  if (runs.length === 0) return [];
+  if (runs.length === 1) return [nextText];
+  if (!nextText.trim()) return runs.map(() => "");
+  const origJoined = runs.map((run) => run.text).join(" ");
+  if (textMatchKey(nextText) === textMatchKey(origJoined)) return runs.map((run) => run.text);
+  const origWords = runs.map((run) => run.text.trim().split(/\s+/).filter(Boolean));
+  const words = nextText.trim().split(/\s+/).filter(Boolean);
+  const parts: string[] = [];
+  let idx = 0;
+  for (let i = 0; i < runs.length; i++) {
+    const count = origWords[i]?.length ?? 1;
+    if (i === runs.length - 1) {
+      parts.push(words.slice(idx).join(" "));
+      break;
+    }
+    const take = Math.max(1, count);
+    parts.push(words.slice(idx, idx + take).join(" "));
+    idx += take;
+  }
+  return parts;
+}
 
 export type TextEditMethod =
   "in-place" | "redraw-standard" | "redraw-system" | "redraw-unicode" | "blocked";
@@ -353,6 +497,132 @@ function sameBaseline(a: TextShow, b: TextShow): boolean {
 
 function showWidth(show: TextShow): number {
   return Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5);
+}
+
+function clusterShowsByColumn(shows: TextShow[]): TextShow[][] {
+  const sorted = [...shows].sort((a, b) => a.x - b.x || a.start - b.start);
+  const groups: TextShow[][] = [];
+  let current: TextShow[] = [];
+  for (const show of sorted) {
+    const prev = current[current.length - 1];
+    if (!prev) {
+      current = [show];
+      continue;
+    }
+    if (shouldStartNewColumn({ ...prev, width: showWidth(prev) }, show)) {
+      groups.push(current);
+      current = [show];
+    } else {
+      current.push(show);
+    }
+  }
+  if (current.length) groups.push(current);
+  return groups;
+}
+
+export function showsAreColumnar(
+  shows: Array<{ x: number; fontSize: number; text: string }>,
+): boolean {
+  if (shows.length < 2) return false;
+  const boxes = shows.map((show) => ({
+    x: show.x,
+    width: Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5),
+    fontSize: show.fontSize,
+    text: show.text,
+  }));
+  return clusterBoxesByColumn(boxes).length > 1;
+}
+
+function membersFromShowsAndDraft(shows: TextShow[], nextText: string): TextPatchMember[] {
+  const columns = clusterShowsByColumn(shows);
+  const columnDrafts = splitDraftAcrossColumns(
+    columns.map((col) => ({ text: col.map((show) => show.text).join(" ") })),
+    nextText,
+  );
+  const members: TextPatchMember[] = [];
+  columns.forEach((col, index) => {
+    const draft = columnDrafts[index] ?? "";
+    const parts = splitDraftAcrossRuns(
+      col.map((show) => ({ text: show.text })),
+      draft,
+    );
+    col.forEach((show, runIndex) => {
+      members.push({
+        x: show.x,
+        y: show.y,
+        width: showWidth(show),
+        height: show.fontSize * 1.18,
+        fontSize: show.fontSize,
+        fontName: show.fontName,
+        text: parts[runIndex] ?? "",
+        originalText: show.text,
+      });
+    });
+  });
+  return members;
+}
+
+function memberToPatch(patch: TextPatch, member: TextPatchMember): TextPatch {
+  const original = member.originalText ?? "";
+  return {
+    page: patch.page,
+    x: member.x,
+    y: member.y,
+    width: member.width || patch.width,
+    height: member.height || patch.height,
+    fontSize: member.fontSize ?? patch.fontSize,
+    text: member.text ?? "",
+    originalText: original || patch.originalText,
+    ...(member.rawText
+      ? { rawText: member.rawText }
+      : patch.rawText
+        ? { rawText: patch.rawText }
+        : {}),
+    fontName: member.fontName ?? patch.fontName,
+    fontFamily: member.fontFamily ?? patch.fontFamily,
+    ...(patch.fontChoice ? { fontChoice: patch.fontChoice } : {}),
+    ...(typeof member.targetX === "number" ? { targetX: member.targetX } : {}),
+    ...(typeof member.targetY === "number" ? { targetY: member.targetY } : {}),
+  };
+}
+
+function flattenMemberPatches(patches: TextPatch[]): TextPatch[] {
+  const out: TextPatch[] = [];
+  for (const patch of patches) {
+    const members = patch.members ?? [];
+    if (members.length === 0) {
+      out.push(patch);
+      continue;
+    }
+    const changed = members.filter((member) => {
+      const textChanged = (member.text ?? "") !== (member.originalText ?? "");
+      const moved =
+        (typeof member.targetX === "number" && Math.abs(member.targetX - member.x) > 0.05) ||
+        (typeof member.targetY === "number" && Math.abs(member.targetY - member.y) > 0.05);
+      return textChanged || moved;
+    });
+    for (const member of [...changed].sort((a, b) => b.x - a.x)) {
+      out.push(memberToPatch(patch, member));
+    }
+  }
+  return out;
+}
+
+function visualShowFontSize(show: TextShow, fallback: number): number {
+  const tm = Math.hypot(show.textMatrix[0], show.textMatrix[1]) || 1;
+  const ctm = Math.hypot(show.ctm[0], show.ctm[1]) || 1;
+  const size = (show.fontSize || fallback) * tm * ctm;
+  if (!Number.isFinite(size) || size < 0.5) return show.fontSize || fallback;
+  return size;
+}
+
+function sizeForWrite(text: string, originalSize: number, width: number, font?: PDFFont): number {
+  if (!text.trim()) return originalSize;
+  const overflow = font
+    ? font.widthOfTextAtSize(text, originalSize) > width * 1.02
+    : text.length * originalSize * 0.5 > width * 1.15;
+  if (!overflow) return originalSize;
+  return shrinkSize(text, originalSize, width, font);
 }
 
 function showOverlapsBox(
@@ -721,6 +991,18 @@ function appendRedraw(
     { kind: "ws" as const, raw: " " },
     { kind: "op" as const, raw: "Tf", value: "Tf" },
     { kind: "ws" as const, raw: "\n" },
+    ...(Math.abs((show.horizScale ?? 1) - 1) > 0.001
+      ? ([
+          {
+            kind: "num" as const,
+            raw: trimNum((show.horizScale ?? 1) * 100),
+            value: (show.horizScale ?? 1) * 100,
+          },
+          { kind: "ws" as const, raw: " " },
+          { kind: "op" as const, raw: "Tz", value: "Tz" },
+          { kind: "ws" as const, raw: "\n" },
+        ] as Token[])
+      : []),
     { kind: "num" as const, raw: String(color.r), value: color.r },
     { kind: "ws" as const, raw: " " },
     { kind: "num" as const, raw: String(color.g), value: color.g },
@@ -879,6 +1161,12 @@ export async function inspectTextPatch(
   bytes: ArrayBuffer,
   patch: TextPatch,
 ): Promise<TextEditInspection> {
+  const changedMember = (patch.members ?? []).find(
+    (member) => (member.text ?? "") !== (member.originalText ?? ""),
+  );
+  if (changedMember) {
+    return inspectTextPatch(bytes, memberToPatch(patch, changedMember));
+  }
   const original = patch.originalText ?? "";
   const winAnsiMissingEarly = charsMissingFromWinAnsi(patch.text);
   const heuristic = matchFont({
@@ -991,7 +1279,7 @@ export async function applyTextPatchesWithReport(
   const reports: TextEditReport[] = [];
   const byPage = new Map<number, TextPatch[]>();
 
-  for (const patch of patches) {
+  for (const patch of flattenMemberPatches(patches)) {
     const list = byPage.get(patch.page) ?? [];
     list.push(patch);
     byPage.set(patch.page, list);
@@ -1019,7 +1307,9 @@ export async function applyTextPatchesWithReport(
     const fonts = readPageFonts(page);
     const layerEmpty = !streams.some((stream) => hasTextOperators(stream.tokens));
 
-    for (const patch of pagePatches) {
+    const queue = [...pagePatches];
+    while (queue.length) {
+      const patch = queue.shift()!;
       const original = patch.originalText ?? "";
       const nextText = patch.text.replace(/\s*\n\s*/g, " ");
       const located = original ? findShows(streams, patch, original) : null;
@@ -1070,14 +1360,41 @@ export async function applyTextPatchesWithReport(
         continue;
       }
 
-      dropCoveredShowsOnOtherStreams(
-        streams,
-        { stream: located.stream, shows: located.shows, score: 0 },
-        patch,
-        original,
-      );
+      if (!patch.members?.length && located.shows.length > 1 && showsAreColumnar(located.shows)) {
+        const members = membersFromShowsAndDraft(located.shows, nextText);
+        const subs = flattenMemberPatches([{ ...patch, members, memberBoxes: undefined }]);
+        if (subs.length > 0) {
+          queue.unshift(...subs);
+          continue;
+        }
+      }
+
+      if (!nextText.trim()) {
+        located.stream.tokens = removeShow(located.stream.tokens, head);
+        located.stream.dirty = true;
+        reports.push({
+          page: patch.page,
+          originalText: original,
+          text: "",
+          method: "in-place",
+          fontMatch: match,
+          fontLabel: fontInfo?.baseFont || match.label,
+          missingGlyphs: [],
+          found: true,
+        });
+        continue;
+      }
 
       const write = resolveWrite(located, original, nextText);
+      if (write.dropRest) {
+        dropCoveredShowsOnOtherStreams(
+          streams,
+          { stream: located.stream, shows: located.shows, score: 0 },
+          patch,
+          original,
+        );
+      }
+
       const encodingMismatch =
         !!original.trim() && !streamTextMatchesVisual(write.glyphSource, original);
       const reuse = canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head, original);
@@ -1087,6 +1404,7 @@ export async function applyTextPatchesWithReport(
       const preferSystem = !!systemBytes && patch.fontChoice?.source === "system";
       const preferBundled =
         patch.fontChoice?.source === "bundled" || (!preferSystem && encodingMismatch);
+      const sourceSize = visualShowFontSize(head, patch.fontSize);
       const writeWidth = Math.max(
         patch.width,
         write.dropRest
@@ -1096,7 +1414,7 @@ export async function applyTextPatchesWithReport(
       const showsToDrop = write.dropRest ? located.shows.slice(1) : [];
 
       if (reuse && !preferSystem && !preferBundled) {
-        const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth);
+        const size = sizeForWrite(write.text, sourceSize, writeWidth);
         dropTrailingShows(located.stream, showsToDrop);
         const glyphBytes = write.dropRest ? concatShowBytes(located.shows) : head.bytes;
         const reusedBytes =
@@ -1113,7 +1431,7 @@ export async function applyTextPatchesWithReport(
         } else {
           located.stream.tokens = replaceShowText(located.stream.tokens, head, write.text);
         }
-        if (Math.abs(size - (head.fontSize || patch.fontSize)) > 0.05) {
+        if (Math.abs(size - sourceSize) > 0.05) {
           const shows = collectTextShows(located.stream.tokens);
           const again = shows.find(
             (s) =>
@@ -1144,7 +1462,7 @@ export async function applyTextPatchesWithReport(
         try {
           await registerPdfFontkit(doc);
           const sysFont = await doc.embedFont(systemBytes, { subset: true });
-          const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth, sysFont);
+          const size = sizeForWrite(write.text, sourceSize, writeWidth, sysFont);
           const fontKey = ensurePageFont(page, sysFont);
           const removed = write.dropRest ? located.shows : [head];
           for (const show of [...removed].reverse()) {
@@ -1187,7 +1505,7 @@ export async function applyTextPatchesWithReport(
           continue;
         }
         const uniFont = await embedUnicodeFallbackFont(doc, fallback.face);
-        const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth, uniFont);
+        const size = sizeForWrite(write.text, sourceSize, writeWidth, uniFont);
         const fontKey = ensurePageFont(page, uniFont);
         const removed = write.dropRest ? located.shows : [head];
         for (const show of [...removed].reverse()) {
@@ -1211,7 +1529,7 @@ export async function applyTextPatchesWithReport(
       }
 
       const stdFont = await embed(match.standard);
-      const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth, stdFont);
+      const size = sizeForWrite(write.text, sourceSize, writeWidth, stdFont);
       const fontKey = ensurePageFont(page, stdFont);
       const removedStd = write.dropRest ? located.shows : [head];
       for (const show of [...removedStd].reverse()) {

@@ -136,6 +136,30 @@ describe("group align against the selection box", () => {
     expect(Math.max(...alignedRights) - Math.min(...alignedRights)).toBeLessThan(0.01);
   });
 
+  it("patchesFromEdit keeps amount locate-x when description text and overlay x both change", () => {
+    const desc = run({ id: "a", text: "Paid To", x: 490, width: 60, originX: 50 });
+    const amt = run({ id: "b", text: "500.00", x: 400, width: 40, originX: 400 });
+    const line = run({
+      id: "row",
+      text: "Paid To 500.00",
+      x: 400,
+      width: 150,
+      originX: 50,
+      members: [desc, amt],
+    });
+    const patches = patchesFromEdit({
+      line,
+      text: "Paid From 500.00",
+      memberTexts: { a: "Paid From", b: "500.00" },
+    });
+    const descPatch = patches.find((patch) => patch.originalText === "Paid To");
+    const amtPatch = patches.find((patch) => patch.originalText === "500.00");
+    expect(descPatch?.x).toBe(50);
+    expect(descPatch?.targetX).toBe(490);
+    expect(descPatch?.text).toBe("Paid From");
+    expect(amtPatch).toBeUndefined();
+  });
+
   it("shows align controls for a multi-run selection or after a marquee", () => {
     expect(ALIGN_SELECTION_LABEL).toMatch(/Align selection/);
     expect(SNAP_ORIGINAL_LABEL).toMatch(/Snap to original layout/);

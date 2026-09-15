@@ -3,6 +3,14 @@
  * Keep these free of React so the P0 UX contracts can be unit-tested.
  */
 
+import {
+  clusterBoxesByColumn,
+  looksLikeAmountText,
+  splitDraftAcrossColumns,
+  splitDraftAcrossRuns,
+  type TextPatchMember,
+} from "./pdf-text-edit";
+
 export const APPLY_EDIT_LABEL = "Apply to page";
 
 export const APPLY_SUCCESS_MESSAGE = "Applied. Export when you are done.";
@@ -227,4 +235,235 @@ export function shouldFlattenPageAsScan(input: {
     input.hasOriginalJpeg &&
     (input.hasOcrEdits || input.replaceWithCleaned || input.ocrLineCount > 0)
   );
+}
+
+export type ColumnField = {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontName: string;
+  fontFamily: string;
+  text: string;
+  rawText?: string;
+  runs: Array<{
+    id: string;
+    x: number;
+    y: number;
+    originX?: number;
+    originY?: number;
+    width: number;
+    height: number;
+    fontSize: number;
+    fontName: string;
+    fontFamily: string;
+    text: string;
+    rawText?: string;
+  }>;
+};
+
+type LineLike = {
+  id: string;
+  x: number;
+  y: number;
+  originX?: number;
+  originY?: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontName: string;
+  fontFamily: string;
+  text: string;
+  rawText?: string;
+  members?: ColumnField["runs"];
+};
+
+const POSITION_EPS = 0.05;
+
+function locateX(run: { x: number; originX?: number }): number {
+  return run.originX ?? run.x;
+}
+
+function locateY(run: { y: number; originY?: number }): number {
+  return run.originY ?? run.y;
+}
+
+function destFields(run: {
+  x: number;
+  y: number;
+  originX?: number;
+  originY?: number;
+}): Pick<TextPatchMember, "targetX" | "targetY"> {
+  const originX = locateX(run);
+  const originY = locateY(run);
+  return {
+    ...(Math.abs(run.x - originX) > POSITION_EPS ? { targetX: run.x } : {}),
+    ...(Math.abs(run.y - originY) > POSITION_EPS ? { targetY: run.y } : {}),
+  };
+}
+
+function clusterRunsByExtractColumn<
+  T extends {
+    id: string;
+    x: number;
+    width: number;
+    fontSize?: number;
+    text?: string;
+    originX?: number;
+  },
+>(runs: T[]): T[][] {
+  const keyed = runs.map((run) => ({ ...run, x: locateX(run) }));
+  return clusterBoxesByColumn(keyed).map((group) =>
+    group.map((item) => runs.find((run) => run.id === item.id) ?? (item as T)),
+  );
+}
+
+function patchMemberFromRun(run: ColumnField["runs"][number], text: string): TextPatchMember {
+  return {
+    x: locateX(run),
+    y: locateY(run),
+    width: run.width,
+    height: run.height,
+    fontSize: run.fontSize,
+    fontName: run.fontName,
+    fontFamily: run.fontFamily,
+    text,
+    originalText: run.text,
+    ...(run.rawText ? { rawText: run.rawText } : {}),
+    ...destFields(run),
+  };
+}
+
+export function memberColumnLabel(groupText: string, index: number, groupTexts: string[]): string {
+  const tokens = groupText.trim().split(/\s+/).filter(Boolean);
+  const amountLike = tokens.length > 0 && tokens.every((token) => looksLikeAmountText(token));
+  if (amountLike) {
+    if (tokens.length > 1) return "Amount / Balance";
+    const amountIndexes = groupTexts
+      .map((text, i) => {
+        const parts = text.trim().split(/\s+/).filter(Boolean);
+        return parts.length > 0 && parts.every((token) => looksLikeAmountText(token)) ? i : -1;
+      })
+      .filter((i) => i >= 0);
+    if (amountIndexes.length > 1 && index === amountIndexes[amountIndexes.length - 1]) {
+      return "Balance";
+    }
+    return "Amount";
+  }
+  if (index === 0) return "Description";
+  return `Column ${index + 1}`;
+}
+
+export function columnFieldsForLine(line: LineLike): ColumnField[] {
+  const members = (line.members?.length ? line.members : []).filter((run) => run.text.trim());
+  if (members.length < 2) return [];
+  const groups = clusterRunsByExtractColumn(members);
+  if (groups.length < 2) return [];
+  const texts = groups.map((group) =>
+    group
+      .map((run) => run.text)
+      .join(" ")
+      .replace(/[ \t]+/g, " ")
+      .trim(),
+  );
+  return groups.map((group, index) => {
+    const first = group[0]!;
+    const x = Math.min(...group.map((run) => locateX(run)));
+    const right = Math.max(...group.map((run) => locateX(run) + run.width));
+    return {
+      id: first.id,
+      label: memberColumnLabel(texts[index] ?? "", index, texts),
+      x,
+      y: Math.min(...group.map((run) => locateY(run))),
+      width: Math.max(right - x, first.fontSize * 0.6),
+      height: Math.max(...group.map((run) => run.height)),
+      fontSize: Math.max(...group.map((run) => run.fontSize)),
+      fontName: first.fontName,
+      fontFamily: first.fontFamily,
+      text: texts[index] ?? "",
+      ...(first.rawText ? { rawText: first.rawText } : {}),
+      runs: group,
+    };
+  });
+}
+
+export function isColumnarLine(line: LineLike): boolean {
+  return columnFieldsForLine(line).length > 1;
+}
+
+export function joinColumnDrafts(fields: ColumnField[], drafts: Record<string, string>): string {
+  return fields
+    .map((field) => (drafts[field.id] ?? field.text).trim())
+    .filter((text) => text.length > 0)
+    .join(" ");
+}
+
+/**
+ * Carry description (or per-column) drafts onto a newly joined full line.
+ * Matches columns by id, then x, then label so Amount/Balance stay original.
+ */
+export function remapColumnMemberTexts(input: {
+  fromFields: ColumnField[];
+  toFields: ColumnField[];
+  memberTexts?: Record<string, string>;
+  liveDrafts?: Record<string, string>;
+  sourceDraft?: string;
+  sourceWasColumnar: boolean;
+}): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const to of input.toFields) {
+    const from =
+      input.fromFields.find((field) => field.id === to.id) ??
+      input.fromFields.find((field) => Math.abs(field.x - to.x) <= 8) ??
+      input.fromFields.find(
+        (field) => field.label === to.label && field.label !== "Amount / Balance",
+      );
+    const live = from ? input.liveDrafts?.[from.id] : undefined;
+    const stored = from ? input.memberTexts?.[from.id] : undefined;
+    out[to.id] = (live ?? stored ?? to.text).trim() || to.text;
+  }
+  if (!input.sourceWasColumnar && input.sourceDraft?.trim()) {
+    const desc = input.toFields.find((field) => field.label === "Description") ?? input.toFields[0];
+    if (desc) out[desc.id] = input.sourceDraft.trim();
+  }
+  return out;
+}
+
+export function membersForLinePatch(
+  line: LineLike,
+  drafts?: Record<string, string>,
+): TextPatchMember[] | undefined {
+  const fields = columnFieldsForLine(line);
+  if (fields.length < 2) {
+    const runs = line.members?.length ? line.members : [];
+    if (runs.length <= 1) return undefined;
+    const next = drafts?.[line.id] ?? line.text;
+    const parts = splitDraftAcrossRuns(
+      runs.map((run) => ({ text: run.text })),
+      next,
+    );
+    return runs.map((run, index) => patchMemberFromRun(run, parts[index] ?? ""));
+  }
+  const members: TextPatchMember[] = [];
+  const hasFieldDrafts = fields.some((field) => drafts?.[field.id] !== undefined);
+  const columnDrafts = hasFieldDrafts
+    ? fields.map((field) => drafts?.[field.id] ?? field.text)
+    : splitDraftAcrossColumns(
+        fields.map((field) => ({ text: field.text })),
+        drafts?.[line.id] ?? line.text,
+      );
+  fields.forEach((field, fieldIndex) => {
+    const next = columnDrafts[fieldIndex] ?? field.text;
+    const parts = splitDraftAcrossRuns(
+      field.runs.map((run) => ({ text: run.text })),
+      next,
+    );
+    field.runs.forEach((run, index) => {
+      members.push(patchMemberFromRun(run, parts[index] ?? ""));
+    });
+  });
+  return members;
 }
