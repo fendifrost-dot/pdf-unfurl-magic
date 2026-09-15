@@ -12,7 +12,7 @@ const TOOLS = [
     to: "/edit" as const,
     hash: "marks",
     title: "Mark",
-    body: "Highlight, note, or redact.",
+    body: "Highlight, note, or cover.",
     icon: Highlighter,
   },
   {

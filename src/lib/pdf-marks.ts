@@ -13,7 +13,6 @@ export type PageMark = AnnotationBurn;
 export { partitionMarks } from "./pdf-annotate-js";
 
 export function exportFileName(base: string, hasEdits: boolean, marks: AnnotationBurn[]): string {
-  if (marks.some((m) => m.kind === "redact")) return `${base}-redacted.pdf`;
   if (marks.length) return `${base}-marked.pdf`;
   if (hasEdits) return `${base}-edited.pdf`;
   return `${base}-copy.pdf`;

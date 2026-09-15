@@ -39,11 +39,13 @@ import {
   isFieldFilled,
   newId,
   sampleContractSetup,
+  sidecarJson,
   type FieldKind,
   type SignField,
   type Signer,
 } from "@/lib/esign";
-import { downloadBytes, openDocument, renderPage } from "@/lib/pdf-runtime";
+import { saveBytesWithResult, saveTextSidecar } from "@/lib/file-export";
+import { openDocument, renderPage } from "@/lib/pdf-runtime";
 
 type Doc = {
   name: string;
@@ -288,7 +290,19 @@ export function EsignWorkbench() {
         signers,
         fields,
       });
-      downloadBytes(exported.pdf, `${doc.base}-signed.pdf`);
+      const outcome = await saveBytesWithResult(exported.pdf, `${doc.base}-signed.pdf`);
+      if (!outcome.saved) return;
+      const sidecarWritten = await saveTextSidecar({
+        outcome,
+        extension: ".esign.json",
+        downloadName: `${doc.base}-signed.esign.json`,
+        text: sidecarJson(exported.sidecar),
+      });
+      if (!sidecarWritten) {
+        setError(
+          "The signed PDF was saved. The matching .esign.json audit record could not be written, so there is nothing to check the file against — export again to get one.",
+        );
+      }
     } catch {
       setError("The export failed. Nothing was changed on your original file.");
     } finally {

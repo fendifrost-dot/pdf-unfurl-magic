@@ -53,7 +53,7 @@ if (srcPage.getWidth() !== outPage.getWidth() || srcPage.getHeight() !== outPage
 const name = exportFileName("quote", true, [
   { id: "r1", page: 1, kind: "redact", x: 0, y: 0, width: 10, height: 10 },
 ]);
-if (name !== "quote-redacted.pdf") throw new Error(`unexpected name ${name}`);
+if (name !== "quote-marked.pdf") throw new Error(`unexpected name ${name}`);
 
 const subtypes = await listPageAnnotationSubtypes(marked, 1);
 for (const needed of ["Highlight", "FreeText", "Underline"]) {
