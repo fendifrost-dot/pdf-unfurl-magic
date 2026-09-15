@@ -448,7 +448,11 @@ export async function extractLines(
 
   try {
     const shows = await listPageTextShows(sourceBytes, pageNumber);
-    if (shows.length === 0) return [];
+    if (shows.length === 0) {
+      // Do not wipe a page that PDF.js can already read (OCR ghosts, walker
+      // misses). Scan-image-only still yields [] because pdfjsRuns is empty.
+      return mergeLinesByBaseline(pdfjsRuns);
+    }
     const hinted = pdfjsRuns.map((run) => attachStreamHints(run, shows));
     return mergeLinesByBaseline(hinted);
   } catch (error) {
