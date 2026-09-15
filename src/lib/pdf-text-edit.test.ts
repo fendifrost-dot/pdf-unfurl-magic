@@ -9,9 +9,11 @@ import {
   rgb,
 } from "pdf-lib";
 import { buildSamplePdf } from "./pdf-tools";
+import { groupTextItems, joinRunsToLine, mergeLinesByBaseline } from "./pdf-runtime";
 import {
   applyTextPatches,
   applyTextPatchesWithReport,
+  clusterBoxesByColumn,
   decodePageContent,
   inspectTextLayer,
   inspectTextPatch,
@@ -19,9 +21,9 @@ import {
   listPageShownText,
   listPageTextShows,
   pageHasWhiteCover,
+  splitDraftAcrossColumns,
 } from "./pdf-text-edit";
 import { mergeFontCatalog } from "./pdf-font-catalog";
-import { groupTextItems } from "./pdf-runtime";
 
 async function decodePageToUnicode(bytes: Uint8Array): Promise<string> {
   const doc = await PDFDocument.load(bytes.slice());
@@ -58,6 +60,35 @@ describe("groupTextItems", () => {
     expect(lines.map((l) => l.text)).toEqual(["Total due", "1,987.00"]);
   });
 
+  it("does not glue a far amount onto a description when PDF.js over-reports width", () => {
+    const lines = groupTextItems(
+      [
+        {
+          str: "06-06 Paid To Chk 4220268",
+          x: 50,
+          y: 700,
+          w: 350,
+          h: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+        },
+        { str: "500.00", x: 400, y: 700, w: 40, h: 8, fontName: "F1", fontFamily: "Helvetica" },
+        { str: "4,972.29", x: 500, y: 700, w: 44, h: 8, fontName: "F1", fontFamily: "Helvetica" },
+      ],
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(["06-06 Paid To Chk 4220268", "500.00", "4,972.29"]);
+    const merged = mergeLinesByBaseline(lines);
+    expect(merged.map((l) => l.text)).toEqual(["06-06 Paid To Chk 4220268", "500.00", "4,972.29"]);
+    const row = joinRunsToLine(lines);
+    expect(row.text).not.toMatch(/4220268,500/);
+    expect(row.members?.map((m) => m.text)).toEqual([
+      "06-06 Paid To Chk 4220268",
+      "500.00",
+      "4,972.29",
+    ]);
+  });
+
   it("joins a wrapped sentence on the same baseline", () => {
     const lines = groupTextItems(
       [
@@ -91,6 +122,34 @@ describe("groupTextItems", () => {
       1,
     );
     expect(lines.map((l) => l.text)).toEqual(["1,987.00"]);
+  });
+});
+
+describe("clusterBoxesByColumn", () => {
+  it("keeps description fragments together and locks amount x", () => {
+    const groups = clusterBoxesByColumn([
+      { x: 50, width: 80, fontSize: 8, text: "06-06 Paid From - Synchrony card Syf" },
+      { x: 180, width: 90, fontSize: 8, text: "Paymnt Chk 4220268" },
+      { x: 400, width: 40, fontSize: 8, text: "500.00" },
+      { x: 500, width: 44, fontSize: 8, text: "4,972.29" },
+    ]);
+    expect(groups.map((group) => group.map((box) => box.text).join(" "))).toEqual([
+      "06-06 Paid From - Synchrony card Syf Paymnt Chk 4220268",
+      "500.00",
+      "4,972.29",
+    ]);
+  });
+
+  it("still splits an over-wide description from a money column", () => {
+    const groups = clusterBoxesByColumn([
+      { x: 50, width: 350, fontSize: 8, text: "06-06 Paid To Chk 4220268" },
+      { x: 400, width: 40, fontSize: 8, text: "500.00" },
+      { x: 500, width: 44, fontSize: 8, text: "4,972.29" },
+    ]);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]?.[0]?.text).toMatch(/Paid To/);
+    expect(groups[1]?.[0]?.x).toBe(400);
+    expect(groups[2]?.[0]?.x).toBe(500);
   });
 });
 
@@ -599,6 +658,206 @@ describe("safe text replace", () => {
     expect(after).toContain("500.00");
   });
 
+  it("keeps amount and balance x when only the left text changes", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Paid To merchant", { x: 50, y: 640, size: 10, font });
+    page.drawText("500.00", { x: 400, y: 640, size: 10, font });
+    page.drawText("4,972.29", { x: 500, y: 640, size: 10, font });
+    const before = (await doc.save()).slice().buffer as ArrayBuffer;
+
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 50,
+        y: 640,
+        width: 500,
+        height: 14,
+        fontSize: 10,
+        text: "Paid From merchant",
+        originalText: "Paid To merchant",
+        fontFamily: "Helvetica",
+        members: [
+          {
+            x: 50,
+            y: 640,
+            width: 120,
+            height: 14,
+            text: "Paid From merchant",
+            originalText: "Paid To merchant",
+            fontSize: 10,
+          },
+          {
+            x: 400,
+            y: 640,
+            width: 50,
+            height: 14,
+            text: "500.00",
+            originalText: "500.00",
+            fontSize: 10,
+          },
+          {
+            x: 500,
+            y: 640,
+            width: 50,
+            height: 14,
+            text: "4,972.29",
+            originalText: "4,972.29",
+            fontSize: 10,
+          },
+        ],
+      },
+    ]);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    const desc = after.find((show) => /Paid From/.test(show.text));
+    const amount = after.find((show) => show.text === "500.00");
+    const balance = after.find((show) => show.text === "4,972.29");
+    expect(desc?.x).toBeCloseTo(50, 1);
+    expect(amount?.x).toBeCloseTo(400, 1);
+    expect(balance?.x).toBeCloseTo(500, 1);
+    expect(after.some((show) => /Paid To/.test(show.text))).toBe(false);
+    expect(after.filter((show) => show.text === "500.00")).toHaveLength(1);
+  });
+
+  it("keeps left text x when only the amount changes", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Paid To merchant", { x: 50, y: 640, size: 10, font });
+    page.drawText("500.00", { x: 400, y: 640, size: 10, font });
+    page.drawText("4,972.29", { x: 500, y: 640, size: 10, font });
+    const before = (await doc.save()).slice().buffer as ArrayBuffer;
+
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 400,
+        y: 640,
+        width: 50,
+        height: 14,
+        fontSize: 10,
+        text: "600.00",
+        originalText: "500.00",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.find((show) => show.text === "Paid To merchant")?.x).toBeCloseTo(50, 1);
+    expect(after.find((show) => show.text === "600.00")?.x).toBeCloseTo(400, 1);
+    expect(after.find((show) => show.text === "4,972.29")?.x).toBeCloseTo(500, 1);
+    expect(after.some((show) => show.text === "500.00")).toBe(false);
+  });
+
+  it("rewrites a full row in place without moving column x or leaving ghost text", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Paid To merchant", { x: 50, y: 640, size: 10, font });
+    page.drawText("500.00", { x: 400, y: 640, size: 10, font });
+    page.drawText("4,972.29", { x: 500, y: 640, size: 10, font });
+    const before = (await doc.save()).slice().buffer as ArrayBuffer;
+    const originalText = "Paid To merchant 500.00 4,972.29";
+    const nextText = "Paid From merchant     550.00    4,972.29";
+
+    expect(
+      splitDraftAcrossColumns(
+        [{ text: "Paid To merchant" }, { text: "500.00" }, { text: "4,972.29" }],
+        nextText,
+      ),
+    ).toEqual(["Paid From merchant", "550.00", "4,972.29"]);
+
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 50,
+        y: 640,
+        width: 520,
+        height: 14,
+        fontSize: 10,
+        text: nextText,
+        originalText,
+        fontFamily: "Helvetica",
+        members: [
+          {
+            x: 50,
+            y: 640,
+            width: 120,
+            height: 14,
+            text: "Paid From merchant",
+            originalText: "Paid To merchant",
+            fontSize: 10,
+          },
+          {
+            x: 400,
+            y: 640,
+            width: 50,
+            height: 14,
+            text: "550.00",
+            originalText: "500.00",
+            fontSize: 10,
+          },
+          {
+            x: 500,
+            y: 640,
+            width: 50,
+            height: 14,
+            text: "4,972.29",
+            originalText: "4,972.29",
+            fontSize: 10,
+          },
+        ],
+      },
+    ]);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.find((show) => /Paid From/.test(show.text))?.x).toBeCloseTo(50, 1);
+    expect(after.find((show) => show.text === "550.00")?.x).toBeCloseTo(400, 1);
+    expect(after.find((show) => show.text === "4,972.29")?.x).toBeCloseTo(500, 1);
+    expect(after.some((show) => /Paid To/.test(show.text))).toBe(false);
+    expect(after.some((show) => show.text === "500.00")).toBe(false);
+    expect(
+      await pageHasWhiteCover(out.slice().buffer as ArrayBuffer, 1, {
+        x: 50,
+        y: 640,
+        width: 520,
+        height: 14,
+      }),
+    ).toBe(false);
+  });
+
+  it("auto-splits a joined full-row draft so amounts stay in their columns", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("06-06 Paid To - Synchrony card Syf Paymnt Chk 4220268", {
+      x: 50,
+      y: 640,
+      size: 8,
+      font,
+    });
+    page.drawText("500.00", { x: 400, y: 640, size: 8, font });
+    page.drawText("4,972.29", { x: 500, y: 640, size: 8, font });
+    const before = (await doc.save()).slice().buffer as ArrayBuffer;
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 50,
+        y: 640,
+        width: 520,
+        height: 12,
+        fontSize: 8,
+        text: "06-06 Paid From - Synchrony card Syf Paymnt Chk 4220268 500.00 4,972.29",
+        originalText: "06-06 Paid To - Synchrony card Syf Paymnt Chk 4220268 500.00 4,972.29",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.find((show) => /Paid From/.test(show.text))?.x).toBeCloseTo(50, 1);
+    expect(after.find((show) => show.text === "500.00")?.x).toBeCloseTo(400, 1);
+    expect(after.find((show) => show.text === "4,972.29")?.x).toBeCloseTo(500, 1);
+    expect(after.some((show) => /Paid To/.test(show.text))).toBe(false);
+  });
+
   it("lists embedded fonts before any stand-in in the picker catalog", async () => {
     const sample = await buildSamplePdf();
     const fonts = await listPageEmbeddedFonts(sample.slice().buffer as ArrayBuffer, 1);
@@ -683,5 +942,49 @@ describe("align writes x into the content stream", () => {
       expect(show.x).toBeCloseTo(originals[index]!.x, 1);
       expect(show.y).toBeCloseTo(originals[index]!.y, 1);
     });
+  });
+
+  it("member targetX relocates one column without rewriting siblings", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Paid To", { x: 50, y: 640, size: 10, font });
+    page.drawText("500.00", { x: 400, y: 640, size: 10, font });
+    page.drawText("1,200.00", { x: 500, y: 640, size: 10, font });
+    const bytes = await doc.save();
+    const before = bytes.slice().buffer as ArrayBuffer;
+    const originals = await listPageTextShows(before, 1);
+    const amount = originals[1]!;
+    const result = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: originals[0]!.x,
+        y: originals[0]!.y,
+        width: 520,
+        height: 12,
+        fontSize: 10,
+        text: "Paid To 500.00 1,200.00",
+        originalText: "Paid To 500.00 1,200.00",
+        fontFamily: "Helvetica",
+        members: originals.map((show) => ({
+          x: show.x,
+          y: show.y,
+          width: font.widthOfTextAtSize(show.text, 10),
+          height: 12,
+          text: show.text,
+          originalText: show.text,
+          fontSize: 10,
+          fontFamily: "Helvetica",
+          ...(show.text === "500.00"
+            ? { targetX: amount.x + 24, targetY: amount.y }
+            : {}),
+        })),
+      },
+    ]);
+    const moved = await listPageTextShows(result.bytes.slice().buffer as ArrayBuffer, 1);
+    expect(moved.map((show) => show.text)).toEqual(["Paid To", "500.00", "1,200.00"]);
+    expect(moved[0]!.x).toBeCloseTo(originals[0]!.x, 1);
+    expect(moved[1]!.x).toBeCloseTo(amount.x + 24, 1);
+    expect(moved[2]!.x).toBeCloseTo(originals[2]!.x, 1);
   });
 });

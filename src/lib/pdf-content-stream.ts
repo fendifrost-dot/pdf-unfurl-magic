@@ -48,6 +48,8 @@ export type TextShow = {
   ctm: AffineMatrix;
   /** Text matrix at the start of the show. */
   textMatrix: AffineMatrix;
+  /** Tz horizontal scaling, 1 = 100%. */
+  horizScale: number;
 };
 
 const WS = new Set([0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20]);
@@ -744,6 +746,7 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
   let fontName = "";
   let fontSize = 0;
   let leading = 0;
+  let horizScale = 1;
   let inText = false;
 
   const significant = tokens
@@ -825,6 +828,11 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
       fontSize = num(sizeTok);
       continue;
     }
+    if (op === "Tz") {
+      const raw = num(prev(1)[0]);
+      horizScale = Number.isFinite(raw) && raw !== 0 ? raw / 100 : 1;
+      continue;
+    }
     if (op === "Tm") {
       const p = prev(6);
       if (p.length === 6) {
@@ -882,6 +890,7 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
         fill: { ...g.fill },
         ctm: [...g.ctm] as AffineMatrix,
         textMatrix: [...textMatrix] as AffineMatrix,
+        horizScale,
       });
       continue;
     }
