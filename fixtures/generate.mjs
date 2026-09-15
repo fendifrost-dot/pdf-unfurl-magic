@@ -275,8 +275,8 @@ function blitText(rgba, width, x, y, text, scale, ink) {
 async function scanImageOnly() {
   const doc = await PDFDocument.create();
   await stamp(doc, "scan-image-only");
-  const width = 220;
-  const height = 120;
+  const width = 400;
+  const height = 180;
   const rgba = new Uint8Array(width * height * 4);
   for (let i = 0; i < rgba.length; i += 4) {
     rgba[i] = 245;
@@ -284,9 +284,9 @@ async function scanImageOnly() {
     rgba[i + 2] = 230;
     rgba[i + 3] = 255;
   }
-  blitText(rgba, width, 12, 18, "SCAN FIXTURE", 2, [28, 26, 24]);
-  blitText(rgba, width, 12, 48, "AMOUNT 1987.00", 2, [28, 26, 24]);
-  blitText(rgba, width, 12, 78, "POS DEBIT 6205", 2, [28, 26, 24]);
+  blitText(rgba, width, 16, 24, "SCAN FIXTURE", 4, [28, 26, 24]);
+  blitText(rgba, width, 16, 72, "AMOUNT 1987.00", 4, [28, 26, 24]);
+  blitText(rgba, width, 16, 120, "POS DEBIT 6205", 4, [28, 26, 24]);
   const png = encodePng(width, height, rgba);
   const page = doc.addPage(A4);
   const image = await doc.embedPng(png);
