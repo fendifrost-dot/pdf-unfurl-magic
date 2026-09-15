@@ -23,6 +23,7 @@ import { loadPdfDocument } from "./pdf-io";
 import { fitFontSize } from "./text-helpers";
 import { canvasToJpeg } from "./image-process";
 import { renderPageToImageData, looksGarbled, type TextLine } from "./pdf-runtime";
+import type { OcrUncertainSnippet } from "./ocr-verify";
 import { enhanceImage } from "./scan/enhance";
 import { canvasFromImageData } from "./scan/image";
 import { recognizePageLines, groupOcrWords } from "./scan/ocr";
@@ -61,6 +62,8 @@ export type ScanPageSession = {
   enhancedJpeg?: ScanJpeg;
   enhancedPreviewUrl?: string;
   ocrLines: TextLine[];
+  /** Uncertain Tesseract snippets waiting for Accept / Correct / Skip. */
+  ocrVerify?: OcrUncertainSnippet[];
   pageWidth?: number;
   pageHeight?: number;
 };
@@ -308,6 +311,14 @@ export function ocrBoxesToTextLines(
       fontFamily: "Helvetica",
       source: "ocr" as const,
       confidence: box.confidence,
+      ...(box.words?.length
+        ? {
+            ocrWords: box.words.map((word) => ({
+              text: word.text,
+              confidence: word.confidence,
+            })),
+          }
+        : {}),
     };
   });
 }
@@ -465,7 +476,7 @@ export async function applyScanPagePatches(
 }
 
 export function emptyScanSession(preset: EnhancePreset = "receipt"): ScanPageSession {
-  return { preset, replaceWithCleaned: false, ocrLines: [] };
+  return { preset, replaceWithCleaned: false, ocrLines: [], ocrVerify: [] };
 }
 
 export function releaseScanSession(session?: ScanPageSession | null) {
