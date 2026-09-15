@@ -20,12 +20,13 @@ export function FontMatchIndicator({
   const blocked = inspection.method === "blocked";
   const inPlace = inspection.method === "in-place";
   const system = inspection.method === "redraw-system";
+  const unicode = inspection.method === "redraw-unicode";
   const missingOperator = !inspection.found && !scan;
   const tone = scan
     ? "text-warning"
     : blocked
       ? "text-destructive"
-      : inPlace
+      : inPlace || unicode
         ? "text-success"
         : "text-warning";
   const Icon = scan ? ScanSearch : blocked ? ShieldAlert : ShieldCheck;
@@ -41,9 +42,11 @@ export function FontMatchIndicator({
             ? "Blocked"
             : inPlace
               ? "Safe in-place rewrite"
-              : system
-                ? "Safe local system font"
-                : "Safe standard stand-in";
+              : unicode
+                ? "Safe Unicode embed"
+                : system
+                  ? "Safe local system font"
+                  : "Safe standard stand-in";
 
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-surface/60 px-3 py-2.5">

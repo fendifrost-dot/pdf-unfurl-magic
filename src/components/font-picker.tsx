@@ -24,6 +24,7 @@ export function FontPicker({
   const selected = options.find((item) => item.id === value);
   const embedded = options.filter((item) => item.source === "embedded");
   const system = options.filter((item) => item.source === "system");
+  const bundled = options.filter((item) => item.source === "bundled");
   const standard = options.filter((item) => item.source === "standard");
 
   return (
@@ -58,6 +59,19 @@ export function FontPicker({
             <SelectGroup>
               <SelectLabel>Local system fonts</SelectLabel>
               {system.map((item) => (
+                <SelectItem key={item.id} value={item.id} disabled={item.safety === "unsafe"}>
+                  <span className="flex items-center gap-2">
+                    {item.label}
+                    <SafetyMark safety={item.safety} />
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
+          {bundled.length > 0 && (
+            <SelectGroup>
+              <SelectLabel>Bundled SIL OFL (PRIOR_ART #1)</SelectLabel>
+              {bundled.map((item) => (
                 <SelectItem key={item.id} value={item.id} disabled={item.safety === "unsafe"}>
                   <span className="flex items-center gap-2">
                     {item.label}

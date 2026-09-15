@@ -3,8 +3,9 @@
  *
  * We never ask the user to download or activate Creative Cloud fonts. If the
  * page already uses a Standard 14 font (or a WinAnsi cousin we can encode),
- * replacement text is written in that encoding. Characters we cannot encode
- * are reported instead of being written as .notdef / "?".
+ * replacement text is written in that encoding. Characters Standard 14 cannot
+ * encode are redrawn with a bundled SIL OFL TTF (PRIOR_ART #1) instead of
+ * being written as .notdef / "?".
  */
 
 import { StandardFonts } from "pdf-lib";
@@ -325,9 +326,16 @@ export function matchFont(input: {
   };
 }
 
-export function describeFontMatch(match: FontMatch, missingGlyphs: string[]): string {
+export function describeFontMatch(
+  match: FontMatch,
+  missingGlyphs: string[],
+  unicodeLabel?: string,
+): string {
   if (missingGlyphs.length > 0) {
-    return `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} in a Standard 14 font — export would write “?”.`;
+    return `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — Liberation/Noto (PRIOR_ART #1) also lack those glyphs, so export would write “?”.`;
+  }
+  if (unicodeLabel) {
+    return `Standard 14 cannot encode this run in WinAnsi. Will embed ${unicodeLabel} (SIL OFL, PRIOR_ART #1) instead of writing “?”.`;
   }
   if (match.kind === "embedded-standard") {
     return `Uses the page’s ${match.label} (Standard 14, already in the file).`;

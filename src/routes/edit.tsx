@@ -47,7 +47,6 @@ import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { FontPicker } from "@/components/font-picker";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
-import { charsMissingFromWinAnsi } from "@/lib/pdf-font-match";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
 import {
   emptyScanSession,
@@ -453,7 +452,6 @@ function Editor() {
   const boxWidth = selected ? selected.width : 0;
   const draftFits = selected ? estimateWidth(draft, selected.fontSize) <= boxWidth : true;
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
-  const missingGlyphs = useMemo(() => charsMissingFromWinAnsi(draft), [draft]);
 
   useEffect(() => {
     if (!doc || !selected || selected.source === "ocr" || scanReport?.looksScanned) {
@@ -470,41 +468,44 @@ function Editor() {
       width: selected.width,
       height: selected.height,
       fontSize: selected.fontSize,
-      text: selected.text,
+      text: draft,
       originalText: selected.text,
       fontName: selected.fontName,
       fontFamily: selected.fontFamily,
     };
-    void inspectTextPatch(doc.bytes, probe)
-      .then(async (result) => {
-        if (cancelled) return;
-        setInspection(result);
-        const system = await querySystemFonts();
-        if (cancelled) return;
-        const catalog = mergeFontCatalog({
-          embedded: result.embeddedFonts ?? [],
-          selectedKey: result.resourceKey || selected.fontName,
-          originalText: selected.text,
-          match: result.fontMatch,
-          system,
+    const timer = window.setTimeout(() => {
+      void inspectTextPatch(doc.bytes, probe)
+        .then(async (result) => {
+          if (cancelled) return;
+          setInspection(result);
+          const system = await querySystemFonts();
+          if (cancelled) return;
+          const catalog = mergeFontCatalog({
+            embedded: result.embeddedFonts ?? [],
+            selectedKey: result.resourceKey || selected.fontName,
+            originalText: selected.text,
+            match: result.fontMatch,
+            system,
+          });
+          setFontCatalog(catalog);
+          setFontChoiceId((prev) =>
+            catalog.some((item) => item.id === prev)
+              ? prev
+              : defaultFontChoiceId(catalog, result.resourceKey || selected.fontName),
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setInspection(null);
+        })
+        .finally(() => {
+          if (!cancelled) setInspecting(false);
         });
-        setFontCatalog(catalog);
-        setFontChoiceId((prev) =>
-          catalog.some((item) => item.id === prev)
-            ? prev
-            : defaultFontChoiceId(catalog, result.resourceKey || selected.fontName),
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setInspection(null);
-      })
-      .finally(() => {
-        if (!cancelled) setInspecting(false);
-      });
+    }, 80);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [doc, selected, scanReport?.looksScanned]);
+  }, [doc, selected, draft, scanReport?.looksScanned]);
 
   const openSample = async () => {
     setStatus("Building the sample quote");
@@ -531,7 +532,6 @@ function Editor() {
     const text = draft.trim();
     if (selected.source !== "ocr" && scanMode) return;
     if (text && text !== selected.text && !canCommitSafely(inspection, text, selected.text)) return;
-    if (missingGlyphs.length > 0 && text !== selected.text) return;
     setEdits((prev) => {
       const next = { ...prev };
       if (!text || text === selected.text) delete next[selected.id];
@@ -1333,20 +1333,7 @@ function Editor() {
                       </p>
                       {!selectedIsOcr && (
                         <>
-                          <FontMatchIndicator
-                            inspection={
-                              inspection && missingGlyphs.length > 0
-                                ? {
-                                    ...inspection,
-                                    method: "blocked",
-                                    blockReason: "missing-glyphs",
-                                    missingGlyphs,
-                                    message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
-                                  }
-                                : inspection
-                            }
-                            loading={inspecting}
-                          />
+                          <FontMatchIndicator inspection={inspection} loading={inspecting} />
                           <FontPicker
                             options={fontCatalog}
                             value={fontChoiceId}
@@ -1397,9 +1384,8 @@ function Editor() {
                           className="flex-1"
                           onClick={commit}
                           disabled={
-                            (!selectedIsOcr &&
-                              (scanMode || !canCommitSafely(inspection, draft, selected.text))) ||
-                            missingGlyphs.length > 0
+                            !selectedIsOcr &&
+                            (scanMode || !canCommitSafely(inspection, draft, selected.text))
                           }
                         >
                           Keep this change

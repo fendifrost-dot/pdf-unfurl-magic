@@ -4,6 +4,7 @@ import {
   charsMissingFromWinAnsi,
   decodeShowBytes,
   decodeWinAnsiBytes,
+  describeFontMatch,
   encodeWinAnsiBytes,
   foldPdfPunctuation,
   matchFont,
@@ -62,5 +63,11 @@ describe("WinAnsi coverage", () => {
       0x30,
     ]);
     expect(decodeShowBytes(bytes)).toBe("2,500.00");
+  });
+
+  it("describes the OFL Unicode embed instead of a question-mark warning", () => {
+    const match = matchFont({ baseFont: "Helvetica" });
+    expect(describeFontMatch(match, [], "Liberation Sans")).toMatch(/PRIOR_ART #1/);
+    expect(describeFontMatch(match, ["你"])).toMatch(/would write “\?”/);
   });
 });

@@ -69,7 +69,8 @@ Install: Android Chrome may offer **Install**. iOS Safari → Share → Add to H
 ## Built with
 
 - TanStack Start, Vite, React, TypeScript, Tailwind CSS, shadcn/ui
-- pdf-lib and PDF.js, both running locally
+- pdf-lib, `@pdf-lib/fontkit`, and PDF.js, all running locally
+- Bundled SIL OFL fonts (Liberation Sans + Noto Sans) for Unicode text edits — see [PRIOR_ART #1](docs/PRIOR_ART.md)
 - Electron for the desktop build
 - [`signature_pad`](https://github.com/szimek/signature_pad) (MIT) for e-sign draw-to-sign — [PRIOR_ART #3](docs/PRIOR_ART.md)
 
