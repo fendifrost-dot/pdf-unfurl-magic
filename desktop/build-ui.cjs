@@ -1,6 +1,7 @@
 /**
- * Production desktop UI build. Sets PDF_RELIEF_DESKTOP so Vite emits a static
- * SPA shell, then stages it into dist/ for electron-builder.
+ * Production desktop UI build. Sets PDF_RELIEF_DESKTOP so Vite prerenders a
+ * static SPA shell into .output/public (the real Nitro client output — there
+ * is no dist/ after npm run build).
  */
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");

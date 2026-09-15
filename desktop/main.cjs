@@ -64,7 +64,7 @@ async function startPackagedUi() {
   const uiRoot = resolveUiRoot(appRoot);
   if (!uiRoot) {
     throw new Error(
-      "PDF Relief UI files were not found (no dist/index.html). Rebuild with npm run pack or npm run desktop. Packed apps must not spawn npx or vite.",
+      "PDF Relief UI files were not found (no .output/public/index.html). npm run build does not create dist/; the client is .output/public. Rebuild with npm run pack or npm run desktop. Packed apps must not spawn npx or vite.",
     );
   }
   const started = await startStaticUiServer(uiRoot);

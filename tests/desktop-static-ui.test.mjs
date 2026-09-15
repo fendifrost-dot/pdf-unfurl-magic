@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 const desktopDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../desktop");
+const repoRoot = path.join(desktopDir, "..");
 const require = createRequire(import.meta.url);
 const { fileForRequest, resolveUiRoot, startStaticUiServer } = require(
   path.join(desktopDir, "static-ui.cjs"),
@@ -40,21 +41,29 @@ test("packed main process must not spawn npx or vite preview", () => {
   assert.match(source, /loadURL/);
 });
 
-test("in-process static UI serves the SPA shell for /edit without npx", async () => {
+test("electron-builder files pack .output/public, not an empty dist glob", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  const serialized = JSON.stringify(pkg.build.files);
+  assert.match(serialized, /\.output\/public/);
+  assert.doesNotMatch(serialized, /dist\/\*\*\/\*/);
+});
+
+test("in-process static UI serves .output/public when dist/ does not exist", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-relief-ui-"));
-  const dist = path.join(tmp, "dist");
-  fs.mkdirSync(path.join(dist, "assets"), { recursive: true });
+  const publicDir = path.join(tmp, ".output", "public");
+  fs.mkdirSync(path.join(publicDir, "assets"), { recursive: true });
   fs.writeFileSync(
-    path.join(dist, "index.html"),
+    path.join(publicDir, "index.html"),
     `<!doctype html><html><head><title>PDF Relief</title></head><body><div id="app">shell</div><script type="module" src="/assets/app.js"></script></body></html>`,
   );
-  fs.writeFileSync(path.join(dist, "assets", "app.js"), "window.__pdfRelief = true;\n");
-  fs.writeFileSync(path.join(dist, "pdf.worker.boot.mjs"), "export {};\n");
+  fs.writeFileSync(path.join(publicDir, "assets", "app.js"), "window.__pdfRelief = true;\n");
+  fs.writeFileSync(path.join(publicDir, "pdf.worker.boot.mjs"), "export {};\n");
 
-  assert.equal(resolveUiRoot(tmp), dist);
-  assert.ok(fileForRequest(dist, "/assets/app.js")?.endsWith(`${path.sep}app.js`));
+  assert.equal(fs.existsSync(path.join(tmp, "dist")), false);
+  assert.equal(resolveUiRoot(tmp), publicDir);
+  assert.ok(fileForRequest(publicDir, "/assets/app.js")?.endsWith(`${path.sep}app.js`));
 
-  const { server, origin } = await startStaticUiServer(dist);
+  const { server, origin } = await startStaticUiServer(publicDir);
   try {
     const edit = await fetchText(`${origin}/edit`);
     assert.equal(edit.status, 200);
@@ -79,10 +88,10 @@ test("in-process static UI serves the SPA shell for /edit without npx", async ()
 
 test("path traversal does not escape the UI root", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-relief-ui-"));
-  const dist = path.join(tmp, "dist");
-  fs.mkdirSync(dist, { recursive: true });
-  fs.writeFileSync(path.join(dist, "index.html"), "<html></html>");
+  const publicDir = path.join(tmp, ".output", "public");
+  fs.mkdirSync(publicDir, { recursive: true });
+  fs.writeFileSync(path.join(publicDir, "index.html"), "<html></html>");
   fs.writeFileSync(path.join(tmp, "secret.txt"), "nope");
-  assert.equal(fileForRequest(dist, "/../secret.txt"), null);
+  assert.equal(fileForRequest(publicDir, "/../secret.txt"), null);
   fs.rmSync(tmp, { recursive: true, force: true });
 });

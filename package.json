@@ -42,7 +42,17 @@
       "desktop/static-ui.cjs",
       "desktop/icon.png",
       "desktop/icon.svg",
-      "dist/**/*",
+      {
+        "from": ".output/public",
+        "to": ".output/public",
+        "filter": [
+          "**/*",
+          "!server",
+          "!server/**/*",
+          "!_headers",
+          "!nitro.json"
+        ]
+      },
       "!node_modules",
       "!node_modules/**/*"
     ],

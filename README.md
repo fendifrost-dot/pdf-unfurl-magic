@@ -39,7 +39,7 @@ on Windows, **Open PDF Relief.bat**.
 
 After a feature merge, rebuild the Dock app with `npm run pack:mac`. See
 [docs/DESKTOP_RELEASE.md](docs/DESKTOP_RELEASE.md) for install, Gatekeeper, Dock pin,
-and the packed-app rule: production must load `dist/` in-process and never spawn npx or vite.
+and the packed-app rule: production must load `.output/public` in-process and never spawn npx or vite.
 
 `npm run desktop:dev` still serves the UI on 127.0.0.1:47321 so it never competes with
 the web dev server's port.

@@ -19,9 +19,9 @@ These builds skip Apple code signing (`identity` is unset). You do not need a De
 
 ## Packed app must not spawn npx
 
-Opening **PDF Relief.app** loads the Vite client from `dist/` with an in-process static file server. It must **not** call `npx`, `vite preview`, or any other child process to start the UI. `vite` / `npx` are only for `npm run desktop:dev` (and the web `dev`/`preview` scripts) on a developer machine.
+Opening **PDF Relief.app** loads the Vite/Nitro client from `.output/public` with an in-process static file server. After `npm run build` there is **no** `dist/` folder — assets land in `.output/public`. The packed app must **not** call `npx`, `vite preview`, or any other child process to start the UI. `vite` / `npx` are only for `npm run desktop:dev` (and the web `dev`/`preview` scripts) on a developer machine.
 
-`npm run pack:mac` runs `build:desktop`, which sets `PDF_RELIEF_DESKTOP=1` so Vite emits a static `index.html` shell and copies it into `dist/` (TanStack Start otherwise writes assets to `.output/public` with no HTML). electron-builder packs `desktop/` + `dist/` + `package.json` only — not the web `node_modules` tree.
+`npm run pack:mac` runs `build:desktop`, which sets `PDF_RELIEF_DESKTOP=1` so Vite prerenders `index.html` into `.output/public` (a plain `vite build` emits JS/CSS there with no HTML shell). electron-builder `files` copies `.output/public` into the asar together with `desktop/main.cjs` — not `dist/**/*` and not the web `node_modules` tree.
 
 ## Install to /Applications
 

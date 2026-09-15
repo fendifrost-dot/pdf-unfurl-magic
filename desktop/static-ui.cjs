@@ -32,11 +32,14 @@ const MIME = {
   ".woff2": "font/woff2",
 };
 
+/** Nitro/Vite client output after `npm run build`. There is no top-level dist/. */
+const PRIMARY_UI_SEGMENTS = [".output", "public"];
+
 function uiRootCandidates(appRoot) {
   return [
-    path.join(appRoot, "dist"),
+    path.join(appRoot, ...PRIMARY_UI_SEGMENTS),
     path.join(appRoot, "dist", "client"),
-    path.join(appRoot, ".output", "public"),
+    path.join(appRoot, "dist"),
   ];
 }
 
@@ -149,6 +152,7 @@ function startStaticUiServer(root, host = "127.0.0.1") {
 }
 
 module.exports = {
+  PRIMARY_UI_SEGMENTS,
   fileForRequest,
   hasHtmlShell,
   resolveShellFile,
