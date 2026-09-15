@@ -17,6 +17,9 @@ import {
   shouldFlattenPageAsScan,
   textOverlayChromeClass,
   textPageFooter,
+  columnFieldsForLine,
+  memberColumnLabel,
+  membersForLinePatch,
 } from "./edit-apply";
 
 const safeInspection: TextEditInspection = {
@@ -317,5 +320,75 @@ describe("Apply / Enhance exit contracts", () => {
         canvasShowsApplied: false,
       }),
     ).toBe(true);
+  });
+
+  it("labels description / amount / balance columns and maps drafts 1:1", () => {
+    expect(
+      memberColumnLabel("Paid To merchant", 0, ["Paid To merchant", "500.00", "4,972.29"]),
+    ).toBe("Description");
+    expect(memberColumnLabel("500.00", 1, ["Paid To merchant", "500.00", "4,972.29"])).toBe(
+      "Amount",
+    );
+    expect(memberColumnLabel("4,972.29", 2, ["Paid To merchant", "500.00", "4,972.29"])).toBe(
+      "Balance",
+    );
+    const line = {
+      id: "row",
+      x: 50,
+      y: 640,
+      width: 500,
+      height: 14,
+      fontSize: 10,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "Paid To merchant 500.00 4,972.29",
+      members: [
+        {
+          id: "desc",
+          x: 50,
+          y: 640,
+          width: 120,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "Paid To merchant",
+        },
+        {
+          id: "amt",
+          x: 400,
+          y: 640,
+          width: 50,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "500.00",
+        },
+        {
+          id: "bal",
+          x: 500,
+          y: 640,
+          width: 50,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "4,972.29",
+        },
+      ],
+    };
+    const fields = columnFieldsForLine(line);
+    expect(fields.map((field) => field.label)).toEqual(["Description", "Amount", "Balance"]);
+    const members = membersForLinePatch(line, {
+      desc: "Paid From merchant",
+      amt: "500.00",
+      bal: "4,972.29",
+    });
+    expect(members?.find((member) => member.originalText === "Paid To merchant")?.text).toBe(
+      "Paid From merchant",
+    );
+    expect(members?.find((member) => member.originalText === "500.00")?.x).toBe(400);
+    expect(members?.find((member) => member.originalText === "4,972.29")?.x).toBe(500);
   });
 });
