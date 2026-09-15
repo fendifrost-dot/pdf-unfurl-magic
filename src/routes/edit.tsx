@@ -88,6 +88,7 @@ import {
   alignRuns,
   editIsPending,
   extractOrigin,
+  groupForAlign,
   lineAtOrigin,
   nudgeRuns,
   patchesFromEdit,
@@ -994,18 +995,24 @@ function Editor() {
     }
   };
 
-  const applyMemberLayout = (nextMembers: ReturnType<typeof selectionMembers>) => {
-    if (!selected) return;
-    const source = showingOcr
+  const pageLines = () =>
+    showingOcr
       ? scanSession.ocrLines.length
         ? scanSession.ocrLines
         : lines
       : nativeLines.length
         ? nativeLines
         : lines;
-    const nextLines = remapLinePositions(source, nextMembers);
+
+  const applyMemberLayout = (
+    nextMembers: ReturnType<typeof selectionMembers>,
+    sourceLines: TextLine[] = pageLines(),
+    anchor: TextLine = selected!,
+  ) => {
+    if (!anchor) return;
+    const nextLines = remapLinePositions(sourceLines, nextMembers);
     const snapshot =
-      findLineOrMember(nextLines, selected.id) ?? parentLineFor(nextLines, selected) ?? selected;
+      findLineOrMember(nextLines, anchor.id) ?? parentLineFor(nextLines, anchor) ?? anchor;
     const parent = parentLineFor(nextLines, snapshot) ?? snapshot;
     if (showingOcr) {
       setLines(nextLines);
@@ -1013,6 +1020,10 @@ function Editor() {
     } else {
       setNativeLines(nextLines);
       setLines(nextLines);
+    }
+    setSelectedId(parent.id);
+    if (anchor.id !== selected?.id) {
+      setDraft(edits[parent.id]?.text ?? parent.text);
     }
     setEdits((prev) => {
       const touched = new Set(nextMembers.map((run) => run.id));
@@ -1030,7 +1041,7 @@ function Editor() {
           next[id] = pending;
         }
       }
-      const existing = next[selected.id];
+      const existing = next[anchor.id] ?? next[parent.id];
       const pending = {
         line: parent,
         text: existing?.text ?? parent.text,
@@ -1038,41 +1049,58 @@ function Editor() {
           ? { fontChoiceId: existing?.fontChoiceId ?? fontChoiceId }
           : {}),
       };
-      if (!editIsPending(pending)) delete next[selected.id];
-      else next[selected.id] = pending;
+      delete next[anchor.id];
+      if (!editIsPending(pending)) delete next[parent.id];
+      else next[parent.id] = pending;
       return next;
     });
     setApplyNotice(APPLY_SUCCESS_MESSAGE);
     setShowOriginalHint(true);
   };
 
+  const workingAlignGroup = () => {
+    if (!selected) return null;
+    const source = pageLines();
+    const current = parentLineFor(source, selected) ?? selected;
+    if (selectionMembers(current).length >= 2) {
+      return { source, anchor: current, members: selectionMembers(current) };
+    }
+    const expanded = expandToFullLine(source, current);
+    if (expanded && selectionMembers(expanded).length >= 2) {
+      const band = Math.max(3, current.fontSize * 0.5);
+      const working = [
+        ...source.filter(
+          (line) => !(line.page === current.page && Math.abs(line.y - current.y) <= band),
+        ),
+        expanded,
+      ].sort((a, b) => b.y - a.y || a.x - b.x);
+      return { source: working, anchor: expanded, members: selectionMembers(expanded) };
+    }
+    return { source, anchor: current, members: selectionMembers(current) };
+  };
+
   const alignSelection = (kind: AlignKind) => {
-    if (!selected) return;
-    applyMemberLayout(alignRuns(selectionMembers(selected), kind));
+    const group = workingAlignGroup();
+    if (!group) return;
+    applyMemberLayout(alignRuns(group.members, kind), group.source, group.anchor);
   };
 
   const nudgeSelection = (dx: number) => {
-    if (!selected) return;
-    applyMemberLayout(nudgeRuns(selectionMembers(selected), dx));
+    const group = workingAlignGroup();
+    if (!group) return;
+    applyMemberLayout(nudgeRuns(group.members, dx), group.source, group.anchor);
   };
 
   const snapSelectionToOrigin = () => {
-    if (!selected) return;
-    const group = selectionMembers(selected);
-    const source = showingOcr
-      ? scanSession.ocrLines.length
-        ? scanSession.ocrLines
-        : lines
-      : nativeLines.length
-        ? nativeLines
-        : lines;
-    const pendingOnPage = source
-      .filter((line) => line.page === selected.page)
+    const group = workingAlignGroup();
+    if (!group) return;
+    const pendingOnPage = group.source
+      .filter((line) => line.page === group.anchor.page)
       .flatMap((line) => (line.members?.length ? line.members : [line]))
       .filter((run) => positionMoved(run));
-    const selectedIds = new Set(group.map((run) => run.id));
+    const selectedIds = new Set(group.members.map((run) => run.id));
     const extras = pendingOnPage.filter((run) => !selectedIds.has(run.id));
-    applyMemberLayout(snapRunsToOrigin([...group, ...extras]));
+    applyMemberLayout(snapRunsToOrigin([...group.members, ...extras]), group.source, group.anchor);
   };
 
   const patchScanSession = (partial: Partial<ScanPageSession>) => {
@@ -2315,7 +2343,7 @@ function Editor() {
                         </Button>
                       )}
 
-                      {showAlignControls({ selected, textSelectMode }) && (
+                      {showAlignControls({ selected, lines, textSelectMode }) && (
                         <AlignSelectionPanel
                           onAlign={alignSelection}
                           onNudge={nudgeSelection}

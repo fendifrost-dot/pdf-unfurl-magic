@@ -386,6 +386,97 @@ export function expandToFullLine(lines: TextLine[], selected: TextLine): TextLin
   return joined;
 }
 
+function estimatedShowWidth(show: { text: string; fontSize: number }): number {
+  return Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5);
+}
+
+/**
+ * PDF.js sometimes paints a whole statement row as one fat run (missing
+ * standard-font widths, or a wide item). Split it back into column members
+ * using content-stream shows so Align can move description vs amount vs
+ * balance independently.
+ */
+export function splitLineByColumnShows(
+  line: TextLine,
+  shows: Array<{ text: string; x: number; y: number; fontSize: number }>,
+): TextLine {
+  if ((line.members?.length ?? 0) > 1) {
+    return {
+      ...line,
+      originX: line.originX ?? line.x,
+      originY: line.originY ?? line.y,
+      members: line.members!.map((member) => ({
+        ...member,
+        originX: member.originX ?? member.x,
+        originY: member.originY ?? member.y,
+      })),
+    };
+  }
+  const band = Math.max(3, line.fontSize * 0.5);
+  const hits = shows
+    .filter((show) => {
+      if (Math.abs(show.y - line.y) > band) return false;
+      const showW = estimatedShowWidth(show);
+      const overlap = Math.min(show.x + showW, line.x + line.width) - Math.max(show.x, line.x);
+      return overlap > Math.min(showW, line.width) * 0.2;
+    })
+    .sort((a, b) => a.x - b.x);
+  if (hits.length < 2) {
+    return { ...line, originX: line.originX ?? line.x, originY: line.originY ?? line.y };
+  }
+  const groups: Array<typeof hits> = [];
+  let current: typeof hits = [];
+  for (const show of hits) {
+    const prev = current[current.length - 1];
+    if (!prev) {
+      current = [show];
+      continue;
+    }
+    const gap = show.x - (prev.x + estimatedShowWidth(prev));
+    const em = Math.max(show.fontSize, prev.fontSize, line.fontSize, 8);
+    const columnGap = Math.max(COLUMN_EM * em, 36);
+    if (gap > columnGap) {
+      groups.push(current);
+      current = [show];
+    } else {
+      current.push(show);
+    }
+  }
+  if (current.length) groups.push(current);
+  if (groups.length < 2) {
+    return { ...line, originX: line.originX ?? line.x, originY: line.originY ?? line.y };
+  }
+  const members: TextLine[] = groups.map((group, index) => {
+    const x = Math.min(...group.map((item) => item.x));
+    const right = Math.max(...group.map((item) => item.x + estimatedShowWidth(item)));
+    const y = Math.min(...group.map((item) => item.y));
+    const fontSize = Math.max(...group.map((item) => item.fontSize), line.fontSize);
+    const text = group
+      .map((item) => item.text)
+      .join(" ")
+      .replace(/[ \t]+/g, " ")
+      .trim();
+    return {
+      id: `${line.id}-col${index}`,
+      page: line.page,
+      text,
+      x,
+      y,
+      originX: x,
+      originY: y,
+      width: Math.max(right - x, fontSize * 0.6),
+      height: fontSize * 1.18,
+      fontSize,
+      fontName: line.fontName,
+      fontFamily: line.fontFamily,
+      ...(line.source ? { source: line.source } : {}),
+      hasTextOperator: true,
+      kind: "run",
+    };
+  });
+  return { ...joinRunsToLine(members), id: line.id };
+}
+
 function attachStreamHints(
   run: TextLine,
   shows: Array<{ text: string; x: number; y: number; fontSize: number }>,
@@ -485,7 +576,7 @@ export async function extractLines(
       return mergeLinesByBaseline(pdfjsRuns);
     }
     const hinted = pdfjsRuns.map((run) => attachStreamHints(run, shows));
-    return mergeLinesByBaseline(hinted);
+    return mergeLinesByBaseline(hinted).map((line) => splitLineByColumnShows(line, shows));
   } catch (error) {
     console.error("content-stream text extract failed; using PDF.js runs", error);
     return mergeLinesByBaseline(pdfjsRuns);

@@ -14,6 +14,7 @@
  * not only the overlay CSS.
  */
 import type { TextLine } from "./pdf-runtime";
+import { expandToFullLine } from "./pdf-runtime";
 import type { TextPatch } from "./pdf-text-edit";
 import { coverBoxesFromLine } from "./text-select";
 
@@ -310,12 +311,21 @@ export function editIsPending(edit: PositionEdit): boolean {
   return members.some((member) => positionMoved(member)) || positionMoved(line);
 }
 
+export function groupForAlign(selected: TextLine, lines: TextLine[]): TextLine[] {
+  const members = selectionMembers(selected);
+  if (members.length >= 2) return members;
+  const expanded = expandToFullLine(lines, selected);
+  if (expanded?.members && expanded.members.length >= 2) return selectionMembers(expanded);
+  return members;
+}
+
 export function showAlignControls(input: {
   selected: TextLine | undefined;
+  lines?: TextLine[];
   textSelectMode: "line" | "marquee";
 }): boolean {
   if (!input.selected) return false;
-  const members = selectionMembers(input.selected);
+  const members = groupForAlign(input.selected, input.lines ?? []);
   if (members.length >= 2) return true;
   return input.textSelectMode === "marquee";
 }

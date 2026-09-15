@@ -9,6 +9,7 @@ import {
   mergeLinesByBaseline,
   preferReadableText,
   joinRunsToLine,
+  splitLineByColumnShows,
   type RawTextItem,
 } from "./pdf-runtime";
 import { applyTextPatchesWithReport, inspectTextPatch, listPageShownText } from "./pdf-text-edit";
@@ -119,6 +120,35 @@ describe("mergeLinesByBaseline", () => {
     const expanded = expandToFullLine(lines, row!);
     expect(expanded?.text).toMatch(/500\.00/);
     expect(expanded?.text).toMatch(/Syd Pay 500\.00/);
+  });
+
+  it("splits a fat statement row into column members from content-stream shows", () => {
+    const line = joinRunsToLine([
+      {
+        id: "row",
+        page: 1,
+        text: "European oak worktop, 40mm 3 12 35",
+        x: 56,
+        y: 640,
+        width: 445,
+        height: 12,
+        fontSize: 10,
+        fontName: "F1",
+        fontFamily: "Helvetica",
+        kind: "run",
+        source: "pdfjs",
+        hasTextOperator: true,
+      },
+    ]);
+    const split = splitLineByColumnShows(line, [
+      { text: "European oak worktop, 40mm", x: 56, y: 640, fontSize: 10 },
+      { text: "3", x: 360, y: 640, fontSize: 10 },
+      { text: "12", x: 420, y: 640, fontSize: 10 },
+      { text: "35", x: 490, y: 640, fontSize: 10 },
+    ]);
+    expect(split.members?.length).toBe(4);
+    expect(split.members?.map((member) => member.x)).toEqual([56, 360, 420, 490]);
+    expect(split.members?.every((member) => member.originX === member.x)).toBe(true);
   });
 
   it("keeps a space when a far amount is merged despite an over-wide label box", () => {
