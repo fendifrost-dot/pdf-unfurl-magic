@@ -308,12 +308,12 @@ export function shouldFlattenPageAsScan(input: {
   replaceWithCleaned: boolean;
   hasNativeEdits: boolean;
   ocrLineCount: number;
+  looksScanned?: boolean;
 }): boolean {
   if (input.hasNativeEdits) return false;
-  return (
-    input.hasOriginalJpeg &&
-    (input.hasOcrEdits || input.replaceWithCleaned || input.ocrLineCount > 0)
-  );
+  if (!input.hasOriginalJpeg) return false;
+  if (input.replaceWithCleaned || input.hasOcrEdits) return true;
+  return input.ocrLineCount > 0 && input.looksScanned === true;
 }
 
 export type ColumnField = {

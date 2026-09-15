@@ -3,6 +3,7 @@ export { enhanceImage } from "./enhance";
 export {
   buildScanPdf,
   defaultScanFilename,
+  drawOcrGlyphs,
   setFillTextMode,
   setInvisibleOcrTextMode,
   type ScanPdfPage,

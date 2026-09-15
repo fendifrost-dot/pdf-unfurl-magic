@@ -18,7 +18,12 @@ import {
   decodePDFRawStream,
   rgb,
 } from "pdf-lib";
-import { collectTextShows, normalizePdfText, tokenizeContentStream } from "./pdf-content-stream";
+import {
+  collectTextShows,
+  normalizePdfText,
+  showPaintsVisibleGlyphs,
+  tokenizeContentStream,
+} from "./pdf-content-stream";
 import { loadPdfDocument } from "./pdf-io";
 import { fitFontSize } from "./text-helpers";
 import { canvasToJpeg } from "./image-process";
@@ -27,7 +32,7 @@ import type { OcrUncertainSnippet } from "./ocr-verify";
 import { enhanceImage } from "./scan/enhance";
 import { canvasFromImageData } from "./scan/image";
 import { recognizePageLines, groupOcrWords } from "./scan/ocr";
-import { setFillTextMode, setInvisibleOcrTextMode } from "./scan/pdf";
+import { drawOcrGlyphs } from "./scan/pdf";
 import type { EnhancePreset, OcrLineBox } from "./scan/types";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
@@ -283,6 +288,198 @@ export async function inspectPageScan(
   };
 }
 
+export type ScanPaintReport = {
+  showCount: number;
+  visibleShowCount: number;
+  invisibleShowCount: number;
+  fullPageImageCount: number;
+  trInsideTextObject: number;
+  trOutsideTextObject: number;
+  overlappingVisiblePairs: number;
+  /**
+   * Full-page image plus a second painted glyph layer — the Enhance export
+   * failure mode (page picture already has text, OCR `drawText` paints again).
+   */
+  hasStackedVisibleText: boolean;
+};
+
+const IDENTITY: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0];
+
+function multiplyCtm(
+  a: [number, number, number, number, number, number],
+  b: [number, number, number, number, number, number],
+): [number, number, number, number, number, number] {
+  return [
+    a[0] * b[0] + a[2] * b[1],
+    a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3],
+    a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4],
+    a[1] * b[4] + a[3] * b[5] + a[5],
+  ];
+}
+
+function tokenNumber(
+  tokens: ReturnType<typeof tokenizeContentStream>,
+  index: number,
+  back: number,
+): number {
+  let seen = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    const token = tokens[i];
+    if (!token || token.kind === "ws" || token.kind === "comment") continue;
+    if (token.kind !== "num" || typeof token.value !== "number") return 0;
+    seen += 1;
+    if (seen === back) return token.value;
+  }
+  return 0;
+}
+
+function countFullPageImages(
+  tokens: ReturnType<typeof tokenizeContentStream>,
+  pageWidth: number,
+  pageHeight: number,
+): number {
+  const stack: Array<[number, number, number, number, number, number]> = [];
+  let ctm: [number, number, number, number, number, number] = [...IDENTITY];
+  let count = 0;
+  const minW = Math.max(pageWidth, 1) * 0.85;
+  const minH = Math.max(pageHeight, 1) * 0.85;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token || token.kind !== "op") continue;
+    const op = String(token.value ?? token.raw);
+    if (op === "q") {
+      stack.push(ctm);
+      continue;
+    }
+    if (op === "Q") {
+      ctm = stack.pop() ?? [...IDENTITY];
+      continue;
+    }
+    if (op === "cm") {
+      const b: [number, number, number, number, number, number] = [
+        tokenNumber(tokens, i, 6),
+        tokenNumber(tokens, i, 5),
+        tokenNumber(tokens, i, 4),
+        tokenNumber(tokens, i, 3),
+        tokenNumber(tokens, i, 2),
+        tokenNumber(tokens, i, 1),
+      ];
+      ctm = multiplyCtm(ctm, b);
+      continue;
+    }
+    if (op === "Do") {
+      if (Math.abs(ctm[0]) >= minW && Math.abs(ctm[3]) >= minH) count += 1;
+    }
+  }
+  return count;
+}
+
+function countTrPlacement(tokens: ReturnType<typeof tokenizeContentStream>): {
+  inside: number;
+  outside: number;
+} {
+  let inText = false;
+  let inside = 0;
+  let outside = 0;
+  for (const token of tokens) {
+    if (token.kind !== "op") continue;
+    const op = String(token.value ?? token.raw);
+    if (op === "BT") inText = true;
+    else if (op === "ET") inText = false;
+    else if (op === "Tr") {
+      if (inText) inside += 1;
+      else outside += 1;
+    }
+  }
+  return { inside, outside };
+}
+
+function countOverlappingVisiblePairs(shows: ReturnType<typeof collectTextShows>): number {
+  const visible = shows.filter((show) => {
+    if (!showPaintsVisibleGlyphs(show)) return false;
+    const text = normalizePdfText(show.text);
+    if (text.length < 8) return false;
+    const letters = [...text].filter((ch) => /[A-Za-z0-9]/.test(ch)).length;
+    return letters / text.length >= 0.55;
+  });
+  let pairs = 0;
+  for (let i = 0; i < visible.length; i++) {
+    const a = visible[i]!;
+    const aKey = normalizePdfText(a.text);
+    const aW = Math.max(a.fontSize * 0.45 * Math.max(a.text.length, 1), 4);
+    for (let j = i + 1; j < visible.length; j++) {
+      const b = visible[j]!;
+      if (Math.abs(a.y - b.y) > Math.max(2, Math.max(a.fontSize, b.fontSize) * 0.45)) continue;
+      const bKey = normalizePdfText(b.text);
+      const bW = Math.max(b.fontSize * 0.45 * Math.max(b.text.length, 1), 4);
+      const overlap = Math.min(a.x + aW, b.x + bW) - Math.max(a.x, b.x);
+      if (overlap < Math.min(aW, bW) * 0.55) continue;
+      if (aKey === bKey || aKey.includes(bKey) || bKey.includes(aKey)) pairs += 1;
+    }
+  }
+  return pairs;
+}
+
+export function inspectContentScanPaint(
+  raw: Uint8Array,
+  pageWidth: number,
+  pageHeight: number,
+): ScanPaintReport {
+  const tokens = tokenizeContentStream(raw);
+  const shows = collectTextShows(tokens);
+  const visibleShowCount = shows.filter(showPaintsVisibleGlyphs).length;
+  const tr = countTrPlacement(tokens);
+  const fullPageImageCount = countFullPageImages(tokens, pageWidth, pageHeight);
+  const overlappingVisiblePairs = countOverlappingVisiblePairs(shows);
+  const brokenInvisibleOcr = shows.length > 0 && tr.outside > 0 && tr.inside === 0;
+  return {
+    showCount: shows.length,
+    visibleShowCount,
+    invisibleShowCount: shows.length - visibleShowCount,
+    fullPageImageCount,
+    trInsideTextObject: tr.inside,
+    trOutsideTextObject: tr.outside,
+    overlappingVisiblePairs,
+    hasStackedVisibleText:
+      (fullPageImageCount > 0 && brokenInvisibleOcr) || overlappingVisiblePairs > 0,
+  };
+}
+
+export async function inspectPageScanPaint(
+  bytes: ArrayBuffer,
+  pageNumber: number,
+): Promise<ScanPaintReport> {
+  const doc = await loadPdfDocument(bytes);
+  const page = doc.getPages()[pageNumber - 1];
+  if (!page) {
+    return {
+      showCount: 0,
+      visibleShowCount: 0,
+      invisibleShowCount: 0,
+      fullPageImageCount: 0,
+      trInsideTextObject: 0,
+      trOutsideTextObject: 0,
+      overlappingVisiblePairs: 0,
+      hasStackedVisibleText: false,
+    };
+  }
+  const { width, height } = page.getSize();
+  const chunks: Uint8Array[] = [];
+  for (const stream of pageContentStreams(doc, page)) {
+    chunks.push(decodeStream(stream));
+  }
+  const total = chunks.reduce((n, chunk) => n + chunk.length, 0);
+  const raw = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    raw.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return inspectContentScanPaint(raw, width, height);
+}
+
 export function ocrBoxesToTextLines(
   boxes: OcrLineBox[],
   pageNumber: number,
@@ -396,6 +593,7 @@ async function drawScanPage(doc: PDFDocument, page: PDFPage, patch: ScanPageExpo
 
   if (patch.lines.length === 0) return;
   const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.setFont(font);
   for (const line of patch.lines) {
     const text = line.text.replace(/\s*\n\s*/g, " ").trim();
     if (!text) continue;
@@ -411,7 +609,6 @@ async function drawScanPage(doc: PDFDocument, page: PDFPage, patch: ScanPageExpo
     const boxH = Math.max(8, line.height);
     try {
       if (changed) {
-        setFillTextMode(page);
         page.drawRectangle({
           x,
           y,
@@ -419,23 +616,19 @@ async function drawScanPage(doc: PDFDocument, page: PDFPage, patch: ScanPageExpo
           height: boxH,
           color: rgb(1, 1, 1),
         });
-        page.drawText(text, {
+        drawOcrGlyphs(page, font, text, {
           x,
           y: y + Math.max(1, (boxH - size) * 0.2),
           size,
-          font,
+          invisible: false,
           color: rgb(0.08, 0.08, 0.1),
-          maxWidth: boxW,
         });
       } else {
-        setInvisibleOcrTextMode(page);
-        page.drawText(text, {
+        drawOcrGlyphs(page, font, text, {
           x,
           y: y + Math.max(1, (boxH - size) * 0.2),
           size,
-          font,
-          color: rgb(0, 0, 0),
-          maxWidth: boxW,
+          invisible: true,
         });
       }
     } catch {

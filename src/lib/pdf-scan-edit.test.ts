@@ -1,10 +1,12 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import { encodePng } from "./tiny-png";
 import { bytesToLatin1 } from "./pdf-content-stream";
+import { extractLines } from "./pdf-runtime";
 import {
   listPageShownText,
   decodePageContent,
@@ -12,10 +14,12 @@ import {
   applyTextPatches,
 } from "./pdf-text-edit";
 import { groupOcrWords } from "./scan/ocr";
+import { setInvisibleOcrTextMode } from "./scan/pdf";
 import {
   applyScanPagePatches,
   classifyPageScan,
   inspectPageScan,
+  inspectPageScanPaint,
   matchPdfJsLines,
   ocrBoxesToTextLines,
 } from "./pdf-scan-edit";
@@ -218,8 +222,14 @@ describe("scan-aware export", () => {
     expect(await decodePageContent(out.slice().buffer as ArrayBuffer, 2)).toBe(page2Before);
 
     const raw = await decodePageContentRaw(out.slice().buffer as ArrayBuffer, 1);
-    expect(raw).toMatch(/\b3\s+Tr\b/);
+    expect(raw).toMatch(/\bBT\b[\s\S]*?\b3\s+Tr\b[\s\S]*?\bTj\b[\s\S]*?\bET\b/);
     expect(bytesToLatin1(out)).not.toMatch(/\/ca\s+0/);
+    const paint = await inspectPageScanPaint(out.slice().buffer as ArrayBuffer, 1);
+    expect(paint.fullPageImageCount).toBeGreaterThan(0);
+    expect(paint.visibleShowCount).toBe(1);
+    expect(paint.invisibleShowCount).toBeGreaterThan(0);
+    expect(paint.trInsideTextObject).toBeGreaterThan(0);
+    expect(paint.hasStackedVisibleText).toBe(false);
   });
 
   it("does not send scan OCR edits through the in-place text engine", async () => {
@@ -267,4 +277,187 @@ describe("scan-aware export", () => {
     const shown = await listPageShownText(exported.slice().buffer as ArrayBuffer, 1);
     expect(shown).toContain("2,257.00");
   });
+});
+
+GlobalWorkerOptions.workerSrc = new URL(
+  "../../node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
+
+function asBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.slice().buffer as ArrayBuffer;
+}
+
+/** Old Enhance export: full-page image + `3 Tr` *before* pdf-lib drawText (outside BT). */
+async function buggyEnhanceExport(opts?: { extraVisibleLayer?: boolean }): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([400, 500]);
+  const image = await doc.embedPng(BLUE);
+  page.drawImage(image, { x: 0, y: 0, width: 400, height: 500 });
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  if (opts?.extraVisibleLayer) {
+    page.drawText("06-09 POS Debit Debit Card 6205", {
+      x: 40,
+      y: 300,
+      size: 10,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  }
+  setInvisibleOcrTextMode(page);
+  page.drawText("06-09 POS Debit Debit Card 6205", {
+    x: 41,
+    y: 299,
+    size: 10,
+    font,
+    color: rgb(0, 0, 0),
+    maxWidth: 80,
+  });
+  return doc.save({ useObjectStreams: false });
+}
+
+const UPLOADS = "/home/ubuntu/.cursor/projects/workspace/uploads";
+const ENHANCE_EXPORT = join(UPLOADS, "June_2026_monthly_statement1_enhance_1cf8.pdf");
+const ENHANCE_ORIGINAL = join(
+  UPLOADS,
+  "June_2026_monthly_statement1_current_after-overwrite_ad28.pdf",
+);
+
+describe("Enhance export must not stack a second visible text layer", () => {
+  it("flags 3 Tr outside BT over a full-page image (the Enhance export bug)", async () => {
+    const bytes = await buggyEnhanceExport();
+    const paint = await inspectPageScanPaint(asBuffer(bytes), 1);
+    expect(paint.fullPageImageCount).toBeGreaterThan(0);
+    expect(paint.trOutsideTextObject).toBeGreaterThan(0);
+    expect(paint.trInsideTextObject).toBe(0);
+    expect(paint.hasStackedVisibleText).toBe(true);
+    const raw = await decodePageContentRaw(asBuffer(bytes), 1);
+    expect(raw).not.toMatch(/\bBT\b[\s\S]*?\b3\s+Tr\b[\s\S]*?\bTj\b/);
+  });
+
+  it("flags overlapping visible Tj at the same baseline on a page image", async () => {
+    const bytes = await buggyEnhanceExport({ extraVisibleLayer: true });
+    const paint = await inspectPageScanPaint(asBuffer(bytes), 1);
+    expect(paint.overlappingVisiblePairs).toBeGreaterThan(0);
+    expect(paint.hasStackedVisibleText).toBe(true);
+  });
+
+  it("applyScanPagePatches writes image + invisible OCR inside BT (Enhance path)", async () => {
+    const source = await imageOnlyPdf();
+    const out = await applyScanPagePatches(asBuffer(source), [
+      {
+        page: 1,
+        imageBytes: BLUE,
+        pixelWidth: 1,
+        pixelHeight: 1,
+        lines: [
+          {
+            x: 40,
+            y: 300,
+            width: 200,
+            height: 12,
+            fontSize: 10,
+            originalText: "06-09 POS Debit Debit Card 6205",
+            text: "06-09 POS Debit Debit Card 6205",
+          },
+          {
+            x: 40,
+            y: 280,
+            width: 80,
+            height: 12,
+            fontSize: 10,
+            originalText: "250.00",
+            text: "250.00",
+          },
+        ],
+      },
+    ]);
+    const paint = await inspectPageScanPaint(asBuffer(out), 1);
+    expect(paint.fullPageImageCount).toBeGreaterThan(0);
+    expect(paint.visibleShowCount).toBe(0);
+    expect(paint.invisibleShowCount).toBe(2);
+    expect(paint.trInsideTextObject).toBeGreaterThan(0);
+    expect(paint.trOutsideTextObject).toBe(0);
+    expect(paint.overlappingVisiblePairs).toBe(0);
+    expect(paint.hasStackedVisibleText).toBe(false);
+
+    const proxy = await getDocument({ data: new Uint8Array(out.slice()) }).promise;
+    const lines = await extractLines(proxy, 1, asBuffer(out));
+    const blob = lines.map((line) => line.text).join(" ");
+    expect(blob).toMatch(/POS Debit/);
+    expect(blob).toMatch(/250\.00/);
+  });
+
+  it("does not treat a native-text page with a logo as stacked OCR", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([400, 500]);
+    const image = await doc.embedPng(BLUE);
+    page.drawImage(image, { x: 20, y: 420, width: 40, height: 40 });
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("05-25 Paid To - Paypal Inst Xfer", {
+      x: 40,
+      y: 300,
+      size: 11,
+      font,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+    const bytes = await doc.save({ useObjectStreams: false });
+    const paint = await inspectPageScanPaint(asBuffer(bytes), 1);
+    expect(paint.fullPageImageCount).toBe(0);
+    expect(paint.visibleShowCount).toBeGreaterThan(0);
+    expect(paint.hasStackedVisibleText).toBe(false);
+  });
+
+  it.runIf(existsSync(ENHANCE_EXPORT))(
+    "the user's Enhance export matches the double-visible-text pattern",
+    async () => {
+      const buf = readFileSync(ENHANCE_EXPORT);
+      const bytes = buf.buffer.slice(
+        buf.byteOffset,
+        buf.byteOffset + buf.byteLength,
+      ) as ArrayBuffer;
+      const page1 = await inspectPageScanPaint(bytes, 1);
+      expect(page1.fullPageImageCount).toBeGreaterThan(0);
+      expect(page1.trOutsideTextObject).toBeGreaterThan(0);
+      expect(page1.trInsideTextObject).toBe(0);
+      expect(page1.hasStackedVisibleText).toBe(true);
+    },
+  );
+
+  it.runIf(existsSync(ENHANCE_ORIGINAL) && existsSync(ENHANCE_EXPORT))(
+    "the original statement page 3 is not stacked; Enhance re-export of a scan page is clean",
+    async () => {
+      const origBuf = readFileSync(ENHANCE_ORIGINAL);
+      const orig = origBuf.buffer.slice(
+        origBuf.byteOffset,
+        origBuf.byteOffset + origBuf.byteLength,
+      ) as ArrayBuffer;
+      const originalPage3 = await inspectPageScanPaint(orig, 3);
+      expect(originalPage3.hasStackedVisibleText).toBe(false);
+
+      const out = await applyScanPagePatches(orig, [
+        {
+          page: 3,
+          imageBytes: BLUE,
+          pixelWidth: 1,
+          pixelHeight: 1,
+          lines: [
+            {
+              x: 40,
+              y: 500,
+              width: 220,
+              height: 12,
+              fontSize: 10,
+              originalText: "05-25 Paid To - Paypal Inst Xfer Chk 9100001",
+              text: "05-25 Paid To - Paypal Inst Xfer Chk 9100001",
+            },
+          ],
+        },
+      ]);
+      const fixed = await inspectPageScanPaint(asBuffer(out), 3);
+      expect(fixed.hasStackedVisibleText).toBe(false);
+      expect(fixed.trInsideTextObject).toBeGreaterThan(0);
+      expect(fixed.visibleShowCount).toBe(0);
+    },
+  );
 });

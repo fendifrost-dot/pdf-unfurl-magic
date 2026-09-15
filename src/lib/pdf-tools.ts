@@ -30,7 +30,13 @@ export {
   listPageTextShows,
   listPageEmbeddedFonts,
 } from "./pdf-text-edit";
-export { inspectPageScan, applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
+export {
+  inspectPageScan,
+  inspectPageScanPaint,
+  applyScanPagePatches,
+  type ScanPageExport,
+  type ScanPaintReport,
+} from "./pdf-scan-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
