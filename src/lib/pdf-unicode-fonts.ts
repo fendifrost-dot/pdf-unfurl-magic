@@ -9,7 +9,6 @@
  * PRIOR_ART.md #1.
  */
 
-import fontkit from "@pdf-lib/fontkit";
 import type { Font } from "@pdf-lib/fontkit";
 import type { PDFDocument, PDFFont } from "pdf-lib";
 import type { FontMatch } from "./pdf-font-match";
@@ -68,21 +67,30 @@ const NOTO_SANS: BundledFace = {
 const bytesCache = new Map<string, Uint8Array>();
 const parsedCache = new Map<string, Font>();
 
-function fontkitCreate(bytes: Uint8Array): Font | Promise<Font> {
-  return fontkit.create(bytes);
+type FontkitModule = typeof import("@pdf-lib/fontkit");
+type FontkitApi = FontkitModule["default"];
+
+let fontkitPromise: Promise<FontkitApi> | null = null;
+
+async function getFontkit(): Promise<FontkitApi> {
+  if (!fontkitPromise) {
+    fontkitPromise = import("@pdf-lib/fontkit").then((mod) => mod.default);
+  }
+  return fontkitPromise;
 }
 
 async function parseFont(file: string, bytes: Uint8Array): Promise<Font> {
   const hit = parsedCache.get(file);
   if (hit) return hit;
-  const created = fontkitCreate(bytes);
+  const kit = await getFontkit();
+  const created = kit.create(bytes);
   const font = typeof (created as Promise<Font>).then === "function" ? await created : created;
   parsedCache.set(file, font);
   return font;
 }
 
-export function registerPdfFontkit(doc: PDFDocument): void {
-  doc.registerFontkit(fontkit);
+export async function registerPdfFontkit(doc: PDFDocument): Promise<void> {
+  doc.registerFontkit(await getFontkit());
 }
 
 export async function loadBundledFontBytes(file: string): Promise<Uint8Array> {
@@ -176,7 +184,7 @@ export async function embedUnicodeFallbackFont(
   doc: PDFDocument,
   face: UnicodeFallbackFace,
 ): Promise<PDFFont> {
-  registerPdfFontkit(doc);
+  await registerPdfFontkit(doc);
   let byFile = embedCache.get(doc);
   if (!byFile) {
     byFile = new Map();

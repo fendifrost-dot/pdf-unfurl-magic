@@ -695,7 +695,6 @@ export async function applyTextPatchesWithReport(
     fontCache.set(id, font);
     return font;
   };
-  registerPdfFontkit(doc);
 
   for (const [pageNumber, pagePatches] of byPage) {
     const page = pages[pageNumber - 1];
@@ -797,6 +796,7 @@ export async function applyTextPatchesWithReport(
 
       if (systemBytes) {
         try {
+          await registerPdfFontkit(doc);
           const sysFont = await doc.embedFont(systemBytes, { subset: true });
           const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, sysFont);
           const fontKey = ensurePageFont(page, sysFont);
