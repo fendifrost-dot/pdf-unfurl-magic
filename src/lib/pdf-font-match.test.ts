@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { StandardFonts } from "pdf-lib";
 import {
   charsMissingFromWinAnsi,
+  decodeShowBytes,
   decodeWinAnsiBytes,
   encodeWinAnsiBytes,
+  foldPdfPunctuation,
   matchFont,
 } from "./pdf-font-match";
 
@@ -47,5 +49,18 @@ describe("WinAnsi coverage", () => {
   it("round-trips WinAnsi bytes including an em dash", () => {
     const text = "Quote 2026-118 — kitchen";
     expect(decodeWinAnsiBytes(encodeWinAnsiBytes(text))).toBe(text);
+  });
+
+  it("folds unicode minus to ASCII so amounts stay encodable", () => {
+    expect(foldPdfPunctuation("−40.00")).toBe("-40.00");
+    expect(charsMissingFromWinAnsi("Total − €40")).toEqual([]);
+  });
+
+  it("decodes two-byte Identity-H Latin including a comma", () => {
+    const bytes = Uint8Array.from([
+      0x00, 0x32, 0x00, 0x2c, 0x00, 0x35, 0x00, 0x30, 0x00, 0x30, 0x00, 0x2e, 0x00, 0x30, 0x00,
+      0x30,
+    ]);
+    expect(decodeShowBytes(bytes)).toBe("2,500.00");
   });
 });

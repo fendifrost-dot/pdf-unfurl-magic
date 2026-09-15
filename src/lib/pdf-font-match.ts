@@ -65,10 +65,37 @@ export function canEncodeWinAnsiChar(codePoint: number): boolean {
   return codePoint in WINANSI_EXTRA;
 }
 
+/** Map lookalike punctuation onto WinAnsi-safe ASCII so we do not drop commas or minus signs. */
+export function foldPdfPunctuation(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp === 0x00a0 || cp === 0x202f || cp === 0x2007 || cp === 0x2009) {
+      out += " ";
+      continue;
+    }
+    if (cp === 0x2212 || cp === 0x2010 || cp === 0x2011 || cp === 0x2012 || cp === 0x2013) {
+      out += "-";
+      continue;
+    }
+    if (cp === 0x00ad) continue;
+    if (cp === 0x2018 || cp === 0x2019) {
+      out += "'";
+      continue;
+    }
+    if (cp === 0x201c || cp === 0x201d) {
+      out += '"';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 export function charsMissingFromWinAnsi(text: string): string[] {
   const missing: string[] = [];
   const seen = new Set<string>();
-  for (const ch of text) {
+  for (const ch of foldPdfPunctuation(text)) {
     const cp = ch.codePointAt(0);
     if (cp === undefined || canEncodeWinAnsiChar(cp)) continue;
     if (seen.has(ch)) continue;
@@ -80,7 +107,7 @@ export function charsMissingFromWinAnsi(text: string): string[] {
 
 export function encodeWinAnsiBytes(text: string): Uint8Array {
   const bytes: number[] = [];
-  for (const ch of text) {
+  for (const ch of foldPdfPunctuation(text)) {
     const cp = ch.codePointAt(0) ?? 0x3f;
     if (cp >= 0x20 && cp <= 0x7e) bytes.push(cp);
     else if (cp === 0x09 || cp === 0x0a || cp === 0x0d) bytes.push(cp);
@@ -108,6 +135,40 @@ export function decodeWinAnsiBytes(bytes: Uint8Array): string {
     }
   }
   return out;
+}
+
+/** Identity-H / UTF-16BE style pairs: high byte is 0, low byte is Latin. */
+export function looksLikeUtf16Be(bytes: Uint8Array): boolean {
+  if (bytes.length < 2 || bytes.length % 2 !== 0) return false;
+  const pairs = bytes.length / 2;
+  let nullHigh = 0;
+  for (let i = 0; i < bytes.length; i += 2) {
+    if (bytes[i] === 0) nullHigh += 1;
+  }
+  return nullHigh / pairs >= 0.8;
+}
+
+export function decodeUtf16BeBytes(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i + 1 < bytes.length; i += 2) {
+    const code = ((bytes[i] ?? 0) << 8) | (bytes[i + 1] ?? 0);
+    if (code) out += String.fromCharCode(code);
+  }
+  return out;
+}
+
+/**
+ * Decode a text-show payload. Simple fonts are WinAnsi; many embedded subsets
+ * store Latin as two-byte Identity-H / UTF-16BE codes. Always keep comma,
+ * period, hyphen, and currency bytes — never drop them as whitespace.
+ */
+export function decodeShowBytes(bytes: Uint8Array): string {
+  if (looksLikeUtf16Be(bytes)) return decodeUtf16BeBytes(bytes);
+  return decodeWinAnsiBytes(bytes);
+}
+
+export function showUnitSize(bytes: Uint8Array): 1 | 2 {
+  return looksLikeUtf16Be(bytes) ? 2 : 1;
 }
 
 const STANDARD_BASE_FONTS: Record<string, StandardFonts> = {
@@ -278,4 +339,16 @@ export function describeFontMatch(match: FontMatch, missingGlyphs: string[]): st
     return "This run uses a symbol / dingbat font. Replacement is blocked so we do not write .notdef glyphs.";
   }
   return `Will write ${match.label} as a Standard 14 stand-in. Metrics may differ slightly.`;
+}
+
+export function isSymbolFontName(name: string): boolean {
+  return familyFromName(name) === "symbol";
+}
+
+export function fontWeightGuess(name: string): "bold" | "regular" {
+  return looksBold(name) ? "bold" : "regular";
+}
+
+export function metricFamilyFor(name: string): FontFamilyKind {
+  return familyFromName(name);
 }

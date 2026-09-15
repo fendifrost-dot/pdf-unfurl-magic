@@ -41,6 +41,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Drop `lines-and-text.pdf`. Edit one amount. Table rules and the signature line stay put.
 - [ ] Drop `image-and-text.pdf`. Edit the caption. The blue image is still an image, not a smeared bitmap of the whole page.
 - [ ] Drop `multi-page.pdf`. Step **1 / 3 → 3 / 3**. Edit page 1 only, export, re-open: pages 2 and 3 still show `PAGE_MARKER_2` and `PAGE_MARKER_3`.
+- [ ] Drop `comma-amounts.pdf`. Click `2,500.00`, change it, export. The comma and neighbouring text stay intact. Font picker lists the embedded font as Safe.
 
 - [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned** (not Helvetica Unsafe). **Enhance page & OCR**. Click an OCR line in the side list (the synthetic 5×7 bitmap may OCR as fragments; a real statement scan yields amounts/labels), edit it, **Keep this change**, **Export**. Re-open: the new text is in the file as a text layer; the page picture remains unless **Replace with cleaned image** is on. Leave that toggle off once, then on once. Confirm `simple-text.pdf` still has **Safe in-place rewrite** and no scan banner.
 
@@ -76,6 +77,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 | `fixtures/multi-font.pdf` | 1 | Font-matching after a one-line edit |
 | `fixtures/lines-and-text.pdf` | 1 | Rules survive a box edit |
 | `fixtures/image-and-text.pdf` | 1 | Image object survives a caption edit |
+| `fixtures/comma-amounts.pdf` | 1 | Comma amounts + multi-run POS line |
 | `fixtures/multi-page.pdf` | 3 | Split, extract, merge, untouched pages |
 | `fixtures/scan-image-only.pdf` | 1 | Scan-aware Enhance / OCR (no text operators) |
 

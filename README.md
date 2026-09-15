@@ -42,6 +42,8 @@ After a feature merge, rebuild the Dock app with `npm run pack:mac`. See
 
 Shared QA: `docs/QA_MVP.md` (10-minute human pass after edit / scan / e-sign). Optional Playwright and Vitest paths are in `tests/e2e/README.md`.
 
+Open-source reuse map (what to depend vs skip, including GPL/AGPL flags): [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md).
+
 The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
 server's port.
 

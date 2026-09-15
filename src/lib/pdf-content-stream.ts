@@ -5,7 +5,7 @@
  * over the old glyphs (the Acrobat TouchUp_TextEdit failure mode).
  */
 
-import { decodeWinAnsiBytes, encodeWinAnsiBytes } from "./pdf-font-match";
+import { decodeShowBytes, encodeWinAnsiBytes, foldPdfPunctuation } from "./pdf-font-match";
 
 export type TokenKind =
   | "ws"
@@ -35,6 +35,8 @@ export type TextShow = {
   end: number;
   operator: "Tj" | "TJ" | "'" | '"';
   text: string;
+  /** Raw shown bytes (literal / hex / TJ concat). Used to reuse CID glyphs. */
+  bytes: Uint8Array;
   fontName: string;
   fontSize: number;
   x: number;
@@ -262,7 +264,7 @@ function readLiteralString(src: string, start: number): { token: Token; next: nu
       kind: "string",
       raw: src.slice(start, i),
       bytes: Uint8Array.from(bytes),
-      value: decodeWinAnsiBytes(Uint8Array.from(bytes)),
+      value: decodeShowBytes(Uint8Array.from(bytes)),
     },
     next: i,
   };
@@ -287,7 +289,7 @@ function readHexString(src: string, start: number): { token: Token; next: number
       kind: "hex",
       raw: src.slice(start, i),
       bytes,
-      value: decodeWinAnsiBytes(bytes),
+      value: decodeShowBytes(bytes),
     },
     next: i,
   };
@@ -324,12 +326,40 @@ export function encodePdfLiteral(text: string): Token {
   return { kind: "string", raw, bytes, value: text };
 }
 
+export function encodePdfHex(bytes: Uint8Array, text = decodeShowBytes(bytes)): Token {
+  let raw = "<";
+  for (const byte of bytes) raw += byte.toString(16).padStart(2, "0").toUpperCase();
+  raw += ">";
+  return { kind: "hex", raw, bytes, value: text };
+}
+
 export function tokensToBytes(tokens: Token[]): Uint8Array {
   return latin1ToBytes(tokens.map((t) => t.raw).join(""));
 }
 
 export function normalizePdfText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return foldPdfPunctuation(text).replace(/\s+/g, " ").trim();
+}
+
+/** Keep commas/periods; only collapse whitespace. Used to match “2,500.00”. */
+export function textMatchKey(text: string): string {
+  return normalizePdfText(text);
+}
+
+/**
+ * Matching-only key: allow a missing thousands separator so PDF.js “2 500.00”
+ * still finds the content-stream run “2,500.00”. Never used for export text.
+ */
+export function looseAmountKey(text: string): string {
+  return textMatchKey(text).replace(/(?<=\d)[, ](?=\d{3}(?:\D|$))/g, "");
+}
+
+export function hasTextOperators(tokens: Token[]): boolean {
+  return tokens.some(
+    (token) =>
+      token.kind === "op" &&
+      (token.value === "Tj" || token.value === "TJ" || token.value === "'" || token.value === '"'),
+  );
 }
 
 type Matrix = [number, number, number, number, number, number];
@@ -366,9 +396,27 @@ function num(token: Token | undefined): number {
 
 function decodeStringToken(token: Token | undefined): string {
   if (!token) return "";
-  if (token.bytes) return decodeWinAnsiBytes(token.bytes);
+  if (token.bytes) return decodeShowBytes(token.bytes);
   if (typeof token.value === "string") return token.value;
   return "";
+}
+
+function concatTokenBytes(tokens: Token[]): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (const token of tokens) {
+    if ((token.kind === "string" || token.kind === "hex") && token.bytes) {
+      chunks.push(token.bytes);
+      total += token.bytes.length;
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 }
 
 function readOperandWindow(tokens: Token[], opIndex: number): { operands: Token[]; start: number } {
@@ -428,8 +476,10 @@ function tjTextFromOperands(operands: Token[]): string {
       continue;
     }
     if (inArray && token.kind === "num") {
-      // Kerning; ignore for matching.
-      continue;
+      // Large negative TJ kerning is how many producers write a word space.
+      // Small kerning (amounts like 2,500.00) must not invent a space.
+      const kern = typeof token.value === "number" ? token.value : 0;
+      if (kern < -180 && !text.endsWith(" ")) text += " ";
     }
   }
   return text;
@@ -571,12 +621,14 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
         op === "TJ"
           ? tjTextFromOperands(window.operands)
           : decodeStringToken(operands[operands.length - 1]);
+      const bytes = concatTokenBytes(op === "TJ" ? window.operands : operands.slice(-1));
       const pos = applyMatrix(g.ctm, textMatrix[4], textMatrix[5]);
       shows.push({
         start: window.start,
         end: index,
         operator: op,
         text,
+        bytes,
         fontName,
         fontSize,
         x: pos.x,
@@ -598,6 +650,32 @@ export function replaceShowText(tokens: Token[], show: TextShow, nextText: strin
   const after = tokens.slice(show.end + 1);
   const gap: Token[] = [{ kind: "ws", raw: " " }];
   return [...before, encoded, ...gap, { kind: "op", raw: "Tj", value: "Tj" }, ...after];
+}
+
+export function replaceShowBytes(
+  tokens: Token[],
+  show: TextShow,
+  nextBytes: Uint8Array,
+  nextText: string,
+): Token[] {
+  const encoded = encodePdfHex(nextBytes, nextText);
+  const before = tokens.slice(0, show.start);
+  const after = tokens.slice(show.end + 1);
+  return [
+    ...before,
+    encoded,
+    { kind: "ws", raw: " " },
+    { kind: "op", raw: "Tj", value: "Tj" },
+    ...after,
+  ];
+}
+
+/** Concatenate adjacent shows on one baseline (multi-run invoice lines). */
+export function joinAdjacentShows(shows: TextShow[], start: number, count: number): string {
+  return shows
+    .slice(start, start + count)
+    .map((show) => show.text)
+    .join("");
 }
 
 export function removeShow(tokens: Token[], show: TextShow): Token[] {

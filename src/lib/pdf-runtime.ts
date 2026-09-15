@@ -6,6 +6,7 @@ import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { installMapPolyfills } from "./map-polyfill";
 import { isDesktopApp } from "./desktop";
 import { saveBytes } from "./file-export";
+import { listPageTextShows } from "./pdf-text-edit";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -51,9 +52,10 @@ export type TextLine = {
   fontSize: number;
   fontName: string;
   fontFamily: string;
-  /** `ocr` lines come from Enhance/OCR and export as a text layer on the page image. */
-  source?: "pdf" | "ocr";
+  /** `ocr` lines come from Enhance/OCR. Content-stream vs PDF.js is for native text. */
+  source?: "pdf" | "ocr" | "content-stream" | "pdfjs";
   confidence?: number;
+  hasTextOperator?: boolean;
 };
 
 export type RawTextItem = {
@@ -65,6 +67,10 @@ export type RawTextItem = {
   fontName: string;
   fontFamily: string;
 };
+
+const PUNCT_ONLY = /^[\s,.;:!?%'"“”‘’()[\]{}\-/–—−$€£¥]+$/;
+const LEADING_PUNCT = /^[,.;:!?%'"”’)\]}-]/;
+const TRAILING_MONEY = /[,$€£¥.\-–—−]$/;
 
 /**
  * Group PDF.js items into clickable runs. Items on the same baseline stay
@@ -81,8 +87,13 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
     const sameBaseline = !!anchor && Math.abs(anchor.y - item.y) <= Math.max(2, item.h * 0.35);
     const sameFont = !!anchor && anchor.fontName === item.fontName;
     const gap = anchor ? item.x - (anchor.x + anchor.w) : 0;
+    const glue =
+      !!anchor &&
+      (PUNCT_ONLY.test(item.str) ||
+        PUNCT_ONLY.test(anchor.str) ||
+        (TRAILING_MONEY.test(anchor.str) && /^\d/.test(item.str)));
     const wordGap = Math.max(10, Math.max(item.h, anchor?.h ?? 0) * 1.15);
-    if (last && sameBaseline && sameFont && gap >= -1 && gap <= wordGap) {
+    if (last && sameBaseline && sameFont && gap >= -1 && (gap <= wordGap || glue)) {
       last.push(item);
     } else {
       groups.push([item]);
@@ -99,14 +110,18 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
     let text = "";
     let cursor: number | null = null;
     for (const g of group) {
-      if (cursor !== null && g.x - cursor > fontSize * 0.22 && !text.endsWith(" ")) text += " ";
+      if (cursor !== null && !text.endsWith(" ") && !text.endsWith(",")) {
+        const recovered = recoverThousandsComma(text, g, cursor, fontSize);
+        if (recovered) text += recovered;
+        else if (shouldInsertJoinSpace(text, g, cursor, fontSize)) text += " ";
+      }
       text += g.str;
       cursor = g.x + g.w;
     }
     return {
       id: `p${pageNumber}-r${index}-${Math.round(x)}-${Math.round(y)}`,
       page: pageNumber,
-      text: text.replace(/\s+/g, " ").trim(),
+      text: text.replace(/[ \t]+/g, " ").trim(),
       x,
       y,
       width: Math.max(right - x, fontSize * 0.6),
@@ -114,24 +129,58 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       fontSize,
       fontName: first?.fontName ?? "",
       fontFamily: first?.fontFamily ?? "",
+      source: "pdfjs",
+      hasTextOperator: true,
     };
   });
 }
 
-/** Group PDF.js text items into visual runs with a bounding box in PDF space. */
-export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): Promise<TextLine[]> {
-  const page = await doc.getPage(pageNumber);
-  const content = await page.getTextContent();
-  const raw: RawTextItem[] = [];
+function recoverThousandsComma(
+  prevText: string,
+  next: RawTextItem,
+  cursor: number,
+  fontSize: number,
+): "," | "" {
+  if (!/\d$/.test(prevText) || !/^\d{3}(?:\D|$)/.test(next.str)) return "";
+  if (prevText.endsWith(",") || next.str.startsWith(",")) return "";
+  const gap = next.x - cursor;
+  if (gap < -1 || gap > fontSize * 0.55) return "";
+  return ",";
+}
 
-  for (const item of content.items) {
-    if (!("str" in item)) continue;
+function shouldInsertJoinSpace(
+  prevText: string,
+  next: RawTextItem,
+  cursor: number,
+  fontSize: number,
+): boolean {
+  if (LEADING_PUNCT.test(next.str)) return false;
+  if (TRAILING_MONEY.test(prevText) && /^\d/.test(next.str)) return false;
+  if (PUNCT_ONLY.test(next.str) && next.str.trim() !== "") return false;
+  return next.x - cursor > fontSize * 0.22;
+}
+
+function collectPdfjsItems(
+  items: Array<{
+    str?: string;
+    transform?: number[];
+    width?: number;
+    height?: number;
+    fontName?: string;
+  }>,
+  styles: Record<string, { fontFamily?: string } | undefined>,
+): RawTextItem[] {
+  const raw: RawTextItem[] = [];
+  for (const item of items) {
+    if (typeof item.str !== "string") continue;
     const str = item.str;
-    if (!str || !str.trim()) continue;
-    const t = item.transform as number[];
-    const height = Math.abs(t[3] ?? 0) || Math.abs(item.height) || 10;
-    const fontName = "fontName" in item && typeof item.fontName === "string" ? item.fontName : "";
-    const style = fontName ? content.styles[fontName] : undefined;
+    // Keep punctuation-only runs (comma, period, currency). Skip blank items.
+    if (!str) continue;
+    if (!str.trim() && !PUNCT_ONLY.test(str)) continue;
+    const t = item.transform ?? [];
+    const height = Math.abs(t[3] ?? 0) || Math.abs(item.height ?? 0) || 10;
+    const fontName = typeof item.fontName === "string" ? item.fontName : "";
+    const style = fontName ? styles[fontName] : undefined;
     raw.push({
       str,
       x: t[4] ?? 0,
@@ -142,8 +191,72 @@ export async function extractLines(doc: PDFDocumentProxy, pageNumber: number): P
       fontFamily: style?.fontFamily ?? "",
     });
   }
+  return raw;
+}
 
-  return groupTextItems(raw, pageNumber);
+/**
+ * Group PDF.js text items into visual runs with a bounding box in PDF space.
+ * When `sourceBytes` is provided, content-stream shows win: one Tj/TJ = one
+ * clickable run, with commas taken from the stream rather than PDF.js.
+ */
+export async function extractLines(
+  doc: PDFDocumentProxy,
+  pageNumber: number,
+  sourceBytes?: ArrayBuffer,
+): Promise<TextLine[]> {
+  const page = await doc.getPage(pageNumber);
+  const content = await page.getTextContent();
+  const raw = collectPdfjsItems(
+    content.items as Array<{
+      str?: string;
+      transform?: number[];
+      width?: number;
+      height?: number;
+      fontName?: string;
+    }>,
+    content.styles as Record<string, { fontFamily?: string } | undefined>,
+  );
+  const pdfjsLines = groupTextItems(raw, pageNumber);
+
+  if (!sourceBytes) return pdfjsLines;
+
+  try {
+    const shows = await listPageTextShows(sourceBytes, pageNumber);
+    if (shows.length === 0) return [];
+    return shows.map((show, index) => {
+      const fontSize = show.fontSize || 10;
+      const estimatedWidth = Math.max(fontSize * 0.6, show.text.length * fontSize * 0.52);
+      const mapped = raw.filter((item) => {
+        if (Math.abs(item.y - show.y) > Math.max(3, fontSize * 0.4)) return false;
+        const itemRight = item.x + item.w;
+        const showRight = show.x + estimatedWidth;
+        const overlap = Math.min(itemRight, showRight) - Math.max(item.x, show.x);
+        return overlap > Math.min(item.w, estimatedWidth) * 0.35;
+      });
+      const x = mapped.length ? Math.min(...mapped.map((g) => g.x), show.x) : show.x;
+      const right = mapped.length
+        ? Math.max(...mapped.map((g) => g.x + g.w), show.x + estimatedWidth * 0.5)
+        : show.x + estimatedWidth;
+      const pdfjsHint = mapped[0];
+      return {
+        id: `p${pageNumber}-s${index}-${Math.round(show.x)}-${Math.round(show.y)}`,
+        page: pageNumber,
+        text: show.text,
+        x,
+        y: show.y,
+        width: Math.max(right - x, fontSize * 0.6),
+        height: fontSize * 1.18,
+        fontSize,
+        fontName: show.fontName || pdfjsHint?.fontName || "",
+        fontFamily: pdfjsHint?.fontFamily || "",
+        source: "content-stream" as const,
+        hasTextOperator: true,
+      };
+    });
+  } catch (error) {
+    console.error("content-stream text extract failed; using PDF.js runs", error);
+    return pdfjsLines;
+  }
 }
 
 export type RenderResult = { canvas: HTMLCanvasElement; viewport: PageViewport };
