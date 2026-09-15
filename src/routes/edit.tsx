@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
@@ -64,7 +65,12 @@ import {
   ORIGINAL_UNCHANGED_HINT,
   SHOW_EDIT_HIGHLIGHT_LABEL,
   canApplyTextEdit,
+  columnFieldsForLine,
   enhanceOpenAfterTextChip,
+  isColumnarLine,
+  joinColumnDrafts,
+  membersForLinePatch,
+  remapColumnMemberTexts,
   nextEnhanceOpen,
   overlayApplyState,
   overlayFillMode,
@@ -172,7 +178,12 @@ type Doc = {
   pageCount: number;
 };
 
-type Edit = { line: TextLine; text: string; fontChoiceId?: string };
+type Edit = {
+  line: TextLine;
+  text: string;
+  fontChoiceId?: string;
+  memberTexts?: Record<string, string>;
+};
 type Mode = "text" | "image" | "mark" | "form";
 type MarkTool = AnnotationBurn["kind"];
 
@@ -260,6 +271,19 @@ function memberBoxesForPatch(line: TextLine): TextPatch["memberBoxes"] {
   }));
 }
 
+function segmentedPatchFields(
+  line: TextLine,
+  text: string,
+  memberTexts?: Record<string, string>,
+): Pick<TextPatch, "members" | "memberBoxes"> {
+  const members = membersForLinePatch(line, memberTexts ?? { [line.id]: text });
+  const memberBoxes = memberBoxesForPatch(line);
+  return {
+    ...(memberBoxes ? { memberBoxes } : {}),
+    ...(members?.length ? { members } : {}),
+  };
+}
+
 function boxStyle(
   x: number,
   y: number,
@@ -286,6 +310,7 @@ function Editor() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [memberDrafts, setMemberDrafts] = useState<Record<string, string>>({});
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [imageEdits, setImageEdits] = useState<Record<string, ImageEdit>>({});
   const [imageDraft, setImageDraft] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS);
@@ -366,18 +391,27 @@ function Editor() {
   const selectedIsOcr = selected?.source === "ocr";
   const selectedParent = selected ? parentLineFor(lines, selected) : undefined;
   const editingRun = !!selected && !!selectedParent && selectedParent.id !== selected.id;
+  const columnFields =
+    selected && !selectedIsOcr && !editingRun ? columnFieldsForLine(selected) : [];
+  const columnarEdit = columnFields.length > 1;
   const fullLine = selected && !selectedIsOcr ? expandToFullLine(lines, selected) : null;
   const selectedVerifyPending = ocrVerifyBlocksApply({
     source: selected?.source,
     lineId: selected?.id,
     snippets: ocrVerify,
   });
+  const applyText = columnarEdit ? joinColumnDrafts(columnFields, memberDrafts) : draft.trim();
+  const applyOriginal = selected
+    ? columnarEdit
+      ? joinColumnDrafts(columnFields, Object.fromEntries(columnFields.map((f) => [f.id, f.text])))
+      : selected.text
+    : "";
   const applyEnabled = selected
     ? canApplyTextEdit({
         selectedIsOcr,
         source: selected.source,
         deferToScan: inspection?.deferToScan,
-        canCommitSafely: canCommitSafely(inspection, draft.trim(), selected.text),
+        canCommitSafely: canCommitSafely(inspection, applyText, applyOriginal),
         looksScanned,
         hasTextOperator: selected.hasTextOperator,
         ocrVerifyPending: selectedVerifyPending,
@@ -630,33 +664,35 @@ function Editor() {
 
     void (async () => {
       try {
-        const patches: TextPatch[] = nativeEdits.map(({ line, text, fontChoiceId: editFontId }) => {
-          const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
-          return {
-            page: line.page,
-            x: line.x,
-            y: line.y,
-            width: line.width,
-            height: line.height,
-            fontSize: line.fontSize,
-            text,
-            originalText: line.text,
-            ...(line.rawText ? { rawText: line.rawText } : {}),
-            ...(memberBoxesForPatch(line) ? { memberBoxes: memberBoxesForPatch(line) } : {}),
-            fontName: line.fontName,
-            fontFamily: line.fontFamily,
-            ...(option
-              ? {
-                  fontChoice: {
-                    source: option.source,
-                    family: option.family,
-                    ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
-                    ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
-                  },
-                }
-              : {}),
-          };
-        });
+        const patches: TextPatch[] = nativeEdits.map(
+          ({ line, text, fontChoiceId: editFontId, memberTexts }) => {
+            const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
+            return {
+              page: line.page,
+              x: line.x,
+              y: line.y,
+              width: line.width,
+              height: line.height,
+              fontSize: line.fontSize,
+              text,
+              originalText: line.text,
+              ...(line.rawText ? { rawText: line.rawText } : {}),
+              ...segmentedPatchFields(line, text, memberTexts),
+              fontName: line.fontName,
+              fontFamily: line.fontFamily,
+              ...(option
+                ? {
+                    fontChoice: {
+                      source: option.source,
+                      family: option.family,
+                      ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
+                      ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
+                    },
+                  }
+                : {}),
+            };
+          },
+        );
         const bytes = await applyTextPatches(doc.bytes, patches);
         if (cancelled) return;
         const proxy = await openDocument(bytes.slice().buffer as ArrayBuffer);
@@ -804,6 +840,7 @@ function Editor() {
       text: draft,
       originalText: selected.text,
       ...(selected.rawText ? { rawText: selected.rawText } : {}),
+      ...segmentedPatchFields(selected, draft, memberDrafts),
       fontName: selected.fontName,
       fontFamily: selected.fontFamily,
       ...(memberBoxesForPatch(selected) ? { memberBoxes: memberBoxesForPatch(selected) } : {}),
@@ -824,18 +861,25 @@ function Editor() {
             system,
           });
           setFontCatalog(catalog);
-          setFontChoiceId((prev) =>
-            catalog.some((item) => item.id === prev)
-              ? prev
-              : defaultFontChoiceId(
-                  catalog,
-                  result.resourceKey || selected.fontName,
-                  result.method === "redraw-unicode" ||
-                    !!result.embeddedFonts?.some(
-                      (font) => font.cid && font.key === (result.resourceKey || selected.fontName),
-                    ),
-                ),
-          );
+          const preferBundled =
+            result.method === "redraw-unicode" ||
+            !!result.embeddedFonts?.some(
+              (font) => font.cid && font.key === (result.resourceKey || selected.fontName),
+            );
+          setFontChoiceId((prev) => {
+            const current = catalog.find((item) => item.id === prev);
+            const fallback = defaultFontChoiceId(
+              catalog,
+              result.resourceKey || selected.fontName,
+              preferBundled,
+            );
+            if (preferBundled) {
+              if (current?.source === "bundled" || current?.source === "system") return prev;
+              return fallback;
+            }
+            if (current) return prev;
+            return fallback;
+          });
         })
         .catch(() => {
           if (!cancelled) setInspection(null);
@@ -848,7 +892,7 @@ function Editor() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [doc, selected, draft]);
+  }, [doc, selected, draft, memberDrafts]);
 
   const openSample = async () => {
     setStatus("Building the sample quote");
@@ -864,10 +908,17 @@ function Editor() {
     setMode("form");
   };
 
-  const select = (line: TextLine) => {
+  const select = (line: TextLine, storedOverride?: Edit) => {
     setSelectedImageId(null);
     setSelectedId(line.id);
-    setDraft(edits[line.id]?.text ?? line.text);
+    const stored = storedOverride ?? edits[line.id];
+    setDraft(stored?.text ?? line.text);
+    const fields = columnFieldsForLine(line);
+    const nextDrafts: Record<string, string> = {};
+    for (const field of fields) {
+      nextDrafts[field.id] = stored?.memberTexts?.[field.id] ?? field.text;
+    }
+    setMemberDrafts(nextDrafts);
     setMode("text");
   };
 
@@ -940,6 +991,31 @@ function Editor() {
     if (!selected) return;
     const joined = expandToFullLine(lines, selected);
     if (!joined) return;
+    const fromFields = columnFieldsForLine(selected);
+    const toFields = columnFieldsForLine(joined);
+    const stored = edits[selected.id];
+    const remapped = remapColumnMemberTexts({
+      fromFields,
+      toFields,
+      memberTexts: stored?.memberTexts,
+      liveDrafts: memberDrafts,
+      sourceDraft: stored?.text ?? draft,
+      sourceWasColumnar: fromFields.length > 1,
+    });
+    const joinedText =
+      toFields.length > 1
+        ? joinColumnDrafts(toFields, remapped)
+        : (stored?.text ?? draft ?? joined.text);
+    const carried: Edit = {
+      line: joined,
+      text: joinedText,
+      fontChoiceId: stored?.fontChoiceId ?? fontChoiceId,
+      ...(toFields.length > 1 ? { memberTexts: remapped } : {}),
+    };
+    const hadApplied = !!stored;
+    const hadLiveChange =
+      (draft && draft !== selected.text) ||
+      fromFields.some((field) => (memberDrafts[field.id] ?? field.text) !== field.text);
     const band = Math.max(3, selected.fontSize * 0.5);
     const merge = (prev: TextLine[]) => {
       const kept = prev.filter(
@@ -949,7 +1025,15 @@ function Editor() {
     };
     setNativeLines(merge);
     setLines(merge);
-    select(joined);
+    if (hadApplied) {
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[selected.id];
+        next[joined.id] = carried;
+        return next;
+      });
+    }
+    select(joined, hadApplied || hadLiveChange ? carried : undefined);
   };
 
   const selectImage = (image: PdfImageRegion) => {
@@ -960,17 +1044,35 @@ function Editor() {
 
   const commit = () => {
     if (!selected) return;
-    const text = draft.trim();
+    const fields = columnFieldsForLine(selected);
+    const memberTexts =
+      fields.length > 1
+        ? Object.fromEntries(
+            fields.map((field) => [field.id, memberDrafts[field.id] ?? field.text]),
+          )
+        : undefined;
+    const text = fields.length > 1 ? joinColumnDrafts(fields, memberTexts ?? {}) : draft.trim();
+    const originalJoined =
+      fields.length > 1
+        ? joinColumnDrafts(fields, Object.fromEntries(fields.map((f) => [f.id, f.text])))
+        : selected.text;
     if (!applyEnabled) {
       return;
     }
     setEdits((prev) => {
       const next = { ...prev };
-      if (!text || text === selected.text) delete next[selected.id];
-      else next[selected.id] = { line: selected, text, fontChoiceId };
+      const unchanged = text === originalJoined || (!text && fields.length <= 1);
+      if (unchanged) delete next[selected.id];
+      else
+        next[selected.id] = {
+          line: selected,
+          text,
+          fontChoiceId,
+          ...(memberTexts ? { memberTexts } : {}),
+        };
       return next;
     });
-    if (text && text !== selected.text) {
+    if (text !== originalJoined && (text || fields.length > 1)) {
       setApplyNotice(APPLY_SUCCESS_MESSAGE);
       setShowOriginalHint(true);
     }
@@ -1274,7 +1376,7 @@ function Editor() {
         }
       }
       const patches: TextPatch[] = [];
-      for (const { line, text, fontChoiceId: editFontId } of Object.values(edits)) {
+      for (const { line, text, fontChoiceId: editFontId, memberTexts } of Object.values(edits)) {
         if (line.source === "ocr" || flattenedPages.has(line.page)) continue;
         const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
         let embedBytes: Uint8Array | undefined;
@@ -1292,7 +1394,7 @@ function Editor() {
           text,
           originalText: line.text,
           ...(line.rawText ? { rawText: line.rawText } : {}),
-          ...(memberBoxesForPatch(line) ? { memberBoxes: memberBoxesForPatch(line) } : {}),
+          ...segmentedPatchFields(line, text, memberTexts),
           fontName: line.fontName,
           fontFamily: line.fontFamily,
           ...(coverBoxes ? { coverBoxes } : {}),
@@ -1396,12 +1498,14 @@ function Editor() {
           showHighlight: showEditHighlight,
         });
         const canvasShowsApplied = pageHasPatchedPreview && isEdited && line.source !== "ocr";
-        const showLabel = overlayShouldPaintLabel({
-          isEdited,
-          isLivePreview: overlay.isLivePreview,
-          showHighlight: showEditHighlight,
-          canvasShowsApplied,
-        });
+        const columnar = isColumnarLine(line);
+        const showLabel =
+          overlayShouldPaintLabel({
+            isEdited,
+            isLivePreview: overlay.isLivePreview,
+            showHighlight: showEditHighlight,
+            canvasShowsApplied,
+          }) && !(columnar && overlay.isLivePreview && !showEditHighlight);
         return (
           <button
             key={line.id}
@@ -2175,14 +2279,48 @@ function Editor() {
                           />
                         </>
                       )}
-                      <Textarea
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        rows={4}
-                        className="mt-3"
-                        placeholder="Replacement text"
-                        data-testid="edit-draft"
-                      />
+                      {columnarEdit ? (
+                        <div className="mt-3 space-y-3" data-testid="edit-columns">
+                          <p className="text-xs text-muted-foreground">
+                            Each column keeps its original position. Extra spaces will not move
+                            amounts.
+                          </p>
+                          {columnFields.map((field) => (
+                            <label key={field.id} className="block space-y-1">
+                              <span className="text-xs font-medium text-foreground">
+                                {field.label}
+                              </span>
+                              <Input
+                                value={memberDrafts[field.id] ?? field.text}
+                                onChange={(event) => {
+                                  const next = {
+                                    ...memberDrafts,
+                                    [field.id]: event.target.value,
+                                  };
+                                  setMemberDrafts(next);
+                                  setDraft(joinColumnDrafts(columnFields, next));
+                                }}
+                                className="font-mono text-sm"
+                                data-testid={
+                                  field.label === "Description"
+                                    ? "edit-draft"
+                                    : `edit-draft-${field.label.toLowerCase()}`
+                                }
+                                placeholder={field.label}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <Textarea
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          rows={4}
+                          className="mt-3"
+                          placeholder="Replacement text"
+                          data-testid="edit-draft"
+                        />
+                      )}
                       <p
                         className={
                           draftFits
@@ -2191,7 +2329,9 @@ function Editor() {
                         }
                       >
                         {draftFits
-                          ? "Fits the original box at full size."
+                          ? columnarEdit
+                            ? "Amounts stay in their columns. Description edits do not move them."
+                            : "Fits the original box at full size."
                           : `Too wide — export will shrink type to about ${exportSize.toFixed(1)}pt to stay inside the box.`}
                       </p>
 
@@ -2199,14 +2339,40 @@ function Editor() {
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => setDraft(cleanCopy(draft))}
+                          onClick={() => {
+                            if (columnarEdit) {
+                              const next = { ...memberDrafts };
+                              for (const field of columnFields) {
+                                next[field.id] = cleanCopy(next[field.id] ?? field.text);
+                              }
+                              setMemberDrafts(next);
+                              setDraft(joinColumnDrafts(columnFields, next));
+                              return;
+                            }
+                            setDraft(cleanCopy(draft));
+                          }}
                         >
                           <Eraser className="mr-1.5 size-3.5" /> Clean copy
                         </Button>
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => setDraft(shortenToFit(draft, selected.fontSize, boxWidth))}
+                          onClick={() => {
+                            if (columnarEdit) {
+                              const next = { ...memberDrafts };
+                              for (const field of columnFields) {
+                                next[field.id] = shortenToFit(
+                                  next[field.id] ?? field.text,
+                                  field.fontSize,
+                                  field.width,
+                                );
+                              }
+                              setMemberDrafts(next);
+                              setDraft(joinColumnDrafts(columnFields, next));
+                              return;
+                            }
+                            setDraft(shortenToFit(draft, selected.fontSize, boxWidth));
+                          }}
                         >
                           <Scissors className="mr-1.5 size-3.5" /> Shorten to fit
                         </Button>
@@ -2237,7 +2403,12 @@ function Editor() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setDraft(selected.text)}
+                          onClick={() => {
+                            setDraft(selected.text);
+                            const reset: Record<string, string> = {};
+                            for (const field of columnFields) reset[field.id] = field.text;
+                            setMemberDrafts(reset);
+                          }}
                           aria-label="Reset to original text"
                         >
                           <Undo2 className="size-3.5" />
