@@ -4,7 +4,7 @@
  * `src/lib/esign.ts` burns into the page and audit record.
  * See docs/PRIOR_ART.md #3.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import SignaturePad from "signature_pad";
 import { Eraser, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,8 +31,9 @@ type Props = {
 
 function fitSignatureCanvas(canvas: HTMLCanvasElement, pad: SignaturePad): void {
   const ratio = Math.max(window.devicePixelRatio || 1, 1);
-  const cssWidth = canvas.offsetWidth;
-  const cssHeight = canvas.offsetHeight;
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = rect.width || canvas.offsetWidth;
+  const cssHeight = rect.height || canvas.offsetHeight;
   if (cssWidth < 2 || cssHeight < 2) return;
 
   const nextWidth = Math.max(1, Math.round(cssWidth * ratio));
@@ -61,34 +62,66 @@ export function SignatureCapture({ open, kind, signerName, onClose, onApply }: P
     setTab("draw");
   }, [open, signerName]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || tab !== "draw") return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
 
-    const pad = new SignaturePad(canvas, {
+    let pad: SignaturePad | null = null;
+    let observer: ResizeObserver | null = null;
+    let frame = 0;
+    let cancelled = false;
+
+    const options = {
       penColor: "#1b1814",
       backgroundColor: "rgba(0,0,0,0)",
       minWidth: kind === "initials" ? 0.8 : 0.55,
       maxWidth: kind === "initials" ? 3.4 : 2.6,
       minDistance: 3,
       throttle: 16,
-    });
-    padRef.current = pad;
+    };
 
-    const fit = () => fitSignatureCanvas(canvas, pad);
-    fit();
-    const frame = requestAnimationFrame(fit);
-    const observer = new ResizeObserver(fit);
-    observer.observe(canvas);
-    window.addEventListener("resize", fit);
+    const teardown = () => {
+      if (frame) cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", fit);
+      pad?.off();
+      if (padRef.current === pad) padRef.current = null;
+      pad = null;
+    };
+
+    const fit = () => {
+      const canvas = canvasRef.current;
+      if (canvas && pad) fitSignatureCanvas(canvas, pad);
+    };
+
+    const attach = (): boolean => {
+      if (cancelled) return true;
+      const canvas = canvasRef.current;
+      if (!canvas || canvas.getBoundingClientRect().width < 2) {
+        return false;
+      }
+      if (!pad) {
+        pad = new SignaturePad(canvas, options);
+        padRef.current = pad;
+        observer = new ResizeObserver(fit);
+        observer.observe(canvas);
+        window.addEventListener("resize", fit);
+      }
+      fit();
+      canvas.dataset["signaturePad"] = canvas.width >= 2 ? "ready" : "pending";
+      return canvas.width >= 2;
+    };
+
+    if (!attach()) {
+      const tick = () => {
+        if (cancelled) return;
+        if (!attach()) frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
+    }
 
     return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("resize", fit);
-      pad.off();
-      if (padRef.current === pad) padRef.current = null;
+      cancelled = true;
+      teardown();
     };
   }, [open, tab, kind]);
 
@@ -138,15 +171,19 @@ export function SignatureCapture({ open, kind, signerName, onClose, onApply }: P
           </TabsList>
 
           <TabsContent value="draw" className="mt-4">
-            <canvas
-              ref={canvasRef}
+            <div
               className={
-                kind === "initials"
-                  ? "h-36 w-full cursor-crosshair touch-none select-none rounded-md border border-border bg-paper"
-                  : "h-44 w-full cursor-crosshair touch-none select-none rounded-md border border-border bg-paper sm:h-[168px]"
+                kind === "initials" ? "relative h-36 w-full" : "relative h-44 w-full sm:h-[168px]"
               }
-              aria-label={kind === "initials" ? "Draw your initials" : "Draw your signature"}
-            />
+            >
+              <canvas
+                ref={canvasRef}
+                width={kind === "initials" ? 360 : 520}
+                height={kind === "initials" ? 180 : 168}
+                className="absolute inset-0 h-full w-full cursor-crosshair touch-none select-none rounded-md border border-border bg-paper"
+                aria-label={kind === "initials" ? "Draw your initials" : "Draw your signature"}
+              />
+            </div>
             <p className="mt-2 text-xs text-muted-foreground">
               Draw with a mouse, trackpad, or finger. The pad ignores page scroll while you ink.
             </p>
