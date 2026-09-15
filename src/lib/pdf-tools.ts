@@ -8,7 +8,8 @@ import { encodeDemoPhoto } from "./tiny-png";
 import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
-import { burnMarksOnPages } from "./pdf-marks";
+import { applyBurnAndNativeMarks, partitionMarks } from "./pdf-marks";
+import { saveEditorAnnotations } from "./pdf-annotate-js";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 export type {
@@ -97,8 +98,9 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
 
 /**
  * Apply in-place text rewrites first, then rebuild any scan-aware pages
- * (image + OCR text layer), then overlay image replacements and annotation
- * burns so photos and marks never flatten the rest of the page.
+ * (image + OCR text layer), then overlay image replacements, burn visual
+ * redacts, and write highlight/note as real PDF annotations so photos and
+ * marks never flatten the rest of the page.
  */
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
@@ -137,11 +139,15 @@ export async function applyWorkshopPatches(
   }
 
   if (marks.length) {
-    const font = await doc.embedFont(StandardFonts.Helvetica);
-    await burnMarksOnPages(pages, marks, font);
+    await applyBurnAndNativeMarks(doc, marks);
   }
 
-  return doc.save();
+  let out = await doc.save();
+  const { editor } = partitionMarks(marks);
+  if (editor.length) {
+    out = (await saveEditorAnnotations(out, editor)).bytes;
+  }
+  return out;
 }
 
 /** A quote with photos, rules, multi-font terms, and a deliberately wrong total. */

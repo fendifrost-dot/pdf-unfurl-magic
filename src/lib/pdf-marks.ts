@@ -1,13 +1,16 @@
 /**
- * Overlay marks and burned-in redaction boxes.
- * Appends drawing operators only — original page objects stay as they are.
- * Does not touch applyTextPatches / the in-place edit-font engine.
+ * Overlay marks. Highlight / note become real PDF annotations via the pdf.js
+ * editor save path (pdf-annotate-js.ts). Underline / rectangle are native
+ * annot dicts. Visual redact still burns a black box into the page stream —
+ * underlying operators stay extractable. Does not touch applyTextPatches.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { partitionMarks, saveEditorAnnotations, writeNativeAnnotations } from "./pdf-annotate-js";
 import type { AnnotationBurn } from "./pdf-images";
 
 export type { AnnotationBurn, AnnotationKind } from "./pdf-images";
 export type PageMark = AnnotationBurn;
+export { partitionMarks } from "./pdf-annotate-js";
 
 export function exportFileName(base: string, hasEdits: boolean, marks: AnnotationBurn[]): string {
   if (marks.some((m) => m.kind === "redact")) return `${base}-redacted.pdf`;
@@ -131,13 +134,26 @@ export async function burnMarksOnPages(pages: PDFPage[], marks: AnnotationBurn[]
   }
 }
 
+export async function applyBurnAndNativeMarks(doc: PDFDocument, marks: AnnotationBurn[]) {
+  const { burn, native } = partitionMarks(marks);
+  if (burn.length) {
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    await burnMarksOnPages(doc.getPages(), burn, font);
+  }
+  if (native.length) writeNativeAnnotations(doc, native);
+}
+
 export async function applyPageMarks(
   bytes: ArrayBuffer | Uint8Array,
   marks: AnnotationBurn[],
 ): Promise<Uint8Array> {
   const src = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const doc = await PDFDocument.load(src.slice(0), { ignoreEncryption: true });
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  await burnMarksOnPages(doc.getPages(), marks, font);
-  return doc.save();
+  const doc = await PDFDocument.load(src.slice(), { ignoreEncryption: true });
+  await applyBurnAndNativeMarks(doc, marks);
+  let out = await doc.save();
+  const { editor } = partitionMarks(marks);
+  if (editor.length) {
+    out = (await saveEditorAnnotations(out, editor)).bytes;
+  }
+  return out;
 }
