@@ -968,7 +968,15 @@ export async function listPageTextShows(
   const doc = await loadDoc(bytes);
   const page = doc.getPages()[pageNumber - 1];
   if (!page) return [];
-  return allPageStreams(doc, page).flatMap((s) => collectTextShows(s.tokens));
+  const out: TextShow[] = [];
+  for (const stream of allPageStreams(doc, page)) {
+    try {
+      out.push(...collectTextShows(stream.tokens));
+    } catch {
+      // Skip a corrupt stream rather than failing the whole page extract.
+    }
+  }
+  return out;
 }
 
 export async function listPageEmbeddedFonts(

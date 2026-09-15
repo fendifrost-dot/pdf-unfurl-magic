@@ -205,7 +205,10 @@ export async function extractLines(
   sourceBytes?: ArrayBuffer,
 ): Promise<TextLine[]> {
   const page = await doc.getPage(pageNumber);
-  const content = await page.getTextContent();
+  const content = await page.getTextContent({
+    includeMarkedContent: false,
+    disableNormalization: true,
+  });
   const raw = collectPdfjsItems(
     content.items as Array<{
       str?: string;
