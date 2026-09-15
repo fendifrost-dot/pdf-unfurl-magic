@@ -1001,3 +1001,16 @@ export async function decodePageContent(bytes: ArrayBuffer, pageNumber: number):
   const streams = allPageStreams(doc, page);
   return streams.map((s) => extractShownStrings(s.tokens).join("\n")).join("\n");
 }
+
+/** Inflated content-stream operators (for asserting `3 Tr` vs `/ca 0`). */
+export async function decodePageContentRaw(
+  bytes: ArrayBuffer,
+  pageNumber: number,
+): Promise<string> {
+  const doc = await loadDoc(bytes);
+  const page = doc.getPages()[pageNumber - 1];
+  if (!page) return "";
+  return allPageStreams(doc, page)
+    .map((s) => s.tokens.map((token) => token.raw).join(""))
+    .join("\n");
+}

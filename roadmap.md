@@ -18,7 +18,8 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] In-PDF Image Studio MVP: select one photo on the current page, replace or crop, export without wrecking text/lines
 - [x] Prior-art / OSS reuse map (`docs/PRIOR_ART.md`) — pick libraries instead of rebuilding OCR/edit
 - [x] PRIOR_ART #1: `@pdf-lib/fontkit` + bundled Liberation Sans / Noto Sans (SIL OFL) so WinAnsi-missing edits embed a real TTF instead of writing `?`
-- [ ] Next 2 weeks (see PRIOR_ART top 5): OCR `/Tr 3` layer; in-place image XObject replace; pdf.js annotation save
+- [x] PRIOR_ART #2: OCR searchable layer uses PDF text rendering mode `/Tr 3` instead of opacity:0 (`src/lib/scan/pdf.ts`, scan-aware Edit export)
+- [ ] Next 2 weeks (see PRIOR_ART top 5): in-place image XObject replace; pdf.js annotation save
 - [ ] Do not npm AGPL (scribe.js, OpenSign, Documenso, MuPDF.js) or ship OpenCV.js (~30 MB) without a lazy Electron-only path
 - [ ] Later (not this workshop): brushes, generative fill, CMYK print
 - [x] Phone / PWA shell: `/split` `/merge` `/scan` `/edit`, bottom nav, 44px targets, share sheet
