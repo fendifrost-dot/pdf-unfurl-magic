@@ -1,19 +1,25 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, shell, session } = require("electron");
-const { spawn } = require("node:child_process");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const { resolveUiRoot, startStaticUiServer } = require("./static-ui.cjs");
 
 const DEV_PORT = Number(process.env.PDF_RELIEF_PORT || 47321);
 const DEV_URL = `http://127.0.0.1:${DEV_PORT}`;
-const isDev = process.argv.includes("--dev");
 
 /** @type {import('electron').BrowserWindow | null} */
 let mainWindow = null;
-/** @type {import('node:child_process').ChildProcess | null} */
-let previewChild = null;
+/** @type {import('node:http').Server | null} */
+let staticServer = null;
+/** @type {string | null} */
+let staticOrigin = null;
 /** @type {{ name: string, data: Buffer } | null} */
 let pendingPdf = null;
+
+function isDevMode() {
+  if (app.isPackaged) return false;
+  return process.argv.includes("--dev");
+}
 
 function iconPath() {
   const png = path.join(__dirname, "icon.png");
@@ -52,24 +58,27 @@ function waitForUrl(url, timeoutMs = 120000) {
   });
 }
 
-function startPreviewServer() {
-  const root = path.join(__dirname, "..");
-  previewChild = spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", String(DEV_PORT), "--strictPort"], {
-    cwd: root,
-    stdio: "inherit",
-    env: process.env,
-    shell: process.platform === "win32",
-  });
-  return waitForUrl(DEV_URL);
+async function startPackagedUi() {
+  if (staticOrigin) return staticOrigin;
+  const appRoot = path.join(__dirname, "..");
+  const uiRoot = resolveUiRoot(appRoot);
+  if (!uiRoot) {
+    throw new Error(
+      "PDF Relief UI files were not found (no dist/index.html). Rebuild with npm run pack or npm run desktop. Packed apps must not spawn npx or vite.",
+    );
+  }
+  const started = await startStaticUiServer(uiRoot);
+  staticServer = started.server;
+  staticOrigin = started.origin;
+  return staticOrigin;
 }
 
 async function resolveStartUrl() {
-  if (isDev) {
+  if (isDevMode()) {
     await waitForUrl(`${DEV_URL}/`);
     return `${DEV_URL}/`;
   }
-  await startPreviewServer();
-  return `${DEV_URL}/`;
+  return startPackagedUi();
 }
 
 let appOrigin = DEV_URL;
@@ -386,7 +395,13 @@ if (!gotLock) {
 }
 
 app.on("window-all-closed", () => {
-  if (previewChild && !previewChild.killed) previewChild.kill();
-  previewChild = null;
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  if (staticServer) {
+    staticServer.close();
+    staticServer = null;
+    staticOrigin = null;
+  }
 });
