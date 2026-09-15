@@ -1,0 +1,48 @@
+# Builds unsigned Apple Silicon dmg/zip on version tags.
+# No Apple Developer ID or notarization secrets are required.
+name: Desktop macOS release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  pack-mac:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build unsigned arm64 dmg and zip
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run pack:mac
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-relief-mac-arm64
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+      - name: Attach artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/*.zip
+          generate_release_notes: true
