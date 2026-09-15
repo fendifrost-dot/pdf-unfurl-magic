@@ -24,6 +24,9 @@ export function SiteHeader() {
           <Link to="/scan" className="transition-colors hover:text-foreground">
             Scan pages
           </Link>
+          <Link to="/sign" className="transition-colors hover:text-foreground">
+            E-Sign
+          </Link>
           <a href="/#bench" className="transition-colors hover:text-foreground">
             Split a file
           </a>
@@ -68,6 +71,13 @@ export function SiteHeader() {
               className="rounded-md px-3 py-3 text-sm hover:bg-accent"
             >
               Scan pages
+            </Link>
+            <Link
+              to="/sign"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              E-Sign
             </Link>
             <a
               href="/#bench"

@@ -34,8 +34,16 @@ import {
   renderPage,
   type TextLine,
 } from "@/lib/pdf-runtime";
-import { applyWorkshopPatches, buildSamplePdf, type TextPatch } from "@/lib/pdf-tools";
+import {
+  applyWorkshopPatches,
+  buildSamplePdf,
+  inspectTextPatch,
+  type TextPatch,
+} from "@/lib/pdf-tools";
 import { toDesktopBytes } from "@/lib/desktop";
+import { FontMatchIndicator } from "@/components/font-match-indicator";
+import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
+import { charsMissingFromWinAnsi } from "@/lib/pdf-font-match";
 import {
   checkNumbers,
   cleanCopy,
@@ -67,7 +75,7 @@ export const Route = createFileRoute("/edit")({
       {
         name: "description",
         content:
-          "Open a PDF, click a line or an embedded photo, and amend it. Only the box you touched is rewritten. Files never leave your browser.",
+          "Open a PDF, click a text run or an embedded photo, and amend it. Text is rewritten in fonts already in the file — no white-out layer. Files never leave your browser.",
       },
       { property: "og:title", content: "Edit a PDF line or photo without Acrobat — PDF Relief" },
       {
@@ -171,6 +179,8 @@ function Editor() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [findings, setFindings] = useState<NumberFinding[] | null>(null);
+  const [inspection, setInspection] = useState<TextEditInspection | null>(null);
+  const [inspecting, setInspecting] = useState(false);
   const holderRef = useRef<HTMLDivElement>(null);
   const pageBoxRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -204,6 +214,7 @@ function Editor() {
       setSelectedId(null);
       setSelectedImageId(null);
       setSourceCanvas(null);
+      setInspection(null);
       setPage(1);
     } catch {
       setDoc(null);
@@ -379,6 +390,41 @@ function Editor() {
   const boxWidth = selected ? selected.width : 0;
   const draftFits = selected ? estimateWidth(draft, selected.fontSize) <= boxWidth : true;
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
+  const missingGlyphs = useMemo(() => charsMissingFromWinAnsi(draft), [draft]);
+
+  useEffect(() => {
+    if (!doc || !selected) {
+      setInspection(null);
+      return;
+    }
+    let cancelled = false;
+    setInspecting(true);
+    const probe: TextPatch = {
+      page: selected.page,
+      x: selected.x,
+      y: selected.y,
+      width: selected.width,
+      height: selected.height,
+      fontSize: selected.fontSize,
+      text: selected.text,
+      originalText: selected.text,
+      fontName: selected.fontName,
+      fontFamily: selected.fontFamily,
+    };
+    void inspectTextPatch(doc.bytes, probe)
+      .then((result) => {
+        if (!cancelled) setInspection(result);
+      })
+      .catch(() => {
+        if (!cancelled) setInspection(null);
+      })
+      .finally(() => {
+        if (!cancelled) setInspecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, selected]);
 
   const openSample = async () => {
     setStatus("Building the sample quote");
@@ -403,6 +449,7 @@ function Editor() {
   const commit = () => {
     if (!selected) return;
     const text = draft.trim();
+    if (text && text !== selected.text && !canCommitSafely(inspection, text, selected.text)) return;
     setEdits((prev) => {
       const next = { ...prev };
       if (!text || text === selected.text) delete next[selected.id];
@@ -547,6 +594,9 @@ function Editor() {
         height: line.height,
         fontSize: line.fontSize,
         text,
+        originalText: line.text,
+        fontName: line.fontName,
+        fontFamily: line.fontFamily,
       }));
       const imagePatches = Object.values(imageEdits).map((edit) => ({
         page: edit.region.page,
@@ -559,8 +609,12 @@ function Editor() {
       }));
       const bytes = await applyWorkshopPatches(doc.bytes, patches, imagePatches, marks);
       downloadBytes(bytes, `${doc.base}-edited.pdf`);
-    } catch {
-      setError("The export failed. Nothing was changed on your original file.");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The export failed. Nothing was changed on your original file.",
+      );
     } finally {
       setStatus(null);
     }
@@ -639,9 +693,9 @@ function Editor() {
             </h1>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
               Original pages stay as PDF objects — fonts, rules, and images you do not touch are not
-              rasterized. Click a line or a photo, change it, and export. Image studio is a document
-              workshop, not Photoshop: replace, crop, rotate, exposure, contrast, compress. Marks
-              burn in only after you confirm them.
+              rasterized. Click a run, rewrite it in a font already in the file, and export. No
+              white-out layer. Image studio is a document workshop, not Photoshop: replace, crop,
+              rotate, exposure, contrast, compress. Marks burn in only after you confirm them.
             </p>
           </div>
           {doc && (
@@ -822,7 +876,7 @@ function Editor() {
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
                 {mode === "text" &&
-                  `${lines.length} text lines on this page. Hover to see the boxes; click one to edit it.`}
+                  `${lines.length} text runs on this page. Hover to see the boxes; click one to edit that run only.`}
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
@@ -918,11 +972,25 @@ function Editor() {
                 </div>
               ) : (
                 <>
-                  <p className="eyebrow">Editing one line</p>
+                  <p className="eyebrow">Editing one run</p>
                   <p className="text-gauge mt-2 text-xs text-muted-foreground">
                     page {selected.page} · {selected.fontSize.toFixed(1)}pt ·{" "}
                     {selected.width.toFixed(0)}pt wide
+                    {selected.fontFamily ? ` · ${selected.fontFamily.split(",")[0]}` : ""}
                   </p>
+                  <FontMatchIndicator
+                    inspection={
+                      inspection && missingGlyphs.length > 0
+                        ? {
+                            ...inspection,
+                            method: "blocked",
+                            missingGlyphs,
+                            message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
+                          }
+                        : inspection
+                    }
+                    loading={inspecting}
+                  />
                   <Textarea
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -958,7 +1026,15 @@ function Editor() {
                   </div>
 
                   <div className="mt-4 flex gap-2">
-                    <Button size="sm" className="flex-1" onClick={commit}>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={commit}
+                      disabled={
+                        !canCommitSafely(inspection, draft, selected.text) ||
+                        missingGlyphs.length > 0
+                      }
+                    >
                       Keep this change
                     </Button>
                     <Button

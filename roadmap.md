@@ -13,5 +13,7 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] Verified end to end in browser: sample -> edit -> check numbers -> export; split on home
 - [x] Restyle home and editor to the approved cream-paper screenshots without changing PDF or Electron behavior
 - [x] Scan lane `/scan`: camera + import, edge detect, perspective, enhance presets, multi-page session, optional local OCR text layer
+- [x] E-Sign MVP (`/sign`): single signer, draw/type signature, place on page, date stamp, export signed PDF + SHA-256 audit page
 - [x] In-PDF Image Studio: select an embedded photo, replace / crop / rotate / exposure / contrast / compress; optional rect / redact burns; export keeps text, rules, and unselected images
 - [ ] Later (not this workshop): brushes, generative fill, CMYK print
+- [ ] Deferred: multi-signer routing, email invites, DocuSign API, PKI certificates

@@ -84,10 +84,22 @@ function onEditorPage() {
   return url.includes("/edit");
 }
 
+function onSignPage() {
+  const url = mainWindow?.webContents.getURL() ?? "";
+  return url.includes("/sign");
+}
+
 async function showEditor() {
   if (!mainWindow) return;
   if (!onEditorPage()) {
     await mainWindow.loadURL(joinAppPath("/edit"));
+  }
+}
+
+async function showSign() {
+  if (!mainWindow) return;
+  if (!onSignPage()) {
+    await mainWindow.loadURL(joinAppPath("/sign"));
   }
 }
 
@@ -98,6 +110,10 @@ function notifyPdfReady() {
 async function openPdfPath(filePath) {
   if (!isPdfPath(filePath)) return;
   pendingPdf = readPdfFile(filePath);
+  if (onSignPage()) {
+    notifyPdfReady();
+    return;
+  }
   await showEditor();
   notifyPdfReady();
 }
@@ -139,7 +155,9 @@ async function openPdfFromMenu() {
   const picked = await pickPdfDialog(false);
   if (!picked) return;
   pendingPdf = picked;
-  await showEditor();
+  if (!onSignPage()) {
+    await showEditor();
+  }
   notifyPdfReady();
 }
 
@@ -181,6 +199,12 @@ function buildMenu() {
         {
           label: "Scan pages",
           click: () => mainWindow?.loadURL(joinAppPath("/scan")),
+        },
+        {
+          label: "E-Sign",
+          click: () => {
+            void showSign();
+          },
         },
         {
           label: "Split a file",

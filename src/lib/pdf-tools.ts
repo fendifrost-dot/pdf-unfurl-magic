@@ -5,14 +5,17 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { containFit } from "./image-process";
 import { encodeDemoPhoto } from "./tiny-png";
+import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
-import { fitFontSize } from "./text-helpers";
+import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
+export type { TextPatch, TextEditReport, TextEditInspection } from "./pdf-text-edit";
+export { applyTextPatches, applyTextPatchesWithReport, inspectTextPatch } from "./pdf-text-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
 async function load(bytes: ArrayBuffer) {
-  return PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
+  return loadPdfDocument(bytes);
 }
 
 /** Split into fixed-size chunks so a huge file becomes several openable ones. */
@@ -77,68 +80,19 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
   return doc.getPageCount();
 }
 
-export type TextPatch = {
-  page: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  fontSize: number;
-  text: string;
-};
-
 /**
- * Writes only the edited boxes. Every other object on the page is left exactly
- * as the original author wrote it — no full-page redraw.
- * Type shrinks (never past 4pt) so replacement copy stays inside the old box.
+ * Apply in-place text rewrites first, then overlay image replacements and
+ * annotation burns so photos and marks never flatten the rest of the page.
  */
-export async function applyTextPatches(
-  bytes: ArrayBuffer,
-  patches: TextPatch[],
-): Promise<Uint8Array> {
-  const doc = await load(bytes);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const pages = doc.getPages();
-
-  for (const patch of patches) {
-    const page = pages[patch.page - 1];
-    if (!page) continue;
-    const pad = Math.max(1, patch.fontSize * 0.18);
-
-    // Cover the old glyphs only, then draw the replacement in the same slot.
-    page.drawRectangle({
-      x: patch.x - pad,
-      y: patch.y - pad * 1.1,
-      width: patch.width + pad * 4,
-      height: patch.height + pad * 1.6,
-      color: rgb(1, 1, 1),
-    });
-
-    let size = fitFontSize(patch.text, patch.fontSize, patch.width);
-    while (size > 4 && font.widthOfTextAtSize(patch.text, size) > patch.width) size -= 0.25;
-
-    // Single line, no wrapping: the replacement must stay inside the old slot.
-    page.drawText(patch.text.replace(/\s*\n\s*/g, " "), {
-      x: patch.x,
-      y: patch.y + Math.max(0, (patch.height - size) * 0.28),
-      size,
-      font,
-      color: rgb(0.08, 0.08, 0.1),
-    });
-  }
-
-  return doc.save();
-}
-
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
   textPatches: TextPatch[],
   imagePatches: ImagePatch[],
   marks: AnnotationBurn[],
 ): Promise<Uint8Array> {
-  const doc = await load(bytes);
+  const afterText = textPatches.length ? await applyTextPatches(bytes, textPatches) : null;
+  const doc = await load(afterText ? bytesToArrayBuffer(afterText) : bytes);
   const pages = doc.getPages();
-  const font = textPatches.length ? await doc.embedFont(StandardFonts.Helvetica) : null;
 
   for (const patch of imagePatches) {
     const page = pages[patch.page - 1];
@@ -160,30 +114,6 @@ export async function applyWorkshopPatches(
       width: fitted.w,
       height: fitted.h,
     });
-  }
-
-  if (font) {
-    for (const patch of textPatches) {
-      const page = pages[patch.page - 1];
-      if (!page) continue;
-      const pad = Math.max(1, patch.fontSize * 0.18);
-      page.drawRectangle({
-        x: patch.x - pad,
-        y: patch.y - pad * 1.1,
-        width: patch.width + pad * 4,
-        height: patch.height + pad * 1.6,
-        color: rgb(1, 1, 1),
-      });
-      let size = fitFontSize(patch.text, patch.fontSize, patch.width);
-      while (size > 4 && font.widthOfTextAtSize(patch.text, size) > patch.width) size -= 0.25;
-      page.drawText(patch.text.replace(/\s*\n\s*/g, " "), {
-        x: patch.x,
-        y: patch.y + Math.max(0, (patch.height - size) * 0.28),
-        size,
-        font,
-        color: rgb(0.08, 0.08, 0.1),
-      });
-    }
   }
 
   for (const mark of marks) {
@@ -215,12 +145,14 @@ export async function applyWorkshopPatches(
   return doc.save();
 }
 
-/** A quote with photos, rules, and a deliberately wrong total. */
+/** A quote with photos, rules, multi-font terms, and a deliberately wrong total. */
 export async function buildSamplePdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const body = await doc.embedFont(StandardFonts.Helvetica);
+  const serif = await doc.embedFont(StandardFonts.TimesRoman);
+  const mono = await doc.embedFont(StandardFonts.Courier);
   const ink = rgb(0.1, 0.11, 0.13);
   const soft = rgb(0.42, 0.44, 0.48);
   const oak = await doc.embedPng(encodeDemoPhoto("oak", 320, 200));
@@ -325,6 +257,14 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
     size: 10,
     color: soft,
   });
+  y -= 28;
+  write("Terms follow the Joinery Supply Agreement, clause 4.", {
+    size: 10,
+    font: serif,
+    color: soft,
+  });
+  y -= 16;
+  write("SKU  NG-BENCH-40-OAK", { size: 10, font: mono });
 
   const appendix = doc.addPage([595, 842]);
   appendix.drawText("Photo appendix", { x: 56, y: 780, size: 20, font: bold, color: ink });
@@ -347,6 +287,29 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
     y: 396,
     size: 10,
     font: body,
+    color: ink,
+  });
+
+  const page2 = doc.addPage([595, 842]);
+  page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });
+  page2.drawText("Reference code REF-4421. Do not amend this page.", {
+    x: 56,
+    y: 742,
+    size: 10,
+    font: body,
+    color: soft,
+  });
+  page2.drawLine({
+    start: { x: 56, y: 720 },
+    end: { x: 539, y: 720 },
+    thickness: 1,
+    color: rgb(0.75, 0.76, 0.78),
+  });
+  page2.drawText("Vector rule and original text objects must survive an edit on page 1.", {
+    x: 56,
+    y: 698,
+    size: 10,
+    font: serif,
     color: ink,
   });
 
