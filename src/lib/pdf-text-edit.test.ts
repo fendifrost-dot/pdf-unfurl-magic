@@ -97,9 +97,9 @@ describe("safe text replace", () => {
   it("rewrites a Helvetica-Bold amount in place and leaves page 2 intact", async () => {
     const sample = await buildSamplePdf();
     const before = sample.slice().buffer as ArrayBuffer;
-    const page3Before = await decodePageContent(before, 3);
-    expect(page3Before).toContain("REF-4421");
-    expect(page3Before).toContain("UNTOUCHED PAGE");
+    const page2Before = await decodePageContent(before, 2);
+    expect(page2Before).toContain("REF-4421");
+    expect(page2Before).toContain("UNTOUCHED PAGE");
 
     const shown = await listPageShownText(before, 1);
     expect(shown).toContain("1,987.00");
@@ -145,8 +145,8 @@ describe("safe text replace", () => {
     expect(after).toContain("SKU  NG-BENCH-40-OAK");
     expect(await pageHasWhiteCover(out, 1, { x: 480, y: 0, width: 80, height: 40 })).toBe(false);
 
-    const page3After = await decodePageContent(out, 3);
-    expect(page3After).toBe(page3Before);
+    const page2After = await decodePageContent(out, 2);
+    expect(page2After).toBe(page2Before);
   });
 
   it("refuses CJK that bundled Liberation/Noto cannot encode", async () => {
