@@ -8,6 +8,7 @@ import { encodeDemoPhoto } from "./tiny-png";
 import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
+import { replaceImageXObject } from "./pdf-image-xobject";
 import { applyBurnAndNativeMarks, partitionMarks } from "./pdf-marks";
 import { saveEditorAnnotations } from "./pdf-annotate-js";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
@@ -98,9 +99,10 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
 
 /**
  * Apply in-place text rewrites first, then rebuild any scan-aware pages
- * (image + OCR text layer), then overlay image replacements, burn visual
- * redacts, and write highlight/note as real PDF annotations so photos and
- * marks never flatten the rest of the page.
+ * (image + OCR text layer), then replace photo XObjects in place (no whiteout),
+ * burn visual redacts, and write highlight/note as real PDF annotations.
+ * Overlay white-rect + stacked drawImage is only used when no identifiable
+ * image XObject exists on the page.
  */
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
@@ -119,6 +121,8 @@ export async function applyWorkshopPatches(
   for (const patch of imagePatches) {
     const page = pages[patch.page - 1];
     if (!page) continue;
+    if (await replaceImageXObject(doc, page, patch)) continue;
+
     const mime = patch.mime ?? jpegMagic(patch.bytes);
     const image =
       mime === "image/png" ? await doc.embedPng(patch.bytes) : await doc.embedJpg(patch.bytes);

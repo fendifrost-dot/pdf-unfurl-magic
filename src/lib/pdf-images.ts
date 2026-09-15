@@ -249,6 +249,11 @@ export type ImagePatch = {
   height: number;
   bytes: Uint8Array;
   mime: "image/jpeg" | "image/png";
+  /**
+   * Resource name from the page (`Im0`, `Image`, …). PDF.js `img_p*` ids and
+   * inline-image placeholders are ignored; bbox matching is used instead.
+   */
+  name?: string;
 };
 
 export type AnnotationKind = "rect" | "redact" | "highlight" | "underline" | "note";

@@ -795,6 +795,7 @@ function Editor() {
         height: edit.region.height,
         bytes: edit.output.bytes,
         mime: "image/jpeg" as const,
+        name: edit.region.name,
       }));
       const scanPatches: ScanPageExport[] = [];
       for (const [pageKey, session] of Object.entries(scanByPage)) {
