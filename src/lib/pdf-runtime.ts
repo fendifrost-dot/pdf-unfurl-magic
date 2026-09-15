@@ -6,7 +6,12 @@ import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { installMapPolyfills } from "./map-polyfill";
 import { isDesktopApp } from "./desktop";
 import { saveBytes } from "./file-export";
-import { listPageTextShows, looksLikeAmountText } from "./pdf-text-edit";
+import {
+  listPageTextShows,
+  looksLikeAmountText,
+  looksLikeMoneyColumn,
+  shouldStartNewColumn,
+} from "./pdf-text-edit";
 import { sameVisibleRun } from "./pdf-content-stream";
 
 type PdfJs = typeof import("pdfjs-dist");
@@ -106,12 +111,18 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
         PUNCT_ONLY.test(anchor.str) ||
         (TRAILING_MONEY.test(anchor.str) && /^\d/.test(item.str)));
     const wordGap = Math.max(10, Math.max(item.h, anchor?.h ?? 0) * 1.65);
-    const farColumn = !!anchor && item.x - anchor.x > Math.max(120, Math.max(item.h, anchor.h) * 8);
+    const xDelta = anchor ? item.x - anchor.x : 0;
+    const farColumn = !!anchor && xDelta > Math.max(200, Math.max(item.h, anchor.h) * 8);
     const amountColumn =
       !!anchor &&
       looksLikeAmountText(anchor.str) &&
       looksLikeAmountText(item.str) &&
-      item.x - anchor.x > Math.max(24, Math.max(item.h, anchor.h) * 2.5);
+      xDelta > Math.max(24, Math.max(item.h, anchor.h) * 2.5);
+    const moneyColumn =
+      !!anchor &&
+      looksLikeMoneyColumn(item.str) &&
+      !looksLikeMoneyColumn(anchor.str) &&
+      xDelta > Math.max(24, Math.max(item.h, anchor.h) * 2.5);
     const overlapOk = gap >= -Math.max(1, Math.max(item.h, anchor?.h ?? 0) * 0.65);
     if (
       last &&
@@ -120,7 +131,8 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       overlapOk &&
       (gap <= wordGap || glue) &&
       !farColumn &&
-      !amountColumn
+      !amountColumn &&
+      !moneyColumn
     ) {
       last.push(item);
     } else {
@@ -229,8 +241,6 @@ export function preferReadableText(streamText: string, visualText: string): stri
   }
   return visualBad ? stream : visual;
 }
-
-const COLUMN_EM = 3.2;
 
 function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: number): string {
   const fake: RawTextItem = {
@@ -345,15 +355,12 @@ export function mergeLinesByBaseline(runs: TextLine[]): TextLine[] {
         current = [run];
         continue;
       }
-      const gap = run.x - (prev.x + prev.width);
-      const em = Math.max(run.fontSize, prev.fontSize, 8);
-      const columnGap = Math.max(COLUMN_EM * em, 36);
-      const xDelta = run.x - prev.x;
-      const amountColumn =
-        looksLikeAmountText(prev.text) &&
-        looksLikeAmountText(run.text) &&
-        xDelta > Math.max(24, em * 2.5);
-      if (gap > columnGap || xDelta > Math.max(columnGap * 3, 120) || amountColumn) {
+      if (
+        shouldStartNewColumn(
+          { x: prev.x, width: prev.width, fontSize: prev.fontSize, text: prev.text },
+          { x: run.x, fontSize: run.fontSize, text: run.text },
+        )
+      ) {
         out.push(joinRunsToLine(current));
         current = [run];
       } else {

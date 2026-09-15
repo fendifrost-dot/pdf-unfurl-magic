@@ -128,6 +128,46 @@ describe("mergeLinesByBaseline", () => {
     expect(expanded?.text).toMatch(/Syd Pay 500\.00/);
   });
 
+  it("joins a split description without swallowing the amount column", () => {
+    const runs = groupTextItems(
+      [
+        {
+          str: "06-06 Paid From - Synchrony card Syf",
+          x: 50,
+          y: 640,
+          w: 80,
+          h: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+        },
+        {
+          str: "Paymnt Chk 4220268",
+          x: 180,
+          y: 640,
+          w: 90,
+          h: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+        },
+        { str: "500.00", x: 400, y: 640, w: 40, h: 8, fontName: "F2", fontFamily: "Helvetica" },
+        { str: "4,972.29", x: 500, y: 640, w: 44, h: 8, fontName: "F2", fontFamily: "Helvetica" },
+      ],
+      1,
+    );
+    const lines = mergeLinesByBaseline(runs);
+    const desc = lines.find((line) => /Paid From/.test(line.text));
+    expect(desc?.text).toMatch(/Paymnt Chk 4220268/);
+    expect(desc?.text).not.toMatch(/500\.00/);
+    expect(lines.find((line) => line.text === "500.00")?.x).toBe(400);
+    expect(lines.find((line) => line.text === "4,972.29")?.x).toBe(500);
+    const expanded = expandToFullLine(lines, desc!);
+    const fields = columnFieldsForLine(expanded ?? desc!);
+    expect(fields.map((field) => field.label)).toEqual(["Description", "Amount", "Balance"]);
+    expect(fields[0]?.text).toMatch(/Paymnt Chk 4220268/);
+    expect(fields[1]?.x).toBe(400);
+    expect(fields[2]?.x).toBe(500);
+  });
+
   it("keeps a space when a far amount is merged despite an over-wide label box", () => {
     const joined = joinRunsToLine([
       {

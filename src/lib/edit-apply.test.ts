@@ -20,6 +20,7 @@ import {
   columnFieldsForLine,
   memberColumnLabel,
   membersForLinePatch,
+  remapColumnMemberTexts,
 } from "./edit-apply";
 
 const safeInspection: TextEditInspection = {
@@ -409,5 +410,77 @@ describe("Apply / Enhance exit contracts", () => {
     );
     expect(members?.find((member) => member.originalText === "500.00")?.x).toBe(400);
     expect(members?.find((member) => member.originalText === "4,972.29")?.x).toBe(500);
+  });
+
+  it("carries a description-only draft onto the expanded full line", () => {
+    const desc = {
+      id: "desc",
+      x: 50,
+      y: 640,
+      width: 200,
+      height: 14,
+      fontSize: 10,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "06-06 Paid To merchant",
+      members: [
+        {
+          id: "desc",
+          x: 50,
+          y: 640,
+          width: 200,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "06-06 Paid To merchant",
+        },
+      ],
+    };
+    const joined = {
+      id: "row",
+      x: 50,
+      y: 640,
+      width: 500,
+      height: 14,
+      fontSize: 10,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "06-06 Paid To merchant 500.00 4,972.29",
+      members: [
+        desc.members[0]!,
+        {
+          id: "amt",
+          x: 400,
+          y: 640,
+          width: 50,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "500.00",
+        },
+        {
+          id: "bal",
+          x: 500,
+          y: 640,
+          width: 50,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "4,972.29",
+        },
+      ],
+    };
+    const remapped = remapColumnMemberTexts({
+      fromFields: columnFieldsForLine(desc),
+      toFields: columnFieldsForLine(joined),
+      sourceDraft: "06-06 Paid From merchant",
+      sourceWasColumnar: false,
+    });
+    expect(remapped.desc).toBe("06-06 Paid From merchant");
+    expect(remapped.amt).toBe("500.00");
+    expect(remapped.bal).toBe("4,972.29");
   });
 });

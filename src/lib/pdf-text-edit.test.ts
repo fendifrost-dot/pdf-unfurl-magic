@@ -13,6 +13,7 @@ import { groupTextItems, joinRunsToLine, mergeLinesByBaseline } from "./pdf-runt
 import {
   applyTextPatches,
   applyTextPatchesWithReport,
+  clusterBoxesByColumn,
   decodePageContent,
   inspectTextLayer,
   inspectTextPatch,
@@ -121,6 +122,34 @@ describe("groupTextItems", () => {
       1,
     );
     expect(lines.map((l) => l.text)).toEqual(["1,987.00"]);
+  });
+});
+
+describe("clusterBoxesByColumn", () => {
+  it("keeps description fragments together and locks amount x", () => {
+    const groups = clusterBoxesByColumn([
+      { x: 50, width: 80, fontSize: 8, text: "06-06 Paid From - Synchrony card Syf" },
+      { x: 180, width: 90, fontSize: 8, text: "Paymnt Chk 4220268" },
+      { x: 400, width: 40, fontSize: 8, text: "500.00" },
+      { x: 500, width: 44, fontSize: 8, text: "4,972.29" },
+    ]);
+    expect(groups.map((group) => group.map((box) => box.text).join(" "))).toEqual([
+      "06-06 Paid From - Synchrony card Syf Paymnt Chk 4220268",
+      "500.00",
+      "4,972.29",
+    ]);
+  });
+
+  it("still splits an over-wide description from a money column", () => {
+    const groups = clusterBoxesByColumn([
+      { x: 50, width: 350, fontSize: 8, text: "06-06 Paid To Chk 4220268" },
+      { x: 400, width: 40, fontSize: 8, text: "500.00" },
+      { x: 500, width: 44, fontSize: 8, text: "4,972.29" },
+    ]);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]?.[0]?.text).toMatch(/Paid To/);
+    expect(groups[1]?.[0]?.x).toBe(400);
+    expect(groups[2]?.[0]?.x).toBe(500);
   });
 });
 

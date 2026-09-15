@@ -121,11 +121,41 @@ export type TextPatchMember = {
 
 const COLUMN_EM = 3.2;
 const COLUMN_MIN_GAP = 36;
+/** When PDF.js over-reports width, gutter looks like 0 — still split far x starts. */
+const COLUMN_X_DELTA_FALLBACK = 200;
 
 export function looksLikeAmountText(text: string): boolean {
   const t = text.replace(/\s+/g, "");
   if (!/\d/.test(t)) return false;
   return /^-?\$?-?[\d,]+(?:\.\d+)?%?$/.test(t);
+}
+
+/** Amount/Balance cells use cents. Check numbers like 4220268 must stay in the description. */
+export function looksLikeMoneyColumn(text: string): boolean {
+  const t = text.replace(/\s+/g, "");
+  return /^-?\$?-?[\d,]+\.\d{2}%?$/.test(t);
+}
+
+export function shouldStartNewColumn(
+  prev: { x: number; width: number; fontSize?: number; text?: string },
+  next: { x: number; fontSize?: number; text?: string },
+): boolean {
+  const em = Math.max(next.fontSize ?? 8, prev.fontSize ?? 8, 8);
+  const columnGap = Math.max(COLUMN_EM * em, COLUMN_MIN_GAP);
+  const gap = next.x - (prev.x + prev.width);
+  const xDelta = next.x - prev.x;
+  const prevText = prev.text ?? "";
+  const nextText = next.text ?? "";
+  const prevMoney = looksLikeMoneyColumn(prevText);
+  const nextMoney = looksLikeMoneyColumn(nextText);
+  const twoAmounts =
+    looksLikeAmountText(prevText) &&
+    looksLikeAmountText(nextText) &&
+    xDelta > Math.max(24, em * 2.5);
+  const descriptionThenMoney = nextMoney && !prevMoney && xDelta > Math.max(24, em * 2.5);
+  const farStart = xDelta > Math.max(columnGap * 3, COLUMN_X_DELTA_FALLBACK);
+  const gutterSplit = gap > columnGap && (prevMoney || nextMoney || gap > columnGap * 2);
+  return gutterSplit || farStart || twoAmounts || descriptionThenMoney;
 }
 
 export function clusterBoxesByColumn<
@@ -140,17 +170,7 @@ export function clusterBoxesByColumn<
       current = [box];
       continue;
     }
-    const gap = box.x - (prev.x + prev.width);
-    const em = Math.max(box.fontSize ?? 8, prev.fontSize ?? 8, 8);
-    const columnGap = Math.max(COLUMN_EM * em, COLUMN_MIN_GAP);
-    const xDelta = box.x - prev.x;
-    const amountColumn =
-      looksLikeAmountText(prev.text ?? "") &&
-      looksLikeAmountText(box.text ?? "") &&
-      xDelta > Math.max(24, em * 2.5);
-    // PDF.js often over-reports run width so a far amount looks like it abuts
-    // the description. Still split when the next box starts far to the right.
-    if (gap > columnGap || xDelta > Math.max(columnGap * 3, 120) || amountColumn) {
+    if (shouldStartNewColumn(prev, box)) {
       groups.push(current);
       current = [box];
     } else {
@@ -480,15 +500,7 @@ function clusterShowsByColumn(shows: TextShow[]): TextShow[][] {
       current = [show];
       continue;
     }
-    const gap = show.x - (prev.x + showWidth(prev));
-    const em = Math.max(show.fontSize, prev.fontSize, 8);
-    const columnGap = Math.max(COLUMN_EM * em, COLUMN_MIN_GAP);
-    const xDelta = show.x - prev.x;
-    const amountColumn =
-      looksLikeAmountText(prev.text) &&
-      looksLikeAmountText(show.text) &&
-      xDelta > Math.max(24, em * 2.5);
-    if (gap > columnGap || xDelta > Math.max(columnGap * 3, 120) || amountColumn) {
+    if (shouldStartNewColumn({ ...prev, width: showWidth(prev) }, show)) {
       groups.push(current);
       current = [show];
     } else {

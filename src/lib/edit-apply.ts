@@ -341,6 +341,38 @@ export function joinColumnDrafts(fields: ColumnField[], drafts: Record<string, s
     .join(" ");
 }
 
+/**
+ * Carry description (or per-column) drafts onto a newly joined full line.
+ * Matches columns by id, then x, then label so Amount/Balance stay original.
+ */
+export function remapColumnMemberTexts(input: {
+  fromFields: ColumnField[];
+  toFields: ColumnField[];
+  memberTexts?: Record<string, string>;
+  liveDrafts?: Record<string, string>;
+  sourceDraft?: string;
+  sourceWasColumnar: boolean;
+}): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const to of input.toFields) {
+    const from =
+      input.fromFields.find((field) => field.id === to.id) ??
+      input.fromFields.find((field) => Math.abs(field.x - to.x) <= 8) ??
+      input.fromFields.find(
+        (field) => field.label === to.label && field.label !== "Amount / Balance",
+      );
+    const live = from ? input.liveDrafts?.[from.id] : undefined;
+    const stored = from ? input.memberTexts?.[from.id] : undefined;
+    out[to.id] = (live ?? stored ?? to.text).trim() || to.text;
+  }
+  if (!input.sourceWasColumnar && input.sourceDraft?.trim()) {
+    const desc =
+      input.toFields.find((field) => field.label === "Description") ?? input.toFields[0];
+    if (desc) out[desc.id] = input.sourceDraft.trim();
+  }
+  return out;
+}
+
 export function membersForLinePatch(
   line: LineLike,
   drafts?: Record<string, string>,

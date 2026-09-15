@@ -70,6 +70,7 @@ import {
   isColumnarLine,
   joinColumnDrafts,
   membersForLinePatch,
+  remapColumnMemberTexts,
   nextEnhanceOpen,
   overlayApplyState,
   overlayFillMode,
@@ -907,10 +908,10 @@ function Editor() {
     setMode("form");
   };
 
-  const select = (line: TextLine) => {
+  const select = (line: TextLine, storedOverride?: Edit) => {
     setSelectedImageId(null);
     setSelectedId(line.id);
-    const stored = edits[line.id];
+    const stored = storedOverride ?? edits[line.id];
     setDraft(stored?.text ?? line.text);
     const fields = columnFieldsForLine(line);
     const nextDrafts: Record<string, string> = {};
@@ -990,6 +991,31 @@ function Editor() {
     if (!selected) return;
     const joined = expandToFullLine(lines, selected);
     if (!joined) return;
+    const fromFields = columnFieldsForLine(selected);
+    const toFields = columnFieldsForLine(joined);
+    const stored = edits[selected.id];
+    const remapped = remapColumnMemberTexts({
+      fromFields,
+      toFields,
+      memberTexts: stored?.memberTexts,
+      liveDrafts: memberDrafts,
+      sourceDraft: stored?.text ?? draft,
+      sourceWasColumnar: fromFields.length > 1,
+    });
+    const joinedText =
+      toFields.length > 1
+        ? joinColumnDrafts(toFields, remapped)
+        : (stored?.text ?? draft ?? joined.text);
+    const carried: Edit = {
+      line: joined,
+      text: joinedText,
+      fontChoiceId: stored?.fontChoiceId ?? fontChoiceId,
+      ...(toFields.length > 1 ? { memberTexts: remapped } : {}),
+    };
+    const hadApplied = !!stored;
+    const hadLiveChange =
+      (draft && draft !== selected.text) ||
+      fromFields.some((field) => (memberDrafts[field.id] ?? field.text) !== field.text);
     const band = Math.max(3, selected.fontSize * 0.5);
     const merge = (prev: TextLine[]) => {
       const kept = prev.filter(
@@ -999,7 +1025,15 @@ function Editor() {
     };
     setNativeLines(merge);
     setLines(merge);
-    select(joined);
+    if (hadApplied) {
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[selected.id];
+        next[joined.id] = carried;
+        return next;
+      });
+    }
+    select(joined, hadApplied || hadLiveChange ? carried : undefined);
   };
 
   const selectImage = (image: PdfImageRegion) => {
