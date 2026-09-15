@@ -58,9 +58,22 @@ export function enhanceOpenAfterTextChip(): false {
   return false;
 }
 
+export const LEAVE_ENHANCE_LABEL = "Leave Enhance";
+
+/**
+ * Text pick (Line / Select any) stays on the Edit chrome in Text mode —
+ * including while Enhance / OCR is open. Hiding it after OCR is the trap:
+ * users cannot return to click-to-edit without an export round-trip.
+ */
+export function textPickVisible(mode: string): boolean {
+  return mode === "text";
+}
+
 /**
  * Auto-open Enhance for scanned pages or #enhance.
- * After the user closes it (Text / Done), do not reopen just because OCR exists.
+ * After the user closes it (Text / Done / Line / Select any / Clear OCR),
+ * do not reopen because OCR exists, looksScanned is still true, or the
+ * URL still has #enhance.
  */
 export function nextEnhanceOpen(input: {
   userClosed: boolean;
@@ -68,13 +81,78 @@ export function nextEnhanceOpen(input: {
   ocrLineCount: number;
   hashEnhance: boolean;
 }): boolean {
-  if (input.hashEnhance) return true;
+  void input.ocrLineCount;
   if (input.userClosed) return false;
+  if (input.hashEnhance) return true;
   return input.looksScanned;
 }
 
-export function preferOcrOverlay(input: { enhanceOpen: boolean; ocrLineCount: number }): boolean {
-  return input.enhanceOpen && input.ocrLineCount > 0;
+export function preferOcrOverlay(input: {
+  enhanceOpen: boolean;
+  ocrLineCount: number;
+  /** Native PDF.js / content-stream lines already on the page. */
+  nativeLineCount?: number | undefined;
+  looksScanned?: boolean | undefined;
+}): boolean {
+  if (!input.enhanceOpen || input.ocrLineCount <= 0) return false;
+  // Digital text (bank statements, native PDFs) must stay click-to-edit
+  // after Enhance & OCR. OCR boxes live in the side panel until the page
+  // has no native lines (true scan) or auto-detect says scanned (ghost).
+  if ((input.nativeLineCount ?? 0) > 0 && !input.looksScanned) return false;
+  return true;
+}
+
+/** Overlay source after leaving Enhance, or while Enhance is open on native text. */
+export function linesForTextEdit<T>(input: {
+  enhanceOpen: boolean;
+  ocrLines: T[];
+  nativeLines: T[];
+  looksScanned?: boolean | undefined;
+}): T[] {
+  if (
+    preferOcrOverlay({
+      enhanceOpen: input.enhanceOpen,
+      ocrLineCount: input.ocrLines.length,
+      nativeLineCount: input.nativeLines.length,
+      looksScanned: input.looksScanned,
+    })
+  ) {
+    return input.ocrLines.length ? input.ocrLines : input.nativeLines;
+  }
+  return input.nativeLines.length ? input.nativeLines : input.ocrLines;
+}
+
+export function emptySelectionCopy(input: {
+  showingOcr: boolean;
+  ocrLineCount: number;
+  pendingVerify: number;
+  hasDoc: boolean;
+  lineCount: number;
+  textSelectMode: "line" | "marquee";
+}): { title: string; body: string } {
+  if (input.lineCount === 0 && input.hasDoc) {
+    return {
+      title: "No text operators on this page",
+      body: "Use Enhance & OCR this page when this is a scan or the picture is hard to read. A Safe edit here would paint over the image.",
+    };
+  }
+  if (input.showingOcr) {
+    return {
+      title: "Nothing selected",
+      body:
+        input.pendingVerify > 0
+          ? "Verify uncertain OCR above, then click a confirmed line."
+          : "Click an OCR line above or a box on the page. Leave Enhance to edit native PDF lines.",
+    };
+  }
+  void input.ocrLineCount;
+  return {
+    title: "Nothing selected",
+    body:
+      input.textSelectMode === "marquee"
+        ? "Drag a rectangle across any text runs, then edit the merged draft."
+        : "Click any line on the page to open it here, or switch to Image studio. Enhance is optional if picking feels wrong.",
+  };
 }
 
 /**

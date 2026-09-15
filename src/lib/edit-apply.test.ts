@@ -6,6 +6,9 @@ import {
   APPLY_SUCCESS_MESSAGE,
   canApplyTextEdit,
   enhanceOpenAfterTextChip,
+  emptySelectionCopy,
+  LEAVE_ENHANCE_LABEL,
+  linesForTextEdit,
   nextEnhanceOpen,
   ocrReadyNextStep,
   overlayApplyState,
@@ -17,6 +20,7 @@ import {
   shouldFlattenPageAsScan,
   textOverlayChromeClass,
   textPageFooter,
+  textPickVisible,
   columnFieldsForLine,
   memberColumnLabel,
   membersForLinePatch,
@@ -60,6 +64,55 @@ describe("Apply / Enhance exit contracts", () => {
     ).toBe(false);
   });
 
+  it("Leave Enhance / Text pick stay available after OCR without an export round-trip", () => {
+    expect(textPickVisible("text")).toBe(true);
+    expect(textPickVisible("image")).toBe(false);
+    expect(LEAVE_ENHANCE_LABEL).toMatch(/leave enhance/i);
+    expect(
+      nextEnhanceOpen({
+        userClosed: true,
+        looksScanned: true,
+        ocrLineCount: 125,
+        hashEnhance: true,
+      }),
+    ).toBe(false);
+    expect(
+      preferOcrOverlay({
+        enhanceOpen: false,
+        ocrLineCount: 125,
+        nativeLineCount: 40,
+        looksScanned: false,
+      }),
+    ).toBe(false);
+    expect(
+      linesForTextEdit({
+        enhanceOpen: false,
+        ocrLines: [{ id: "ocr" }],
+        nativeLines: [{ id: "native" }],
+      }),
+    ).toEqual([{ id: "native" }]);
+    expect(
+      emptySelectionCopy({
+        showingOcr: false,
+        ocrLineCount: 125,
+        pendingVerify: 3,
+        hasDoc: true,
+        lineCount: 40,
+        textSelectMode: "line",
+      }).body,
+    ).toMatch(/click any line on the page/i);
+    expect(
+      emptySelectionCopy({
+        showingOcr: true,
+        ocrLineCount: 125,
+        pendingVerify: 0,
+        hasDoc: true,
+        lineCount: 125,
+        textSelectMode: "line",
+      }).body,
+    ).toMatch(/leave enhance/i);
+  });
+
   it("does not auto-reopen Enhance solely because an OCR session exists", () => {
     expect(
       nextEnhanceOpen({
@@ -69,6 +122,14 @@ describe("Apply / Enhance exit contracts", () => {
         hashEnhance: false,
       }),
     ).toBe(false);
+    expect(
+      nextEnhanceOpen({
+        userClosed: false,
+        looksScanned: false,
+        ocrLineCount: 0,
+        hashEnhance: true,
+      }),
+    ).toBe(true);
     expect(
       nextEnhanceOpen({
         userClosed: false,
@@ -198,6 +259,41 @@ describe("Apply / Enhance exit contracts", () => {
   it("hides OCR boxes when Enhance is closed", () => {
     expect(preferOcrOverlay({ enhanceOpen: true, ocrLineCount: 125 })).toBe(true);
     expect(preferOcrOverlay({ enhanceOpen: false, ocrLineCount: 125 })).toBe(false);
+  });
+
+  it("keeps native click-to-edit after Enhance & OCR on a digital text page", () => {
+    expect(
+      preferOcrOverlay({
+        enhanceOpen: true,
+        ocrLineCount: 125,
+        nativeLineCount: 40,
+        looksScanned: false,
+      }),
+    ).toBe(false);
+    expect(
+      linesForTextEdit({
+        enhanceOpen: true,
+        ocrLines: [{ id: "ocr" }],
+        nativeLines: [{ id: "native" }],
+        looksScanned: false,
+      }),
+    ).toEqual([{ id: "native" }]);
+    expect(
+      preferOcrOverlay({
+        enhanceOpen: true,
+        ocrLineCount: 80,
+        nativeLineCount: 0,
+        looksScanned: true,
+      }),
+    ).toBe(true);
+    expect(
+      preferOcrOverlay({
+        enhanceOpen: true,
+        ocrLineCount: 80,
+        nativeLineCount: 12,
+        looksScanned: true,
+      }),
+    ).toBe(true);
   });
 
   it("does not flatten a page as a scan when native edits exist", () => {
