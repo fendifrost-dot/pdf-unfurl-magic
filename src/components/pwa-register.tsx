@@ -18,7 +18,7 @@ export function PwaRegister() {
     if ("serviceWorker" in navigator) {
       const register = () => {
         void navigator.serviceWorker.register("/sw.js").catch(() => {
-          // Offline install is optional; the app still works online.
+          // SW is only for installability. Offline cache is deferred.
         });
       };
       if (document.readyState === "complete") register();
