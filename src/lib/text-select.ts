@@ -90,17 +90,42 @@ export function selectRunAtPoint(lines: TextLine[], x: number, y: number): TextL
   return hits[0] ?? null;
 }
 
-function baselineBand(runs: TextLine[]): TextLine[][] {
+/**
+ * Group runs into visual rows (top → bottom). Amount columns on the same
+ * baseline stay with their label; the next statement row starts a new band.
+ */
+export function visualRowBands<
+  T extends { x: number; y: number; originY?: number; fontSize?: number; page?: number },
+>(runs: T[]): T[][] {
   if (runs.length === 0) return [];
   const sorted = [...runs].sort((a, b) => b.y - a.y || a.x - b.x);
-  const bands: TextLine[][] = [];
+  const bands: T[][] = [];
   for (const run of sorted) {
     const band = bands[bands.length - 1];
     const anchor = band?.[0];
-    if (band && anchor && onSameVisualRow(anchor, run)) band.push(run);
-    else bands.push([run]);
+    if (
+      band &&
+      anchor &&
+      onSameVisualRow(
+        {
+          page: anchor.page ?? 1,
+          y: anchor.y,
+          originY: anchor.originY,
+          fontSize: anchor.fontSize ?? 8,
+        },
+        { page: run.page ?? 1, y: run.y, originY: run.originY, fontSize: run.fontSize ?? 8 },
+      )
+    ) {
+      band.push(run);
+    } else {
+      bands.push([run]);
+    }
   }
   return bands;
+}
+
+function baselineBand(runs: TextLine[]): TextLine[][] {
+  return visualRowBands(runs);
 }
 
 /** Merge hit runs into one draft in reading order (top→bottom, then left→right). */

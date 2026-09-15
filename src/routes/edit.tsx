@@ -58,6 +58,7 @@ import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { FontPicker } from "@/components/font-picker";
 import { AlignSelectionPanel } from "@/components/align-selection-panel";
+import { ChunkEditorPanel } from "@/components/chunk-editor-panel";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
 import {
   APPLY_EDIT_LABEL,
@@ -68,10 +69,14 @@ import {
   ORIGINAL_UNCHANGED_HINT,
   SHOW_EDIT_HIGHLIGHT_LABEL,
   canApplyTextEdit,
+  chunkRowsForSelection,
+  collectChunkMemberTexts,
   columnFieldsForLine,
   emptySelectionCopy,
   enhanceOpenAfterTextChip,
+  isChunkSelection,
   isColumnarLine,
+  joinChunkDrafts,
   joinColumnDrafts,
   linesForTextEdit,
   membersForLinePatch,
@@ -83,6 +88,9 @@ import {
   editPreviewLayers,
   pendingExportBanner,
   preferOcrOverlay,
+  runCountForLine,
+  seedChunkDrafts,
+  selectionEditTitle,
   shouldFlattenPageAsScan,
   textOverlayChromeClass,
   textOverlayLabelClass,
@@ -488,20 +496,33 @@ function Editor() {
   const selectedIsOcr = selected?.source === "ocr";
   const selectedParent = selected ? parentLineFor(lines, selected) : undefined;
   const editingRun = !!selected && !!selectedParent && selectedParent.id !== selected.id;
+  const chunkRows =
+    selected && !selectedIsOcr && !editingRun ? chunkRowsForSelection(selected) : [];
+  const chunkEdit = chunkRows.length > 1;
   const columnFields =
-    selected && !selectedIsOcr && !editingRun ? columnFieldsForLine(selected) : [];
+    selected && !selectedIsOcr && !editingRun && !chunkEdit ? columnFieldsForLine(selected) : [];
   const columnarEdit = columnFields.length > 1;
-  const fullLine = selected && !selectedIsOcr ? expandToFullLine(lines, selected) : null;
+  const fullLine =
+    selected && !selectedIsOcr && !chunkEdit ? expandToFullLine(lines, selected) : null;
   const selectedVerifyPending = ocrVerifyBlocksApply({
     source: selected?.source,
     lineId: selected?.id,
     snippets: ocrVerify,
   });
-  const applyText = columnarEdit ? joinColumnDrafts(columnFields, memberDrafts) : draft.trim();
+  const applyText = chunkEdit
+    ? joinChunkDrafts(chunkRows, memberDrafts)
+    : columnarEdit
+      ? joinColumnDrafts(columnFields, memberDrafts)
+      : draft.trim();
   const applyOriginal = selected
-    ? columnarEdit
-      ? joinColumnDrafts(columnFields, Object.fromEntries(columnFields.map((f) => [f.id, f.text])))
-      : selected.text
+    ? chunkEdit
+      ? joinChunkDrafts(chunkRows, seedChunkDrafts(chunkRows))
+      : columnarEdit
+        ? joinColumnDrafts(
+            columnFields,
+            Object.fromEntries(columnFields.map((f) => [f.id, f.text])),
+          )
+        : selected.text
     : "";
   const applyEnabled = selected
     ? canApplyTextEdit({
@@ -893,7 +914,22 @@ function Editor() {
   }, []);
 
   const boxWidth = selected ? selected.width : 0;
-  const draftFits = selected ? estimateWidth(draft, selected.fontSize) <= boxWidth : true;
+  const chunkFits =
+    !chunkEdit ||
+    chunkRows.every((row) => {
+      if (row.fields.length > 1) {
+        return row.fields.every(
+          (field) =>
+            estimateWidth(memberDrafts[field.id] ?? field.text, field.fontSize) <= field.width,
+        );
+      }
+      return estimateWidth(memberDrafts[row.id] ?? row.text, row.fontSize) <= row.width;
+    });
+  const draftFits = chunkEdit
+    ? chunkFits
+    : selected
+      ? estimateWidth(draft, selected.fontSize) <= boxWidth
+      : true;
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
 
   useEffect(() => {
@@ -990,6 +1026,14 @@ function Editor() {
     setSelectedImageId(null);
     setSelectedId(line.id);
     const stored = storedOverride ?? edits[line.id];
+    const rows = chunkRowsForSelection(line);
+    if (rows.length > 1) {
+      const nextDrafts = seedChunkDrafts(rows, stored?.memberTexts);
+      setMemberDrafts(nextDrafts);
+      setDraft(joinChunkDrafts(rows, nextDrafts));
+      setMode("text");
+      return;
+    }
     setDraft(stored?.text ?? line.text);
     const fields = columnFieldsForLine(line);
     const nextDrafts: Record<string, string> = {};
@@ -1141,14 +1185,21 @@ function Editor() {
 
   const commit = () => {
     if (!selected) return;
-    const fields = columnFieldsForLine(selected);
-    const memberTexts =
-      fields.length > 1
+    const rows = chunkRowsForSelection(selected);
+    const chunking = rows.length > 1;
+    const fields = chunking ? [] : columnFieldsForLine(selected);
+    const memberTexts = chunking
+      ? collectChunkMemberTexts(rows, memberDrafts)
+      : fields.length > 1
         ? Object.fromEntries(
             fields.map((field) => [field.id, memberDrafts[field.id] ?? field.text]),
           )
         : undefined;
-    const text = fields.length > 1 ? joinColumnDrafts(fields, memberTexts ?? {}) : draft.trim();
+    const text = chunking
+      ? joinChunkDrafts(rows, memberTexts ?? {})
+      : fields.length > 1
+        ? joinColumnDrafts(fields, memberTexts ?? {})
+        : draft.trim();
     if (!applyEnabled) {
       return;
     }
@@ -1677,7 +1728,7 @@ function Editor() {
 
   const textOverlay = useMemo(
     () =>
-      lines.map((line) => {
+      lines.flatMap((line) => {
         const overlay = overlayApplyState({
           lineId: line.id,
           originalText: line.text,
@@ -1699,6 +1750,7 @@ function Editor() {
         });
         const canvasShowsApplied = pageHasPatchedPreview && textChanged && line.source !== "ocr";
         const columnar = isColumnarLine(line);
+        const chunky = isChunkSelection(line);
         const showLabel =
           overlayShouldPaintLabel({
             isEdited: textChanged,
@@ -1707,18 +1759,26 @@ function Editor() {
             canvasShowsApplied,
             nativeCanvasVisible: previewLayers.showNativeCanvas,
             source: showingOcr ? "ocr" : line.source,
-          }) && !(columnar && overlay.isLivePreview && !showEditHighlight);
-        return (
+          }) &&
+          !(columnar && overlay.isLivePreview && !showEditHighlight) &&
+          !chunky;
+        const boxes = chunky && line.members?.length ? line.members : [line];
+        return boxes.map((box) => (
           <button
-            key={line.id}
+            key={box.id === line.id ? line.id : `${line.id}-${box.id}`}
             type="button"
             data-testid="text-overlay"
             data-edited={isEdited ? "true" : "false"}
             data-overlay-fill={fill}
             data-overlay-label={showLabel ? "visible" : "sr-only"}
             data-overlay-text={overlay.displayText}
+            data-chunk-run={chunky ? "true" : undefined}
             onClick={(event) => {
               if (event.shiftKey && line.members && line.members.length > 1) {
+                if (box.id !== line.id) {
+                  select(box);
+                  return;
+                }
                 const rect = event.currentTarget.getBoundingClientRect();
                 const rel = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
                 const pdfX = line.x + rel * line.width;
@@ -1732,7 +1792,7 @@ function Editor() {
             }}
             title={overlay.displayText}
             data-text={overlay.displayText}
-            style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
+            style={boxStyle(box.x, box.y, box.width, box.height, scale, viewSize)}
             className={[
               textOverlayChromeClass({
                 isSelected,
@@ -1749,15 +1809,15 @@ function Editor() {
             {showLabel ? (
               <span
                 className={textOverlayLabelClass(fill)}
-                style={{ fontSize: `${Math.max(9, Math.min(22, line.fontSize * scale * 0.92))}px` }}
+                style={{ fontSize: `${Math.max(9, Math.min(22, box.fontSize * scale * 0.92))}px` }}
               >
                 {overlay.displayText}
               </span>
             ) : (
-              <span className="sr-only">Edit: {line.text}</span>
+              <span className="sr-only">Edit: {box.text}</span>
             )}
           </button>
-        );
+        ));
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -2015,7 +2075,7 @@ function Editor() {
                     {enhanceOpen
                       ? "Line / Select any leave Enhance and restore click-to-edit on this page."
                       : textSelectMode === "marquee"
-                        ? "Drag a rectangle over any runs — including a label and its amount."
+                        ? "Drag a rectangle over any runs or several rows. Each selected row opens in the chunk editor."
                         : "Click a row to edit the whole line. Shift-click a fragment for one run."}
                   </p>
                 </div>
@@ -2460,12 +2520,13 @@ function Editor() {
                     </div>
                   ) : (
                     <>
-                      <p className="eyebrow">
-                        {selectedIsOcr
-                          ? "Editing one OCR line"
-                          : editingRun
-                            ? "Editing one run"
-                            : "Editing one line"}
+                      <p className="eyebrow" data-testid="edit-selection-title">
+                        {selectionEditTitle({
+                          selectedIsOcr,
+                          editingRun,
+                          rowCount: chunkEdit ? chunkRows.length : 1,
+                          runCount: selected ? runCountForLine(selected) : 1,
+                        })}
                       </p>
                       <p className="text-gauge mt-2 text-xs text-muted-foreground">
                         page {selected.page} · {selected.fontSize.toFixed(1)}pt ·{" "}
@@ -2487,7 +2548,16 @@ function Editor() {
                           />
                         </>
                       )}
-                      {columnarEdit ? (
+                      {chunkEdit ? (
+                        <ChunkEditorPanel
+                          rows={chunkRows}
+                          drafts={memberDrafts}
+                          onChange={(next) => {
+                            setMemberDrafts(next);
+                            setDraft(joinChunkDrafts(chunkRows, next));
+                          }}
+                        />
+                      ) : columnarEdit ? (
                         <div className="mt-3 space-y-3" data-testid="edit-columns">
                           <p className="text-xs text-muted-foreground">
                             Each column keeps its original position. Extra spaces will not move
@@ -2537,9 +2607,11 @@ function Editor() {
                         }
                       >
                         {draftFits
-                          ? columnarEdit
-                            ? "Amounts stay in their columns. Description edits do not move them."
-                            : "Fits the original box at full size."
+                          ? chunkEdit
+                            ? "Each row keeps its columns. Amounts stay locked to their original x."
+                            : columnarEdit
+                              ? "Amounts stay in their columns. Description edits do not move them."
+                              : "Fits the original box at full size."
                           : `Too wide — export will shrink type to about ${exportSize.toFixed(1)}pt to stay inside the box.`}
                       </p>
 
@@ -2548,6 +2620,21 @@ function Editor() {
                           variant="secondary"
                           size="sm"
                           onClick={() => {
+                            if (chunkEdit) {
+                              const next = { ...memberDrafts };
+                              for (const row of chunkRows) {
+                                if (row.fields.length > 1) {
+                                  for (const field of row.fields) {
+                                    next[field.id] = cleanCopy(next[field.id] ?? field.text);
+                                  }
+                                } else {
+                                  next[row.id] = cleanCopy(next[row.id] ?? row.text);
+                                }
+                              }
+                              setMemberDrafts(next);
+                              setDraft(joinChunkDrafts(chunkRows, next));
+                              return;
+                            }
                             if (columnarEdit) {
                               const next = { ...memberDrafts };
                               for (const field of columnFields) {
@@ -2566,6 +2653,29 @@ function Editor() {
                           variant="secondary"
                           size="sm"
                           onClick={() => {
+                            if (chunkEdit) {
+                              const next = { ...memberDrafts };
+                              for (const row of chunkRows) {
+                                if (row.fields.length > 1) {
+                                  for (const field of row.fields) {
+                                    next[field.id] = shortenToFit(
+                                      next[field.id] ?? field.text,
+                                      field.fontSize,
+                                      field.width,
+                                    );
+                                  }
+                                } else {
+                                  next[row.id] = shortenToFit(
+                                    next[row.id] ?? row.text,
+                                    row.fontSize,
+                                    row.width,
+                                  );
+                                }
+                              }
+                              setMemberDrafts(next);
+                              setDraft(joinChunkDrafts(chunkRows, next));
+                              return;
+                            }
                             if (columnarEdit) {
                               const next = { ...memberDrafts };
                               for (const field of columnFields) {
@@ -2622,6 +2732,12 @@ function Editor() {
                           size="sm"
                           variant="ghost"
                           onClick={() => {
+                            if (chunkEdit) {
+                              const reset = seedChunkDrafts(chunkRows);
+                              setMemberDrafts(reset);
+                              setDraft(joinChunkDrafts(chunkRows, reset));
+                              return;
+                            }
                             setDraft(selected.text);
                             const reset: Record<string, string> = {};
                             for (const field of columnFields) reset[field.id] = field.text;
@@ -2651,7 +2767,14 @@ function Editor() {
                         </p>
                       )}
                       <p className="mt-3 text-xs text-muted-foreground">
-                        Original: <code className="font-mono">{selected.text}</code>
+                        Original:{" "}
+                        {chunkEdit ? (
+                          <span>
+                            {chunkRows.length} statement rows · {runCountForLine(selected)} runs
+                          </span>
+                        ) : (
+                          <code className="font-mono">{selected.text}</code>
+                        )}
                       </p>
                     </>
                   )}

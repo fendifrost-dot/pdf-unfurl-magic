@@ -11,6 +11,12 @@ import {
   joinRunsInReadingOrder,
   selectRunsIntersectingRect,
 } from "./text-select";
+import {
+  chunkRowsForSelection,
+  columnFieldsForLine,
+  membersForLinePatch,
+  selectionEditTitle,
+} from "./edit-apply";
 
 function item(str: string, x: number, w: number, fontName = "F1", y = 400): RawTextItem {
   return { str, x, y, w, h: 9, fontName, fontFamily: "Helvetica" };
@@ -93,5 +99,84 @@ describe("marquee text select", () => {
     expect(joined?.text).toMatch(/500\.00/);
     expect(next.some((line) => line.text === "Paid To")).toBe(true);
     expect(next.some((line) => line.id === joined?.id)).toBe(true);
+  });
+
+  it("marquee across two statement rows produces per-row drafts, not mashed amounts", () => {
+    const row = (y: number, desc: string, amt: string, bal: string, key: string): TextLine[] => [
+      run({ id: `${key}-desc`, text: desc, x: 14, width: 280, y, originY: y, fontSize: 8 }),
+      run({
+        id: `${key}-amt`,
+        text: amt,
+        x: 409,
+        width: 48,
+        y,
+        originY: y,
+        fontSize: 8,
+        fontName: "F2",
+      }),
+      run({
+        id: `${key}-bal`,
+        text: bal,
+        x: 517,
+        width: 48,
+        y,
+        originY: y,
+        fontSize: 8,
+        fontName: "F2",
+      }),
+    ];
+    const lines = [
+      joinRunsInReadingOrder(
+        row(400, "06-08 Paid To - Synchrony card Syd Pay", "500.00", "4,972.29", "r1"),
+      ),
+      joinRunsInReadingOrder(
+        row(380, "06-09 Paid To - Applecard Payment", "250.00", "1,834.34", "r2"),
+      ),
+    ];
+    const { joined } = applyMarqueeToLines(lines, { x: 10, y: 370, width: 560, height: 50 });
+    expect(joined).toBeTruthy();
+    expect(columnFieldsForLine(joined!)).toEqual([]);
+
+    const chunks = chunkRowsForSelection(joined!);
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((chunk) => chunk.fields.map((field) => field.label))).toEqual([
+      ["Description", "Amount", "Balance"],
+      ["Description", "Amount", "Balance"],
+    ]);
+    expect(chunks[0]?.fields.map((field) => field.text)).toEqual([
+      "06-08 Paid To - Synchrony card Syd Pay",
+      "500.00",
+      "4,972.29",
+    ]);
+    expect(chunks[1]?.fields.map((field) => field.text)).toEqual([
+      "06-09 Paid To - Applecard Payment",
+      "250.00",
+      "1,834.34",
+    ]);
+    const mashed = chunks
+      .flatMap((chunk) => chunk.fields)
+      .some((field) => /\d\s+\d/.test(field.text));
+    expect(mashed).toBe(false);
+    expect(
+      chunks.some((chunk) => chunk.fields.some((field) => field.label === "Amount / Balance")),
+    ).toBe(false);
+
+    const descId = chunks[0]?.fields.find((field) => field.label === "Description")?.id;
+    const members = membersForLinePatch(joined!, {
+      [descId!]: "06-08 Paid From - Synchrony card Syd Pay",
+    });
+    expect(members?.find((member) => member.originalText === "500.00")).toMatchObject({
+      text: "500.00",
+      x: 409,
+    });
+    expect(members?.find((member) => member.originalText === "250.00")).toMatchObject({
+      text: "250.00",
+      x: 409,
+    });
+    expect(members?.find((member) => member.originalText === "4,972.29")?.x).toBe(517);
+    expect(members?.find((member) => member.originalText === "1,834.34")?.x).toBe(517);
+    expect(selectionEditTitle({ rowCount: chunks.length, runCount: 6 })).toBe(
+      "Editing 2 lines / 6 runs",
+    );
   });
 });
