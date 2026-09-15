@@ -20,6 +20,7 @@ import {
   listPageTextShows,
 } from "./pdf-text-edit";
 import { columnFieldsForLine, membersForLinePatch } from "./edit-apply";
+import { patchesFromEdit } from "./text-align";
 
 GlobalWorkerOptions.workerSrc = new URL(
   "../../node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
@@ -404,5 +405,61 @@ describe("extractLines vs content stream", () => {
     expect(after.find((show) => show.text === "500.00")?.x).toBeCloseTo(400, 1);
     expect(after.find((show) => show.text === "4,972.29")?.x).toBeCloseTo(500, 1);
     expect(after.some((show) => /Paid To/.test(show.text))).toBe(false);
+  });
+
+  it("extractLines still sees amount+balance after a description-only June-like edit", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const desc = "05-22 Paid To - Applecard Gsbank Payment Chk 12408508";
+    page.drawText(desc, { x: 14, y: 700, size: 8, font });
+    page.drawText("250.00-", { x: 409, y: 700, size: 8, font: bold });
+    page.drawText("1,834.34", { x: 517, y: 700, size: 8, font: bold });
+    page.drawText("05-23 Paid To - Other Merchant Chk 9999", { x: 14, y: 680, size: 8, font });
+    page.drawText("10.00-", { x: 409, y: 680, size: 8, font: bold });
+    page.drawText("2,084.34", { x: 517, y: 680, size: 8, font: bold });
+    const bytes = (await doc.save()).slice().buffer as ArrayBuffer;
+    const proxy = await getDocument({ data: new Uint8Array(bytes.slice(0)) }).promise;
+    const lines = await extractLines(proxy, 1, bytes);
+    const apple = lines.find((line) => /Applecard/.test(line.text));
+    expect(apple).toBeTruthy();
+    const expanded = expandToFullLine(lines, apple!) ?? apple!;
+    const fields = columnFieldsForLine(expanded);
+    expect(fields.map((field) => field.label)).toEqual(["Description", "Amount", "Balance"]);
+    const descField = fields.find((field) => field.label === "Description");
+    expect(descField).toBeTruthy();
+    const patches = patchesFromEdit({
+      line: expanded,
+      text: expanded.text.replace("Paid To", "Paid From"),
+      memberTexts: {
+        [descField!.id]: descField!.text.replace("Paid To", "Paid From"),
+      },
+    });
+    expect(patches).toHaveLength(1);
+    const { bytes: out } = await applyTextPatchesWithReport(bytes, patches);
+    const afterProxy = await getDocument({ data: new Uint8Array(out) }).promise;
+    const afterLines = await extractLines(afterProxy, 1, out.slice().buffer as ArrayBuffer);
+    const afterApple =
+      afterLines.find((line) => /Applecard/.test(line.text)) ??
+      afterLines.find((line) => /Paid From/.test(line.text));
+    expect(afterApple).toBeTruthy();
+    const afterRow = expandToFullLine(afterLines, afterApple!) ?? afterApple!;
+    const members = afterRow.members?.length ? afterRow.members : [afterRow];
+    const amount =
+      members.find((member) => member.text === "250.00-") ??
+      afterLines.find((line) => line.text === "250.00-" && Math.abs(line.y - afterApple!.y) < 3);
+    const balance =
+      members.find((member) => member.text === "1,834.34") ??
+      afterLines.find((line) => line.text === "1,834.34" && Math.abs(line.y - afterApple!.y) < 3);
+    expect(amount?.x).toBeCloseTo(409, 1);
+    expect(balance?.x).toBeCloseTo(517, 1);
+    expect(afterApple?.text).toMatch(/Paid From/);
+    expect(afterApple?.text).not.toMatch(/Paid To/);
+    const shows = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    const onApple = shows.filter((show) => Math.abs(show.y - afterApple!.y) < 2);
+    expect(onApple.length).toBeGreaterThanOrEqual(3);
+    expect(onApple.find((show) => show.text === "250.00-")?.x).toBeCloseTo(409, 1);
+    expect(onApple.find((show) => show.text === "1,834.34")?.x).toBeCloseTo(517, 1);
   });
 });
