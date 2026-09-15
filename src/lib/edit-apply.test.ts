@@ -9,9 +9,13 @@ import {
   nextEnhanceOpen,
   ocrReadyNextStep,
   overlayApplyState,
+  overlayFillMode,
+  overlayHasOpaqueFill,
+  overlayShouldPaintLabel,
   pendingExportBanner,
   preferOcrOverlay,
   shouldFlattenPageAsScan,
+  textOverlayChromeClass,
   textPageFooter,
 } from "./edit-apply";
 
@@ -227,5 +231,110 @@ describe("Apply / Enhance exit contracts", () => {
         pendingTextEdits: 1,
       }),
     ).toMatch(/1 edit ready/);
+  });
+
+  it("default applied overlay has no opaque paper/white fill", () => {
+    const applied = textOverlayChromeClass({
+      isSelected: false,
+      isEdited: true,
+      isLivePreview: false,
+      showHighlight: false,
+    });
+    expect(overlayFillMode({ isEdited: true, isLivePreview: false, showHighlight: false })).toBe(
+      "none",
+    );
+    expect(overlayHasOpaqueFill(applied)).toBe(false);
+    expect(applied).toMatch(/bg-transparent/);
+    expect(applied).toMatch(/border-success/);
+
+    const selectedApplied = textOverlayChromeClass({
+      isSelected: true,
+      isEdited: true,
+      isLivePreview: false,
+      showHighlight: false,
+    });
+    expect(overlayHasOpaqueFill(selectedApplied)).toBe(false);
+    expect(selectedApplied).toMatch(/border-primary/);
+    expect(selectedApplied).toMatch(/bg-transparent/);
+  });
+
+  it("live preview overlay is also seamless until the reviewer toggle is on", () => {
+    const live = textOverlayChromeClass({
+      isSelected: true,
+      isEdited: false,
+      isLivePreview: true,
+      showHighlight: false,
+    });
+    expect(overlayHasOpaqueFill(live)).toBe(false);
+    expect(overlayFillMode({ isEdited: false, isLivePreview: true, showHighlight: false })).toBe(
+      "none",
+    );
+  });
+
+  it("reviewer highlight restores the opaque paper box on applied text", () => {
+    const highlighted = textOverlayChromeClass({
+      isSelected: false,
+      isEdited: true,
+      isLivePreview: false,
+      showHighlight: true,
+    });
+    expect(overlayFillMode({ isEdited: true, isLivePreview: false, showHighlight: true })).toBe(
+      "highlight",
+    );
+    expect(overlayHasOpaqueFill(highlighted)).toBe(true);
+    expect(highlighted).toMatch(/bg-paper/);
+  });
+
+  it("unedited selection chrome is unchanged by the highlight toggle", () => {
+    const off = textOverlayChromeClass({
+      isSelected: true,
+      isEdited: false,
+      isLivePreview: false,
+      showHighlight: false,
+    });
+    const on = textOverlayChromeClass({
+      isSelected: true,
+      isEdited: false,
+      isLivePreview: false,
+      showHighlight: true,
+    });
+    expect(off).toBe(on);
+    expect(off).toMatch(/bg-primary\/25/);
+    expect(overlayHasOpaqueFill(off)).toBe(false);
+  });
+
+  it("hides overlay label once the canvas already shows the applied rewrite", () => {
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: true,
+      }),
+    ).toBe(false);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: true,
+        showHighlight: false,
+        canvasShowsApplied: true,
+      }),
+    ).toBe(true);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: false,
+        showHighlight: true,
+        canvasShowsApplied: true,
+      }),
+    ).toBe(true);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: false,
+      }),
+    ).toBe(true);
   });
 });
