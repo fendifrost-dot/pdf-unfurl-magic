@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+/**
+ * Draw-to-sign uses `signature_pad` (MIT) for velocity-weighted ink and high-DPI
+ * canvases. Type-to-sign and upload still emit the same PNG + MarkMethod that
+ * `src/lib/esign.ts` burns into the page and audit record.
+ * See docs/PRIOR_ART.md #3.
+ */
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import SignaturePad from "signature_pad";
 import { Eraser, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,14 +29,30 @@ type Props = {
   onApply: (pngDataUrl: string, method: MarkMethod) => void;
 };
 
+function fitSignatureCanvas(canvas: HTMLCanvasElement, pad: SignaturePad): void {
+  const ratio = Math.max(window.devicePixelRatio || 1, 1);
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = rect.width || canvas.offsetWidth;
+  const cssHeight = rect.height || canvas.offsetHeight;
+  if (cssWidth < 2 || cssHeight < 2) return;
+
+  const nextWidth = Math.max(1, Math.round(cssWidth * ratio));
+  const nextHeight = Math.max(1, Math.round(cssHeight * ratio));
+  if (canvas.width === nextWidth && canvas.height === nextHeight) return;
+
+  canvas.width = nextWidth;
+  canvas.height = nextHeight;
+  canvas.getContext("2d")?.scale(ratio, ratio);
+  pad.redraw();
+}
+
 export function SignatureCapture({ open, kind, signerName, onClose, onApply }: Props) {
   const [tab, setTab] = useState<"draw" | "type" | "upload">("draw");
   const [typed, setTyped] = useState(signerName);
   const [upload, setUpload] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const dirty = useRef(false);
+  const padRef = useRef<SignaturePad | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -37,53 +60,81 @@ export function SignatureCapture({ open, kind, signerName, onClose, onApply }: P
     setUpload(null);
     setError(null);
     setTab("draw");
-    dirty.current = false;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (canvas && ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
   }, [open, signerName]);
 
-  const point = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
-    };
-  };
+  useLayoutEffect(() => {
+    if (!open || tab !== "draw") return;
 
-  const stroke = (event: React.PointerEvent<HTMLCanvasElement>, start: boolean) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    const { x, y } = point(event);
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = "#1b1814";
-    ctx.lineWidth = kind === "initials" ? 5 : 4;
-    if (start) {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-      ctx.stroke();
+    let pad: SignaturePad | null = null;
+    let observer: ResizeObserver | null = null;
+    let frame = 0;
+    let cancelled = false;
+
+    const options = {
+      penColor: "#1b1814",
+      backgroundColor: "rgba(0,0,0,0)",
+      minWidth: kind === "initials" ? 0.8 : 0.55,
+      maxWidth: kind === "initials" ? 3.4 : 2.6,
+      minDistance: 3,
+      throttle: 16,
+    };
+
+    const teardown = () => {
+      if (frame) cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", fit);
+      pad?.off();
+      if (padRef.current === pad) padRef.current = null;
+      pad = null;
+    };
+
+    const fit = () => {
+      const canvas = canvasRef.current;
+      if (canvas && pad) fitSignatureCanvas(canvas, pad);
+    };
+
+    const attach = (): boolean => {
+      if (cancelled) return true;
+      const canvas = canvasRef.current;
+      if (!canvas || canvas.getBoundingClientRect().width < 2) {
+        return false;
+      }
+      if (!pad) {
+        pad = new SignaturePad(canvas, options);
+        padRef.current = pad;
+        observer = new ResizeObserver(fit);
+        observer.observe(canvas);
+        window.addEventListener("resize", fit);
+      }
+      fit();
+      canvas.dataset["signaturePad"] = canvas.width >= 2 ? "ready" : "pending";
+      return canvas.width >= 2;
+    };
+
+    if (!attach()) {
+      const tick = () => {
+        if (cancelled) return;
+        if (!attach()) frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
     }
-    dirty.current = true;
-  };
+
+    return () => {
+      cancelled = true;
+      teardown();
+    };
+  }, [open, tab, kind]);
 
   const apply = () => {
     setError(null);
     try {
       if (tab === "draw") {
-        const canvas = canvasRef.current;
-        if (!canvas || !dirty.current) {
+        const pad = padRef.current;
+        if (!pad || pad.isEmpty()) {
           setError("Draw a mark first.");
           return;
         }
-        onApply(canvas.toDataURL("image/png"), "draw");
+        onApply(pad.toDataURL("image/png"), "draw");
         return;
       }
       if (tab === "type") {
@@ -120,33 +171,29 @@ export function SignatureCapture({ open, kind, signerName, onClose, onApply }: P
           </TabsList>
 
           <TabsContent value="draw" className="mt-4">
-            <canvas
-              ref={canvasRef}
-              width={kind === "initials" ? 360 : 520}
-              height={kind === "initials" ? 180 : 168}
-              className="w-full cursor-crosshair rounded-md border border-border bg-paper touch-none"
-              onPointerDown={(event) => {
-                drawing.current = true;
-                event.currentTarget.setPointerCapture(event.pointerId);
-                stroke(event, true);
-              }}
-              onPointerMove={(event) => {
-                if (drawing.current) stroke(event, false);
-              }}
-              onPointerUp={() => {
-                drawing.current = false;
-              }}
-            />
+            <div
+              className={
+                kind === "initials" ? "relative h-36 w-full" : "relative h-44 w-full sm:h-[168px]"
+              }
+            >
+              <canvas
+                ref={canvasRef}
+                width={kind === "initials" ? 360 : 520}
+                height={kind === "initials" ? 180 : 168}
+                className="absolute inset-0 h-full w-full cursor-crosshair touch-none select-none rounded-md border border-border bg-paper"
+                aria-label={kind === "initials" ? "Draw your initials" : "Draw your signature"}
+              />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Draw with a mouse, trackpad, or finger. The pad ignores page scroll while you ink.
+            </p>
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="mt-2"
+              className="mt-2 min-h-11"
               onClick={() => {
-                const canvas = canvasRef.current;
-                const ctx = canvas?.getContext("2d");
-                if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-                dirty.current = false;
+                padRef.current?.clear();
               }}
             >
               <Eraser className="size-3.5" /> Clear

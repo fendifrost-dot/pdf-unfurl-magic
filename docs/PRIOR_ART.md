@@ -12,7 +12,7 @@ Ordered by impact on headaches we still have, not by GitHub stars.
 | --- | --- | --- | --- | --- | --- |
 | 1 | **`@pdf-lib/fontkit` + SIL OFL Liberation/Noto** | **depend** fontkit; **vendor** OFL `.ttf` (subset at embed time) | `src/lib/pdf-font-match.ts`, `src/lib/pdf-text-edit.ts` | **1–2 days** | WinAnsi Standard 14 cannot encode most of the world. Today we block or redraw Helvetica. Embedding a metric-compatible face (Liberation Sans ≈ Arial/Helvetica) is the only permissive, browser-safe way to stop `?` glyphs without Creative Cloud. |
 | 2 | **Invisible OCR layer = text rendering mode 3** (port Tesseract/OCRmyPDF, keep `tesseract.js`) | **port algorithms**; keep existing **depend** | `src/lib/scan/pdf.ts`, `src/lib/scan/ocr.ts` | **4–8 hours** | We already run Tesseract.js and stamp words with `opacity: 0`. Acrobat, Tesseract’s PDF renderer, and OCRmyPDF use `/Tr 3` (neither fill nor stroke). Opacity-0 glyphs fail PDF/A and can reappear when flattened. Highest OCR quality-per-hour change. |
-| 3 | **`signature_pad` (MIT)** | **depend** | `src/components/signature-capture.tsx` | **2–4 hours** | Homegrown pointer drawing is fine for MVP; `signature_pad` is the maintained 12k-star pad (velocity strokes, SVG/PNG, high-DPI). Drop-in for e-sign feel without DocuSign. |
+| 3 | **`signature_pad` (MIT)** | **depend** (landed) | `src/components/signature-capture.tsx` | **2–4 hours** | Homegrown pointer drawing is fine for MVP; `signature_pad` is the maintained 12k-star pad (velocity strokes, SVG/PNG, high-DPI). Drop-in for e-sign feel without DocuSign. |
 | 4 | **In-place image XObject replace** (port pdf-lib #175 / pdfcpu `images update`) | **port algorithms** on existing pdf-lib | `src/lib/pdf-images.ts`, `src/lib/pdf-tools.ts` | **1–2 days** | Image Studio currently paints a **white rectangle + new image** on top of the original XObject (same class of corruption as TouchUp whiteout). Reassigning the existing `/ImN` stream keeps text, rules, and file size honest. |
 | 5 | **pdf.js `AnnotationEditorLayer` we already ship** (`pdfjs-dist@4.10.38`) | **depend** (already); **port** save path | `src/lib/pdf-marks.ts`, `src/routes/edit.tsx` | **2–3 days** | Mozilla’s editor writes real `Highlight` / `Ink` / `FreeText` / `Stamp` annotations via `PDFDocumentProxy.saveDocument()`. Our marks are burned pdf-lib rectangles. Using the engine we already load avoids `pdfAnnotate` (stale) and AGPL e-sign suites. |
 
@@ -321,7 +321,7 @@ Tesseract’s own searchable-PDF recipe (and OCRmyPDF) place glyphs with **text 
 | **Maintenance** | ~12k stars; pushed 2026-09-13 |
 | **Does well** | Velocity-weighted ink, SVG or PNG, retina, undo. The default pad every commercial tutorial wraps. |
 | **Does poorly** | Not PDF-aware; we still embed PNG via pdf-lib (good). |
-| **Action** | **depend**. |
+| **Action** | **depend** — landed in `src/components/signature-capture.tsx`. Type-to-sign and `src/lib/esign.ts` export/audit are unchanged. |
 | **Integration** | `src/components/signature-capture.tsx` (replace custom `stroke()`). Keep `src/lib/esign.ts` for placement/hash. |
 | **Effort** | **2–4 hours**. |
 
@@ -475,7 +475,7 @@ Useful as tests of “does the page still text-select after replace?”. **skip*
 
 1. **Fonts (days 1–2):** `npm i @pdf-lib/fontkit`; vendor Liberation Sans/Serif/Mono + Noto Sans under `public/fonts/` with OFL `LICENSE`; extend `pdf-font-match.ts` + tests in `src/lib/pdf-font-match.test.ts` / `pdf-text-edit.test.ts` so `Ł` does not become `?`.
 2. **OCR layer (day 2–3):** `/Tr 3` in `scan/pdf.ts`; self-host `eng.traineddata`; skip OCR when PDF.js already reports a text layer (edit/scan of born-digital files).
-3. **Signatures (day 3):** `signature_pad` in `signature-capture.tsx`.
+3. **Signatures (day 3):** `signature_pad` in `signature-capture.tsx`. **Landed.**
 4. **Image XObject (days 4–5):** in-place replace in `pdf-tools.ts`; smoke `fixtures/image-and-text.pdf`.
 5. **Annotate (days 6–10):** pdf.js editor save **or** flatten-redact export — pick one; do not do both if fonts slip.
 

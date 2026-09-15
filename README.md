@@ -71,13 +71,15 @@ Install: Android Chrome may offer **Install**. iOS Safari → Share → Add to H
 - TanStack Start, Vite, React, TypeScript, Tailwind CSS, shadcn/ui
 - pdf-lib and PDF.js, both running locally
 - Electron for the desktop build
+- [`signature_pad`](https://github.com/szimek/signature_pad) (MIT) for e-sign draw-to-sign — [PRIOR_ART #3](docs/PRIOR_ART.md)
 
 ## E-Sign
 
 Open `/sign` (or **E-Sign** in the header). Drop a contract, place a signature and date,
-draw or type a mark, and export. The signed PDF keeps the original page graphics and
-adds an audit page (who, when, SHA-256). Single signer. This is not DocuSign and not a
-PKI digital signature.
+draw or type a mark, and export. Draw-to-sign uses `signature_pad` (see
+[`docs/PRIOR_ART.md`](docs/PRIOR_ART.md) #3); type-to-sign and the SHA-256 audit page
+are unchanged. The signed PDF keeps the original page graphics. Single signer. This is
+not DocuSign and not a PKI digital signature.
 
 ```bash
 npm test   # integrity hash + certificate-page checks

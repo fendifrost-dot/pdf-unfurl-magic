@@ -14,9 +14,10 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] Restyle home and editor to the approved cream-paper screenshots without changing PDF or Electron behavior
 - [x] Scan lane `/scan`: camera + import, edge detect, perspective, enhance presets, multi-page session, optional local OCR text layer
 - [x] E-Sign MVP (`/sign`): single signer, draw/type signature, place on page, date stamp, export signed PDF + SHA-256 audit page
+- [x] `signature_pad` (MIT) for e-sign draw-to-sign (`src/components/signature-capture.tsx`, [PRIOR_ART #3](docs/PRIOR_ART.md))
 - [x] In-PDF Image Studio MVP: select one photo on the current page, replace or crop, export without wrecking text/lines
 - [x] Prior-art / OSS reuse map (`docs/PRIOR_ART.md`) — pick libraries instead of rebuilding OCR/edit
-- [ ] Next 2 weeks (see PRIOR_ART top 5): `@pdf-lib/fontkit` + Liberation/Noto (stop `?` glyphs); OCR `/Tr 3` layer; `signature_pad`; in-place image XObject replace; pdf.js annotation save
+- [ ] Next 2 weeks (see PRIOR_ART top 5): `@pdf-lib/fontkit` + Liberation/Noto (stop `?` glyphs); OCR `/Tr 3` layer; in-place image XObject replace; pdf.js annotation save
 - [ ] Do not npm AGPL (scribe.js, OpenSign, Documenso, MuPDF.js) or ship OpenCV.js (~30 MB) without a lazy Electron-only path
 - [ ] Later (not this workshop): brushes, generative fill, CMYK print
 - [x] Phone / PWA shell: `/split` `/merge` `/scan` `/edit`, bottom nav, 44px targets, share sheet
