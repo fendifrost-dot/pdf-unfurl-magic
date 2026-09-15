@@ -17,6 +17,16 @@ That writes unsigned `PDF Relief` `.dmg` and `.zip` files to `release/`.
 
 These builds skip Apple code signing (`identity` is unset). You do not need a Developer ID or notarization secrets.
 
+## Packed app must not spawn npx
+
+Opening **PDF Relief.app** must open a window without spawning `npx` or `vite`. A plain `npm run build` is TanStack Start / Nitro SSR: `.output/public` has JS/CSS/fonts and **no `index.html`**, so production cannot `loadFile` that folder.
+
+`npm run pack:mac` / `npm run desktop` run `build:desktop`, which prerenders a SPA shell and copies it to `dist/index.html` + `dist/assets`. The packaged main process serves that tree in-process on 127.0.0.1 (no child_process, cwd is never `app.asar`). `file://` `loadFile` is not used for `/edit` because there is no per-route HTML and PDF.js/fonts use absolute `/…` URLs.
+
+electron-builder `files` copies `dist/` into the asar (`from`/`to`, because `dist` is gitignored). It does **not** pack `.output/public` from an SSR build, and does not pack `node_modules`.
+
+`npm run desktop:dev` is the only path that starts Vite (`--dev`).
+
 ## Install to /Applications
 
 1. Open the `.dmg` (or unzip the `.zip`).

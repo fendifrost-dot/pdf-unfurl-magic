@@ -17,6 +17,7 @@ release
 .nitro
 *.local
 tmp
+.desktop-ui-staging
 
 # Wrangler / Cloudflare
 .wrangler/

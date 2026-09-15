@@ -14,28 +14,43 @@
     "dev": "vite dev",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "build:desktop": "node desktop/build-ui.cjs",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "vitest run && tsx --test src/lib/esign.test.ts",
+    "test": "vitest run && tsx --test src/lib/esign.test.ts && node --test tests/desktop-static-ui.test.mjs",
     "test:scan": "node --experimental-strip-types --test src/lib/scan/geometry.node-test.ts",
     "test:image-studio": "tsx scripts/verify-image-studio.mjs",
     "test:smoke": "node --test tests/smoke-pdf.test.mjs",
     "fixtures:generate": "tsx fixtures/generate.mjs",
     "format": "prettier --write .",
     "postinstall": "node desktop/copy-worker.cjs",
-    "desktop": "npm run build && electron .",
+    "desktop": "npm run build:desktop && electron .",
     "desktop:dev": "node desktop/dev.cjs",
-    "pack": "npm run build && electron-builder --publish never",
-    "pack:mac": "npm run build && electron-builder --mac --arm64 --publish never"
+    "pack": "npm run build:desktop && electron-builder --publish never",
+    "pack:mac": "npm run build:desktop && electron-builder --mac --arm64 --publish never"
   },
   "build": {
     "appId": "app.pdfrelief.desktop",
     "productName": "PDF Relief",
+    "asar": true,
+    "npmRebuild": true,
+    "beforeBuild": "./desktop/before-pack.cjs",
     "files": [
-      "desktop/**/*",
-      "dist/**/*",
-      "public/**/*",
-      "package.json"
+      "package.json",
+      "desktop/main.cjs",
+      "desktop/preload.cjs",
+      "desktop/static-ui.cjs",
+      "desktop/icon.png",
+      "desktop/icon.svg",
+      {
+        "from": "dist",
+        "to": "dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "!node_modules",
+      "!node_modules/**/*"
     ],
     "directories": {
       "output": "release"

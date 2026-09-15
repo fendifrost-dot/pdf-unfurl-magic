@@ -26,26 +26,27 @@ on Windows, **Open PDF Relief.bat**.
 
 ## Scripts
 
-| Script                | What it does                                         |
-| --------------------- | ---------------------------------------------------- |
-| `npm run dev`         | Web app in development                               |
-| `npm run build`       | Production web build                                 |
-| `npm run desktop`     | Build, then open the desktop app                     |
-| `npm run desktop:dev` | Desktop app against the dev server (127.0.0.1:47321) |
-| `npm run pack`        | Package installers with electron-builder (current platform) |
-| `npm run pack:mac`    | Build unsigned Apple Silicon `.dmg` and `.zip` into `release/` |
-| `npm run test:smoke`  | Load the synthetic PDFs in `fixtures/`, check page counts and export size |
-| `npm run fixtures:generate` | Rebuild the committed files in `fixtures/` |
+| Script                      | What it does                                                              |
+| --------------------------- | ------------------------------------------------------------------------- |
+| `npm run dev`               | Web app in development                                                    |
+| `npm run build`             | Production web build                                                      |
+| `npm run desktop`           | Static production UI, then open the desktop app                           |
+| `npm run desktop:dev`       | Desktop app against the Vite dev server (127.0.0.1:47321)                 |
+| `npm run pack`              | Package installers with electron-builder (current platform)               |
+| `npm run pack:mac`          | Build unsigned Apple Silicon `.dmg` and `.zip` into `release/`            |
+| `npm run test:smoke`        | Load the synthetic PDFs in `fixtures/`, check page counts and export size |
+| `npm run fixtures:generate` | Rebuild the committed files in `fixtures/`                                |
 
 After a feature merge, rebuild the Dock app with `npm run pack:mac`. See
-[docs/DESKTOP_RELEASE.md](docs/DESKTOP_RELEASE.md) for install, Gatekeeper, and Dock pin.
+[docs/DESKTOP_RELEASE.md](docs/DESKTOP_RELEASE.md) for install, Gatekeeper, Dock pin,
+and the packed-app rule: production must load the `dist/` SPA in-process and never spawn npx or vite.
+
+`npm run desktop:dev` still serves the UI on 127.0.0.1:47321 so it never competes with
+the web dev server's port.
 
 Shared QA: `docs/QA_MVP.md` (10-minute human pass after edit / scan / e-sign). Optional Playwright and Vitest paths are in `tests/e2e/README.md`.
 
 Open-source reuse map (what to depend vs skip, including GPL/AGPL flags): [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md).
-
-The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
-server's port.
 
 ## Fill and flatten forms
 
