@@ -3,7 +3,12 @@
  * the original file on disk is never touched and nothing is uploaded.
  */
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { loadPdfDocument } from "./pdf-io";
+import { containFit } from "./image-process";
+import { encodeDemoPhoto } from "./tiny-png";
+import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
+import type { AnnotationBurn, ImagePatch } from "./pdf-images";
+import { jpegMagic } from "./pdf-images";
+import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 export type { TextPatch, TextEditReport, TextEditInspection } from "./pdf-text-edit";
 export { applyTextPatches, applyTextPatchesWithReport, inspectTextPatch } from "./pdf-text-edit";
 
@@ -76,9 +81,71 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
 }
 
 /**
- * Multi-font quote: Helvetica / Helvetica-Bold amounts, Times terms, Courier SKU,
- * plus a second page that must stay byte-stable when page 1 is edited.
+ * Apply in-place text rewrites first, then overlay image replacements and
+ * annotation burns so photos and marks never flatten the rest of the page.
  */
+export async function applyWorkshopPatches(
+  bytes: ArrayBuffer,
+  textPatches: TextPatch[],
+  imagePatches: ImagePatch[],
+  marks: AnnotationBurn[],
+): Promise<Uint8Array> {
+  const afterText = textPatches.length ? await applyTextPatches(bytes, textPatches) : null;
+  const doc = await load(afterText ? bytesToArrayBuffer(afterText) : bytes);
+  const pages = doc.getPages();
+
+  for (const patch of imagePatches) {
+    const page = pages[patch.page - 1];
+    if (!page) continue;
+    const mime = patch.mime ?? jpegMagic(patch.bytes);
+    const image =
+      mime === "image/png" ? await doc.embedPng(patch.bytes) : await doc.embedJpg(patch.bytes);
+    page.drawRectangle({
+      x: patch.x,
+      y: patch.y,
+      width: patch.width,
+      height: patch.height,
+      color: rgb(1, 1, 1),
+    });
+    const fitted = containFit(image.width, image.height, patch.width, patch.height);
+    page.drawImage(image, {
+      x: patch.x + fitted.x,
+      y: patch.y + fitted.y,
+      width: fitted.w,
+      height: fitted.h,
+    });
+  }
+
+  for (const mark of marks) {
+    const page = pages[mark.page - 1];
+    if (!page) continue;
+    if (mark.kind === "redact") {
+      page.drawRectangle({
+        x: mark.x,
+        y: mark.y,
+        width: mark.width,
+        height: mark.height,
+        color: rgb(0.06, 0.06, 0.07),
+      });
+    } else {
+      page.drawRectangle({
+        x: mark.x,
+        y: mark.y,
+        width: mark.width,
+        height: mark.height,
+        borderColor: rgb(0.48, 0.27, 0.14),
+        borderWidth: 1.35,
+        color: rgb(1, 1, 1),
+        opacity: 0,
+        borderOpacity: 1,
+      });
+    }
+  }
+
+  return doc.save();
+}
+
+/** A quote with photos, rules, multi-font terms, and a deliberately wrong total. */
 export async function buildSamplePdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]);
@@ -88,6 +155,9 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   const mono = await doc.embedFont(StandardFonts.Courier);
   const ink = rgb(0.1, 0.11, 0.13);
   const soft = rgb(0.42, 0.44, 0.48);
+  const oak = await doc.embedPng(encodeDemoPhoto("oak", 320, 200));
+  const kitchen = await doc.embedPng(encodeDemoPhoto("kitchen", 280, 180));
+  const washout = await doc.embedPng(encodeDemoPhoto("washout", 360, 220));
 
   let y = 770;
   const write = (
@@ -111,6 +181,15 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 14;
   write("Valid for 30 days. Please kindly note that timber prices really move weekly.", {
     size: 10,
+    color: soft,
+  });
+
+  page.drawImage(oak, { x: 390, y: 708, width: 150, height: 94 });
+  page.drawText("Site photo — oak delivery", {
+    x: 390,
+    y: 694,
+    size: 8,
+    font: body,
     color: soft,
   });
 
@@ -156,7 +235,22 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   write("Total due", { font: bold, size: 11, x: 420 });
   write("1,987.00", { font: bold, size: 11, x: 490 });
 
-  y -= 40;
+  page.drawImage(kitchen, { x: 56, y: 318, width: 220, height: 141 });
+  page.drawLine({
+    start: { x: 56, y: 308 },
+    end: { x: 276, y: 308 },
+    thickness: 0.75,
+    color: rgb(0.8, 0.8, 0.82),
+  });
+  page.drawText("Finished bench — client reference. Fix the photo, not the page.", {
+    x: 56,
+    y: 294,
+    size: 8,
+    font: body,
+    color: soft,
+  });
+
+  y = 250;
   write("3 x 12 = 35 for the worktop run (per-metre pricing).", { size: 10, color: soft });
   y -= 16;
   write("Deposit of 40% is due before before the timber order is placed.", {
@@ -171,6 +265,30 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   });
   y -= 16;
   write("SKU  NG-BENCH-40-OAK", { size: 10, font: mono });
+
+  const appendix = doc.addPage([595, 842]);
+  appendix.drawText("Photo appendix", { x: 56, y: 780, size: 20, font: bold, color: ink });
+  appendix.drawText("Washed-out site shot — pull exposure down, then compress.", {
+    x: 56,
+    y: 758,
+    size: 11,
+    font: body,
+    color: soft,
+  });
+  appendix.drawImage(washout, { x: 56, y: 430, width: 360, height: 220 });
+  appendix.drawLine({
+    start: { x: 56, y: 414 },
+    end: { x: 416, y: 414 },
+    thickness: 0.9,
+    color: rgb(0.8, 0.8, 0.82),
+  });
+  appendix.drawText("NORTHGATE_KEEP  ·  surrounding type and this rule stay as PDF objects.", {
+    x: 56,
+    y: 396,
+    size: 10,
+    font: body,
+    color: ink,
+  });
 
   const page2 = doc.addPage([595, 842]);
   page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });

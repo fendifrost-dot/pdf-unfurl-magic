@@ -185,6 +185,14 @@ function Home() {
               <Link to="/edit">Edit a PDF without Adobe</Link>
             </Button>
             <Button asChild variant="outline">
+              <Link to="/edit" hash="images">
+                Fix a photo in the PDF
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/scan">Scan pages without a phone app</Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link to="/sign">E-Sign without a DocuSign seat</Link>
             </Button>
           </div>

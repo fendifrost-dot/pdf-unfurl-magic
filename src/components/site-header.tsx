@@ -18,6 +18,9 @@ export function SiteHeader() {
           <Link to="/edit" className="transition-colors hover:text-foreground">
             Edit a PDF
           </Link>
+          <Link to="/edit" hash="images" className="transition-colors hover:text-foreground">
+            Image studio
+          </Link>
           <Link to="/scan" className="transition-colors hover:text-foreground">
             Scan pages
           </Link>
@@ -53,6 +56,14 @@ export function SiteHeader() {
               className="rounded-md px-3 py-3 text-sm hover:bg-accent"
             >
               Edit a PDF
+            </Link>
+            <Link
+              to="/edit"
+              hash="images"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-3 text-sm hover:bg-accent"
+            >
+              Image studio
             </Link>
             <Link
               to="/scan"

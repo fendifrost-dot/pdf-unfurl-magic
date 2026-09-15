@@ -9,13 +9,18 @@ import {
   Download,
   Eraser,
   FileText,
+  Highlighter,
+  ImageIcon,
   Loader2,
   Scissors,
+  Square,
+  Type,
   Undo2,
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
+import { ImageStudioPanel } from "@/components/image-studio-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,7 +35,7 @@ import {
   type TextLine,
 } from "@/lib/pdf-runtime";
 import {
-  applyTextPatches,
+  applyWorkshopPatches,
   buildSamplePdf,
   inspectTextPatch,
   type TextPatch,
@@ -47,6 +52,21 @@ import {
   shortenToFit,
   type NumberFinding,
 } from "@/lib/text-helpers";
+import {
+  canvasToJpeg,
+  DEFAULT_ADJUSTMENTS,
+  fileToWorkingCanvas,
+  PREVIEW_EDGE,
+  renderAdjustedCanvas,
+  type ImageAdjustments,
+} from "@/lib/image-process";
+import {
+  decodePageImage,
+  extractImages,
+  type AnnotationBurn,
+  type ImageEdit,
+  type PdfImageRegion,
+} from "@/lib/pdf-images";
 
 export const Route = createFileRoute("/edit")({
   head: () => ({
@@ -55,13 +75,13 @@ export const Route = createFileRoute("/edit")({
       {
         name: "description",
         content:
-          "Open a PDF, click a text run, and rewrite it using fonts already in the file. Only that operator is replaced — no white-out layer, no Creative Cloud fonts.",
+          "Open a PDF, click a text run or an embedded photo, and amend it. Text is rewritten in fonts already in the file — no white-out layer. Files never leave your browser.",
       },
-      { property: "og:title", content: "Edit a PDF line without Acrobat — PDF Relief" },
+      { property: "og:title", content: "Edit a PDF line or photo without Acrobat — PDF Relief" },
       {
         property: "og:description",
         content:
-          "One page at a time, click-to-edit text, local checks for doubled words and totals that do not add up.",
+          "One page at a time: click-to-edit text, in-PDF image studio, and local checks for totals that do not add up.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -79,16 +99,81 @@ type Doc = {
 };
 
 type Edit = { line: TextLine; text: string };
+type Mode = "text" | "image" | "mark";
+type MarkTool = AnnotationBurn["kind"];
 
 const CANVAS_WIDTH = 720;
+
+function CommittedImageOverlay({
+  edit,
+  scale,
+  viewSize,
+}: {
+  edit: ImageEdit;
+  scale: number;
+  viewSize: { width: number; height: number };
+}) {
+  const url = useMemo(() => {
+    const blob = new Blob([edit.output.bytes.slice(0) as unknown as BlobPart], {
+      type: "image/jpeg",
+    });
+    return URL.createObjectURL(blob);
+  }, [edit.output.bytes]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  return (
+    <img
+      src={url}
+      alt=""
+      className="pointer-events-none absolute object-contain"
+      style={boxStyle(
+        edit.region.x,
+        edit.region.y,
+        edit.region.width,
+        edit.region.height,
+        scale,
+        viewSize,
+      )}
+    />
+  );
+}
+
+function boxStyle(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  scale: number,
+  view: { width: number; height: number },
+) {
+  const left = x * scale;
+  const top = view.height - (y + height) * scale;
+  return {
+    left: `${(left / view.width) * 100}%`,
+    top: `${(top / view.height) * 100}%`,
+    width: `${(Math.max(width * scale, 8) / view.width) * 100}%`,
+    height: `${(Math.max(height * scale, 8) / view.height) * 100}%`,
+  };
+}
 
 function Editor() {
   const [doc, setDoc] = useState<Doc | null>(null);
   const [page, setPage] = useState(1);
   const [lines, setLines] = useState<TextLine[]>([]);
+  const [images, setImages] = useState<PdfImageRegion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
+  const [imageEdits, setImageEdits] = useState<Record<string, ImageEdit>>({});
+  const [imageDraft, setImageDraft] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS);
+  const [sourceCanvas, setSourceCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [sourceLabel, setSourceLabel] = useState("Original embedded photo");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [mode, setMode] = useState<Mode>("text");
+  const [marks, setMarks] = useState<AnnotationBurn[]>([]);
+  const [markTool, setMarkTool] = useState<MarkTool>("redact");
+  const [draftMark, setDraftMark] = useState<Omit<AnnotationBurn, "id"> | null>(null);
   const [scale, setScale] = useState(1);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [status, setStatus] = useState<string | null>(null);
@@ -97,9 +182,24 @@ function Editor() {
   const [inspection, setInspection] = useState<TextEditInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const holderRef = useRef<HTMLDivElement>(null);
+  const pageBoxRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  const previewTimer = useRef<number | null>(null);
 
   const selected = selectedId ? lines.find((l) => l.id === selectedId) : undefined;
+  const selectedImage = selectedImageId
+    ? images.find((img) => img.id === selectedImageId)
+    : undefined;
   const editedIds = Object.keys(edits);
+  const imageEditIds = Object.keys(imageEdits);
+  const pendingCount = editedIds.length + imageEditIds.length + marks.length;
+
+  const clearPreview = () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = null;
+    setPreviewUrl(null);
+  };
 
   const loadBytes = useCallback(async (name: string, bytes: ArrayBuffer) => {
     setError(null);
@@ -109,7 +209,11 @@ function Editor() {
       const proxy = await openDocument(bytes);
       setDoc({ name, base: name.replace(/\.pdf$/i, ""), bytes, proxy, pageCount: proxy.numPages });
       setEdits({});
+      setImageEdits({});
+      setMarks([]);
       setSelectedId(null);
+      setSelectedImageId(null);
+      setSourceCanvas(null);
       setInspection(null);
       setPage(1);
     } catch {
@@ -120,6 +224,17 @@ function Editor() {
     } finally {
       setStatus(null);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sync = () => {
+      if (window.location.hash === "#images") setMode("image");
+      if (window.location.hash === "#marks") setMode("mark");
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
   }, []);
 
   // Desktop app: pick up a file opened from File → Open PDF or the Finder.
@@ -145,16 +260,20 @@ function Editor() {
     };
   }, [loadBytes]);
 
-  // Render the current page and collect its text lines.
+  // Render the current page and collect its text lines and embedded images.
   useEffect(() => {
     if (!doc) return;
     let cancelled = false;
     setStatus("Rendering page " + page);
+    setSelectedImageId(null);
+    setSourceCanvas(null);
+    clearPreview();
     (async () => {
       try {
-        const [{ canvas, viewport }, pageLines] = await Promise.all([
+        const [{ canvas, viewport }, pageLines, pageImages] = await Promise.all([
           renderPage(doc.proxy, page, CANVAS_WIDTH),
           extractLines(doc.proxy, page),
+          extractImages(doc.proxy, page),
         ]);
         if (cancelled) return;
         const holder = holderRef.current;
@@ -165,6 +284,7 @@ function Editor() {
         setScale(viewport.scale);
         setViewSize({ width: viewport.width, height: viewport.height });
         setLines(pageLines);
+        setImages(pageImages);
       } catch (e) {
         console.error("render failed", e);
         if (!cancelled) setError("That page could not be rendered.");
@@ -176,6 +296,96 @@ function Editor() {
       cancelled = true;
     };
   }, [doc, page]);
+
+  useEffect(() => {
+    if (!doc || !selectedImage) {
+      setSourceCanvas(null);
+      return;
+    }
+    let cancelled = false;
+    setPreviewBusy(true);
+    (async () => {
+      try {
+        const existing = imageEdits[selectedImage.id];
+        if (existing?.replacementBytes) {
+          const blob = new Blob([existing.replacementBytes.slice(0) as unknown as BlobPart], {
+            type: "image/jpeg",
+          });
+          const bitmap = await createImageBitmap(blob);
+          if (cancelled) {
+            bitmap.close();
+            return;
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          setSourceCanvas(canvas);
+          setSourceLabel(existing.replacementName ?? "Replacement photo");
+          setImageDraft(existing.adjustments);
+          return;
+        }
+        const canvas = await decodePageImage(doc.proxy, selectedImage.page, selectedImage.name);
+        if (cancelled) return;
+        setSourceCanvas(canvas);
+        setSourceLabel("Original embedded photo");
+        setImageDraft(existing?.adjustments ?? DEFAULT_ADJUSTMENTS);
+      } catch (e) {
+        console.error("decode image failed", e);
+        if (!cancelled) setError("That photo could not be decoded. Try another image on the page.");
+      } finally {
+        if (!cancelled) setPreviewBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Re-decode when the selected region changes, not when sliders move.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, selectedImageId]);
+
+  useEffect(() => {
+    if (!sourceCanvas) {
+      clearPreview();
+      return;
+    }
+    if (previewTimer.current) window.clearTimeout(previewTimer.current);
+    previewTimer.current = window.setTimeout(() => {
+      try {
+        const preview = renderAdjustedCanvas(sourceCanvas, imageDraft);
+        const scaled =
+          Math.max(preview.width, preview.height) > PREVIEW_EDGE
+            ? (() => {
+                const canvas = document.createElement("canvas");
+                const fit = PREVIEW_EDGE / Math.max(preview.width, preview.height);
+                canvas.width = Math.max(1, Math.round(preview.width * fit));
+                canvas.height = Math.max(1, Math.round(preview.height * fit));
+                canvas.getContext("2d")?.drawImage(preview, 0, 0, canvas.width, canvas.height);
+                return canvas;
+              })()
+            : preview;
+        scaled.toBlob(
+          (blob) => {
+            if (!blob) return;
+            if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+            const url = URL.createObjectURL(blob);
+            previewUrlRef.current = url;
+            setPreviewUrl(url);
+          },
+          "image/jpeg",
+          imageDraft.quality,
+        );
+      } catch (e) {
+        console.error("preview failed", e);
+      }
+    }, 70);
+    return () => {
+      if (previewTimer.current) window.clearTimeout(previewTimer.current);
+    };
+  }, [sourceCanvas, imageDraft]);
+
+  useEffect(() => () => clearPreview(), []);
 
   const boxWidth = selected ? selected.width : 0;
   const draftFits = selected ? estimateWidth(draft, selected.fontSize) <= boxWidth : true;
@@ -219,13 +429,21 @@ function Editor() {
   const openSample = async () => {
     setStatus("Building the sample quote");
     const bytes = await buildSamplePdf();
-    // slice() to hand the editor its own copy of the buffer
     await loadBytes("northgate-quote-sample.pdf", bytes.slice(0).buffer as ArrayBuffer);
+    setMode("image");
   };
 
   const select = (line: TextLine) => {
+    setSelectedImageId(null);
     setSelectedId(line.id);
     setDraft(edits[line.id]?.text ?? line.text);
+    setMode("text");
+  };
+
+  const selectImage = (image: PdfImageRegion) => {
+    setSelectedId(null);
+    setSelectedImageId(image.id);
+    setMode("image");
   };
 
   const commit = () => {
@@ -238,6 +456,115 @@ function Editor() {
       else next[selected.id] = { line: selected, text };
       return next;
     });
+  };
+
+  const commitImage = async () => {
+    if (!selectedImage || !sourceCanvas) return;
+    setStatus("Compressing the selected photo");
+    try {
+      const rendered = renderAdjustedCanvas(sourceCanvas, imageDraft);
+      const output = await canvasToJpeg(rendered, imageDraft.quality);
+      const next: ImageEdit = { region: selectedImage, adjustments: imageDraft, output };
+      if (sourceLabel.startsWith("Replacement")) {
+        next.replacementName = sourceLabel;
+        next.replacementBytes = (await canvasToJpeg(sourceCanvas, 0.92)).bytes;
+      }
+      setImageEdits((prev) => ({ ...prev, [selectedImage.id]: next }));
+    } catch {
+      setError("That photo could not be processed. Nothing was written to the original file.");
+    } finally {
+      setStatus(null);
+    }
+  };
+
+  const replaceImage = async (file: File) => {
+    setPreviewBusy(true);
+    try {
+      const canvas = await fileToWorkingCanvas(file);
+      setSourceCanvas(canvas);
+      setSourceLabel(`Replacement · ${file.name}`);
+      setImageDraft((prev) => ({
+        ...DEFAULT_ADJUSTMENTS,
+        quality: prev.quality,
+        exposure: prev.exposure,
+        contrast: prev.contrast,
+      }));
+    } catch {
+      setError("That replacement image could not be read. Use a JPEG, PNG, or WebP.");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
+  const resetImage = async () => {
+    if (!doc || !selectedImage) return;
+    setPreviewBusy(true);
+    try {
+      const canvas = await decodePageImage(doc.proxy, selectedImage.page, selectedImage.name);
+      setSourceCanvas(canvas);
+      setSourceLabel("Original embedded photo");
+      setImageDraft(DEFAULT_ADJUSTMENTS);
+      setImageEdits((prev) => {
+        const next = { ...prev };
+        delete next[selectedImage.id];
+        return next;
+      });
+    } catch {
+      setError("The original photo could not be restored.");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
+  const eventToPdf = (event: React.PointerEvent<HTMLDivElement>) => {
+    const box = pageBoxRef.current;
+    if (!box || !viewSize.width) return null;
+    const rect = box.getBoundingClientRect();
+    const pageWidth = viewSize.width / scale;
+    const pageHeight = viewSize.height / scale;
+    const x = ((event.clientX - rect.left) / rect.width) * pageWidth;
+    const y = pageHeight - ((event.clientY - rect.top) / rect.height) * pageHeight;
+    return { x, y };
+  };
+
+  const onMarkPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (mode !== "mark") return;
+    const point = eventToPdf(event);
+    if (!point) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = point;
+    setDraftMark({ page, kind: markTool, x: point.x, y: point.y, width: 0, height: 0 });
+  };
+
+  const onMarkPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const point = eventToPdf(event);
+    if (!point) return;
+    const start = dragRef.current;
+    setDraftMark({
+      page,
+      kind: markTool,
+      x: Math.min(start.x, point.x),
+      y: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y),
+    });
+  };
+
+  const onMarkPointerUp = () => {
+    dragRef.current = null;
+  };
+
+  const keepMark = () => {
+    if (!draftMark || draftMark.width < 8 || draftMark.height < 8) return;
+    setMarks((prev) => [
+      ...prev,
+      {
+        ...draftMark,
+        id: `mark-${prev.length + 1}-${Math.round(draftMark.x)}-${Math.round(draftMark.y)}`,
+      },
+    ]);
+    setDraftMark(null);
   };
 
   const runCheck = async () => {
@@ -271,7 +598,16 @@ function Editor() {
         fontName: line.fontName,
         fontFamily: line.fontFamily,
       }));
-      const bytes = await applyTextPatches(doc.bytes, patches);
+      const imagePatches = Object.values(imageEdits).map((edit) => ({
+        page: edit.region.page,
+        x: edit.region.x,
+        y: edit.region.y,
+        width: edit.region.width,
+        height: edit.region.height,
+        bytes: edit.output.bytes,
+        mime: "image/jpeg" as const,
+      }));
+      const bytes = await applyWorkshopPatches(doc.bytes, patches, imagePatches, marks);
       downloadBytes(bytes, `${doc.base}-edited.pdf`);
     } catch (e) {
       setError(
@@ -284,11 +620,9 @@ function Editor() {
     }
   };
 
-  const overlay = useMemo(
+  const textOverlay = useMemo(
     () =>
       lines.map((line) => {
-        const left = line.x * scale;
-        const top = viewSize.height - (line.y + line.height) * scale;
         const isEdited = !!edits[line.id];
         return (
           <button
@@ -296,12 +630,7 @@ function Editor() {
             type="button"
             onClick={() => select(line)}
             title={line.text}
-            style={{
-              left: `${(left / viewSize.width) * 100}%`,
-              top: `${(top / viewSize.height) * 100}%`,
-              width: `${(Math.max(line.width * scale, 8) / viewSize.width) * 100}%`,
-              height: `${(Math.max(line.height * scale, 8) / viewSize.height) * 100}%`,
-            }}
+            style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
               "absolute cursor-text rounded-[2px] border transition-colors",
               selectedId === line.id
@@ -319,6 +648,38 @@ function Editor() {
     [lines, scale, viewSize, selectedId, edits],
   );
 
+  const imageOverlay = useMemo(
+    () =>
+      images.map((image) => {
+        const isEdited = !!imageEdits[image.id];
+        return (
+          <button
+            key={image.id}
+            type="button"
+            onClick={() => selectImage(image)}
+            title="Edit this photo"
+            style={boxStyle(image.x, image.y, image.width, image.height, scale, viewSize)}
+            className={[
+              "absolute cursor-pointer rounded-[2px] border-2 transition-colors",
+              selectedImageId === image.id
+                ? "border-primary bg-primary/20"
+                : isEdited
+                  ? "border-success/80 bg-success/15"
+                  : "border-primary/50 bg-primary/10 hover:border-primary hover:bg-primary/20",
+            ].join(" ")}
+          >
+            <span className="sr-only">Edit embedded image</span>
+          </button>
+        );
+      }),
+
+    [images, scale, viewSize, selectedImageId, imageEdits],
+  );
+
+  const markOverlay = [...marks.filter((m) => m.page === page), draftMark].filter(Boolean) as Array<
+    Omit<AnnotationBurn, "id"> & { id?: string }
+  >;
+
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
@@ -328,24 +689,24 @@ function Editor() {
           <div>
             <p className="eyebrow">Local editor · No Adobe license</p>
             <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight sm:text-5xl">
-              Edit the words. Leave the rest of the page alone.
+              Edit the words or the photo. Leave the rest of the page alone.
             </h1>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
               Original pages stay as PDF objects — fonts, rules, and images you do not touch are not
               rasterized. Click a run, rewrite it in a font already in the file, and export. No
-              white-out layer, no Creative Cloud activation. Assistants here only clean copy, fit a
-              sentence to its box, or check whether the numbers on the page add up.
+              white-out layer. Image studio is a document workshop, not Photoshop: replace, crop,
+              rotate, exposure, contrast, compress. Marks burn in only after you confirm them.
             </p>
           </div>
           {doc && (
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="text-gauge">
-                {editedIds.length} edited line(s)
+                {pendingCount} pending change(s)
               </Badge>
               <Button size="sm" variant="secondary" onClick={runCheck} disabled={!!status}>
                 <Calculator className="mr-1.5 size-3.5" /> Check numbers
               </Button>
-              <Button size="sm" onClick={exportPdf} disabled={!!status || editedIds.length === 0}>
+              <Button size="sm" onClick={exportPdf} disabled={!!status || pendingCount === 0}>
                 <Download className="mr-1.5 size-3.5" /> Export
               </Button>
             </div>
@@ -385,16 +746,15 @@ function Editor() {
                   </Button>
                 </PdfDropZone>
                 <div className="bench-panel mt-5 p-4 text-sm text-muted-foreground">
-                  No document yet. Use a contract, handout, quote, or the workshop notes sample.
-                  This editor is for documents you own — it will not help fake bank statements or
-                  other official records.
+                  No document yet. Use a contract, handout, quote, or the workshop notes sample
+                  (photos + text). This editor is for documents you own — it will not help fake bank
+                  statements or other official records.
                 </div>
               </>
             )}
           </div>
         ) : (
           <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-            {/* Page */}
             <div className="bench-panel p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="truncate text-sm font-medium">{doc.name}</p>
@@ -405,6 +765,8 @@ function Editor() {
                     disabled={page <= 1 || !!status}
                     onClick={() => {
                       setSelectedId(null);
+                      setSelectedImageId(null);
+                      setDraftMark(null);
                       setPage((p) => Math.max(1, p - 1));
                     }}
                     aria-label="Previous page"
@@ -420,6 +782,8 @@ function Editor() {
                     disabled={page >= doc.pageCount || !!status}
                     onClick={() => {
                       setSelectedId(null);
+                      setSelectedImageId(null);
+                      setDraftMark(null);
                       setPage((p) => Math.min(doc.pageCount, p + 1));
                     }}
                     aria-label="Next page"
@@ -429,7 +793,27 @@ function Editor() {
                 </div>
               </div>
 
-              <div className="mt-4 rounded-md bg-paper p-2 sm:p-3">
+              <div className="mt-4 flex flex-wrap gap-1 rounded-md bg-muted p-1">
+                {(
+                  [
+                    ["text", Type, "Text"],
+                    ["image", ImageIcon, "Image studio"],
+                    ["mark", Highlighter, "Marks"],
+                  ] as const
+                ).map(([value, Icon, label]) => (
+                  <Button
+                    key={value}
+                    size="sm"
+                    variant={mode === value ? "default" : "ghost"}
+                    className="flex-1"
+                    onClick={() => setMode(value)}
+                  >
+                    <Icon className="size-3.5" /> {label}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="mt-4 max-h-[70vh] overflow-auto rounded-md bg-paper p-2 sm:p-3">
                 <div className="relative mx-auto w-full">
                   <div ref={holderRef} className="w-full" />
                   {status ? (
@@ -437,23 +821,153 @@ function Editor() {
                       <Loader2 className="mr-2 size-4 animate-spin" /> {status}…
                     </div>
                   ) : (
-                    <div className="absolute inset-0">{overlay}</div>
+                    <div
+                      ref={pageBoxRef}
+                      className="absolute inset-0"
+                      onPointerDown={mode === "mark" ? onMarkPointerDown : undefined}
+                      onPointerMove={mode === "mark" ? onMarkPointerMove : undefined}
+                      onPointerUp={mode === "mark" ? onMarkPointerUp : undefined}
+                    >
+                      {mode === "text" && textOverlay}
+                      {mode === "image" && imageOverlay}
+                      {mode === "image" &&
+                        Object.values(imageEdits)
+                          .filter(
+                            (edit) =>
+                              edit.region.page === page && edit.region.id !== selectedImageId,
+                          )
+                          .map((edit) => (
+                            <CommittedImageOverlay
+                              key={edit.region.id}
+                              edit={edit}
+                              scale={scale}
+                              viewSize={viewSize}
+                            />
+                          ))}
+                      {mode === "image" && selectedImage && previewUrl && (
+                        <img
+                          src={previewUrl}
+                          alt=""
+                          className="pointer-events-none absolute object-contain"
+                          style={boxStyle(
+                            selectedImage.x,
+                            selectedImage.y,
+                            selectedImage.width,
+                            selectedImage.height,
+                            scale,
+                            viewSize,
+                          )}
+                        />
+                      )}
+                      {markOverlay.map((mark, index) => (
+                        <div
+                          key={mark.id ?? `draft-${index}`}
+                          style={boxStyle(mark.x, mark.y, mark.width, mark.height, scale, viewSize)}
+                          className={
+                            mark.kind === "redact"
+                              ? "pointer-events-none absolute bg-foreground/80"
+                              : "pointer-events-none absolute border-2 border-primary bg-primary/10"
+                          }
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                {lines.length} text runs on this page. Hover to see the boxes; click one to edit
-                that run only.
+                {mode === "text" &&
+                  `${lines.length} text runs on this page. Hover to see the boxes; click one to edit that run only.`}
+                {mode === "image" &&
+                  `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
+                {mode === "mark" &&
+                  "Drag a rectangle, then keep it to burn a shape or redact on export."}
               </p>
             </div>
 
-            {/* Side panel */}
             <aside className="bench-panel flex flex-col p-4 sm:p-5">
-              {!selected ? (
+              {mode === "image" ? (
+                <ImageStudioPanel
+                  region={selectedImage ?? null}
+                  imageCount={images.length}
+                  draft={imageDraft}
+                  previewUrl={previewUrl}
+                  previewBusy={previewBusy}
+                  outputBytes={
+                    selectedImage
+                      ? (imageEdits[selectedImage.id]?.output.bytes.byteLength ?? null)
+                      : null
+                  }
+                  sourceLabel={sourceLabel}
+                  onChange={setImageDraft}
+                  onReplace={(file) => void replaceImage(file)}
+                  onCommit={() => void commitImage()}
+                  onReset={() => void resetImage()}
+                />
+              ) : mode === "mark" ? (
+                <>
+                  <p className="eyebrow">Marks</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Simple shapes only. Confirmed marks burn into the export. They do not become
+                    Photoshop layers.
+                  </p>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      variant={markTool === "redact" ? "default" : "secondary"}
+                      onClick={() => setMarkTool("redact")}
+                    >
+                      <Highlighter className="size-3.5" /> Redact
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={markTool === "rect" ? "default" : "secondary"}
+                      onClick={() => setMarkTool("rect")}
+                    >
+                      <Square className="size-3.5" /> Rectangle
+                    </Button>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      disabled={!draftMark || draftMark.width < 8 || draftMark.height < 8}
+                      onClick={keepMark}
+                    >
+                      Keep this mark
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setDraftMark(null)}
+                      aria-label="Cancel draft mark"
+                    >
+                      <Undo2 className="size-3.5" />
+                    </Button>
+                  </div>
+                  {marks.length > 0 && (
+                    <ul className="mt-4 space-y-2 text-xs">
+                      {marks.map((mark) => (
+                        <li key={mark.id} className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">
+                            p{mark.page} · {mark.kind}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setMarks((prev) => prev.filter((m) => m.id !== mark.id))}
+                          >
+                            Remove
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : !selected ? (
                 <div className="py-8 text-center">
                   <p className="font-display text-base font-semibold">Nothing selected</p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Click any line on the page to open it here.
+                    Click any line on the page to open it here, or switch to Image studio.
                   </p>
                 </div>
               ) : (
@@ -576,15 +1090,31 @@ function Editor() {
                 </div>
               )}
 
-              {editedIds.length > 0 && (
+              {pendingCount > 0 && (
                 <>
                   <Separator className="my-5" />
                   <p className="eyebrow">Pending edits</p>
                   <ul className="mt-2 space-y-2">
                     {Object.values(edits).map(({ line, text }) => (
                       <li key={line.id} className="text-xs">
-                        <span className="text-gauge text-muted-foreground">p{line.page}</span>{" "}
+                        <span className="text-gauge text-muted-foreground">p{line.page} text</span>{" "}
                         <span className="text-success">{text}</span>
+                      </li>
+                    ))}
+                    {Object.values(imageEdits).map((edit) => (
+                      <li key={edit.region.id} className="text-xs">
+                        <span className="text-gauge text-muted-foreground">
+                          p{edit.region.page} photo
+                        </span>{" "}
+                        <span className="text-success">
+                          {edit.output.width}×{edit.output.height} JPEG
+                        </span>
+                      </li>
+                    ))}
+                    {marks.map((mark) => (
+                      <li key={mark.id} className="text-xs">
+                        <span className="text-gauge text-muted-foreground">p{mark.page}</span>{" "}
+                        <span className="text-success">{mark.kind}</span>
                       </li>
                     ))}
                   </ul>
