@@ -71,14 +71,25 @@ export function preferOcrOverlay(input: {
   return input.enhanceOpen && input.ocrLineCount > 0;
 }
 
+/**
+ * Apply-button / commit enablement. Priority:
+ * 1. OCR lines (`selectedIsOcr` / `source === "ocr"`) always apply.
+ * 2. Native ghost lines (`deferToScan` or no text operator) stay blocked.
+ * 3. `scanMode` / false `looksScanned` must never disable Apply by themselves —
+ *    `canCommitSafely` already returns false when `inspection.deferToScan`.
+ */
 export function canApplyTextEdit(input: {
+  selectedIsOcr?: boolean | undefined;
   source?: "pdf" | "ocr" | "content-stream" | "pdfjs" | undefined;
   deferToScan?: boolean | undefined;
   canCommitSafely: boolean;
   looksScanned?: boolean | undefined;
   hasTextOperator?: boolean | undefined;
+  /** Ignored. Kept so callers cannot accidentally reintroduce scanMode gating. */
+  scanMode?: boolean | undefined;
 }): boolean {
-  if (input.source === "ocr") return true;
+  void input.scanMode;
+  if (input.selectedIsOcr || input.source === "ocr") return true;
   if (input.deferToScan) return false;
   if (input.looksScanned && input.hasTextOperator === false) return false;
   return input.canCommitSafely;
