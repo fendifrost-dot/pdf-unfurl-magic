@@ -83,6 +83,27 @@ describe("group align against the selection box", () => {
     expect(snapped.every((item) => !positionMoved(item))).toBe(true);
   });
 
+  it("does not treat extract-time PDF.js vs stream Y drift as a user move", () => {
+    const member = run({
+      id: "desc",
+      text: "06-06 POS Debit Debit Card 6205",
+      x: 14,
+      y: 695.2,
+      originX: 14,
+      originY: 700,
+    });
+    expect(positionMoved(member)).toBe(false);
+    const wrapped = run({
+      id: "wrap",
+      text: "Amzn Mktp Us zl4Fa Amzn.Com/Bill",
+      x: 56,
+      y: 500,
+      originX: 56,
+      originY: 535.76,
+    });
+    expect(positionMoved(wrapped)).toBe(false);
+  });
+
   it("is a no-op for position when text was edited but not moved", () => {
     const member = run({ id: "a", text: "Paid To", x: 50, originX: 50, originY: 400 });
     expect(positionMoved(member)).toBe(false);

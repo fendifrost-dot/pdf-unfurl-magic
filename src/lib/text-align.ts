@@ -28,6 +28,15 @@ export const ALIGN_HINT =
 
 export const POSITION_EPS = 0.05;
 
+/**
+ * PDF.js `y` vs content-stream `originY` (attachStreamHints) often differs by
+ * a few points on CID/statement pages, and wrapped continuation rows can land
+ * 20–40pt away from the nearest show. That is extract metadata, not a user
+ * nudge — treating it as `isMoved` painted overlay labels on live glyphs.
+ * Align/nudge only change x, so a generous Y band is safe.
+ */
+export const POSITION_Y_EXTRACT_EPS = 48;
+
 export type OriginBox = {
   x: number;
   y: number;
@@ -47,7 +56,8 @@ export function positionMoved(
   eps = POSITION_EPS,
 ): boolean {
   const origin = extractOrigin(run);
-  return Math.abs(run.x - origin.x) > eps || Math.abs(run.y - origin.y) > eps;
+  if (Math.abs(run.x - origin.x) > eps) return true;
+  return Math.abs(run.y - origin.y) > Math.max(eps, POSITION_Y_EXTRACT_EPS);
 }
 
 export function withExtractOrigin(line: TextLine): TextLine {

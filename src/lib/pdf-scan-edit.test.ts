@@ -24,6 +24,8 @@ import {
   ocrBoxesToTextLines,
 } from "./pdf-scan-edit";
 import { applyWorkshopPatches } from "./pdf-tools";
+import { editPreviewWouldDoublePaint, resolveEditPreview } from "./edit-apply";
+import { positionMoved } from "./text-align";
 
 const BLUE = encodePng(1, 1, Uint8Array.from([40, 90, 180, 255]));
 
@@ -112,6 +114,18 @@ describe("scan page classification", () => {
       matchRatio: 1,
     });
     expect(classified.looksScanned).toBe(false);
+  });
+
+  it("does not flag a digital statement when PDF.js grouping breaks exact show matches", () => {
+    const classified = classifyPageScan({
+      showCount: 120,
+      imageCount: 2,
+      pdfJsLineCount: 40,
+      matchRatio: 0.1,
+      garbledRatio: 0.05,
+    });
+    expect(classified.looksScanned).toBe(false);
+    expect(classified.reason).toBe("ok");
   });
 
   it("does not treat a CID encoding mismatch as an OCR ghost", () => {
@@ -322,6 +336,10 @@ const ENHANCE_ORIGINAL = join(
   UPLOADS,
   "June_2026_monthly_statement1_current_after-overwrite_ad28.pdf",
 );
+const JUNE_STATEMENT = [
+  join(UPLOADS, "June_2026_monthly_statement1_current_after-overwrite_0b6c.pdf"),
+  ENHANCE_ORIGINAL,
+].find((path) => existsSync(path));
 
 describe("Enhance export must not stack a second visible text layer", () => {
   it("flags 3 Tr outside BT over a full-page image (the Enhance export bug)", async () => {
@@ -458,6 +476,57 @@ describe("Enhance export must not stack a second visible text layer", () => {
       expect(fixed.hasStackedVisibleText).toBe(false);
       expect(fixed.trInsideTextObject).toBeGreaterThan(0);
       expect(fixed.visibleShowCount).toBe(0);
+    },
+  );
+});
+
+describe("Edit UI preview must not composite a second text layer on digital pages", () => {
+  it.runIf(!!JUNE_STATEMENT)(
+    "June statement page 3 stays native-canvas-only (no overlay labels, no enhance bitmap)",
+    async () => {
+      const buf = readFileSync(JUNE_STATEMENT!);
+      const bytes = buf.buffer.slice(
+        buf.byteOffset,
+        buf.byteOffset + buf.byteLength,
+      ) as ArrayBuffer;
+      const proxy = await getDocument({ data: new Uint8Array(bytes.slice(0)) }).promise;
+      const pageLines = await extractLines(proxy, 3, bytes);
+      await proxy.destroy();
+
+      const report = await inspectPageScan(
+        bytes,
+        3,
+        pageLines.map((line) => line.text),
+      );
+      expect(report.looksScanned).toBe(false);
+      expect(pageLines.length).toBeGreaterThan(8);
+
+      const wrapped = pageLines.find((line) => /Amzn Mktp/i.test(line.text));
+      expect(wrapped).toBeTruthy();
+      expect(positionMoved(wrapped!)).toBe(false);
+
+      for (const line of pageLines) {
+        const preview = resolveEditPreview({
+          looksScanned: report.looksScanned,
+          nativeLineCount: pageLines.length,
+          replaceWithCleaned: true,
+          hasEnhancedPreview: true,
+          enhanceOpen: true,
+          ocrLineCount: 90,
+          line: {
+            source: line.source,
+            textChanged: false,
+            isLivePreview: false,
+            isMoved: positionMoved(line),
+            showHighlight: false,
+            canvasShowsApplied: false,
+          },
+        });
+        expect(preview.showNativeCanvas).toBe(true);
+        expect(preview.showEnhancedBitmap).toBe(false);
+        expect(preview.paintVisibleOverlayLabel).toBe(false);
+        expect(editPreviewWouldDoublePaint(preview)).toBe(false);
+      }
     },
   );
 });

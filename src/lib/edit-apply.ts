@@ -289,17 +289,109 @@ export function textOverlayLabelClass(fill: OverlayFillMode): string {
  * After Apply, the canvas is re-rendered from the rewritten PDF so the new
  * glyphs match neighbouring lines. Overlay text is then only needed for a live
  * draft, a reviewer highlight box, or when the canvas could not be patched.
+ *
+ * Never paint OCR/string labels on top of a still-visible native PDF.js
+ * canvas — hit-targets stay `sr-only`. Position-only drift (`isMoved`) is not
+ * a text edit and must not be passed as `isEdited`.
  */
 export function overlayShouldPaintLabel(input: {
   isEdited: boolean;
   isLivePreview: boolean;
   showHighlight: boolean;
   canvasShowsApplied: boolean;
+  /** PDF.js / patched canvas is showing live native glyphs. */
+  nativeCanvasVisible?: boolean | undefined;
+  source?: string | undefined;
 }): boolean {
+  const overNative = input.nativeCanvasVisible !== false;
+  if (overNative && input.source === "ocr") return false;
+  if (overNative && !input.isLivePreview && !input.isEdited) return false;
   if (input.isLivePreview) return true;
   if (!input.isEdited) return false;
   if (input.showHighlight) return true;
   return !input.canvasShowsApplied;
+}
+
+/**
+ * Edit page compositing: native PDF.js canvas vs enhanced JPEG preview.
+ * These two must be mutually exclusive — never stack a cleaned bitmap on a
+ * still-visible text canvas. Digital (non-scan) pages keep the native canvas
+ * even if Enhance produced a JPEG or `replaceWithCleaned` was toggled.
+ */
+export function editPreviewLayers(input: {
+  looksScanned: boolean;
+  nativeLineCount: number;
+  replaceWithCleaned: boolean;
+  hasEnhancedPreview: boolean;
+}): {
+  showNativeCanvas: boolean;
+  showEnhancedBitmap: boolean;
+} {
+  const digitalNative = input.nativeLineCount > 0 && !input.looksScanned;
+  const showEnhancedBitmap = input.hasEnhancedPreview && input.replaceWithCleaned && !digitalNative;
+  return {
+    showEnhancedBitmap,
+    showNativeCanvas: !showEnhancedBitmap,
+  };
+}
+
+/** True when the Edit preview would show two copies of the same glyphs. */
+export function editPreviewWouldDoublePaint(input: {
+  showNativeCanvas: boolean;
+  showEnhancedBitmap: boolean;
+  paintVisibleOverlayLabel: boolean;
+}): boolean {
+  if (!input.showNativeCanvas) return false;
+  return input.showEnhancedBitmap || input.paintVisibleOverlayLabel;
+}
+
+/**
+ * Full Edit preview path for one overlay line — the compositing + label
+ * decision `edit.tsx` must follow so digital pages never stack.
+ */
+export function resolveEditPreview(input: {
+  looksScanned: boolean;
+  nativeLineCount: number;
+  replaceWithCleaned: boolean;
+  hasEnhancedPreview: boolean;
+  enhanceOpen: boolean;
+  ocrLineCount: number;
+  line: {
+    source?: string | undefined;
+    textChanged: boolean;
+    isLivePreview: boolean;
+    /** Extract-time PDF.js vs stream Y, or a user nudge. Not a text edit. */
+    isMoved?: boolean | undefined;
+    showHighlight: boolean;
+    canvasShowsApplied: boolean;
+  };
+}): {
+  showNativeCanvas: boolean;
+  showEnhancedBitmap: boolean;
+  paintVisibleOverlayLabel: boolean;
+} {
+  void input.line.isMoved;
+  const layers = editPreviewLayers({
+    looksScanned: input.looksScanned,
+    nativeLineCount: input.nativeLineCount,
+    replaceWithCleaned: input.replaceWithCleaned,
+    hasEnhancedPreview: input.hasEnhancedPreview,
+  });
+  const showingOcr = preferOcrOverlay({
+    enhanceOpen: input.enhanceOpen,
+    ocrLineCount: input.ocrLineCount,
+    nativeLineCount: input.nativeLineCount,
+    looksScanned: input.looksScanned,
+  });
+  const paintVisibleOverlayLabel = overlayShouldPaintLabel({
+    isEdited: input.line.textChanged,
+    isLivePreview: input.line.isLivePreview,
+    showHighlight: input.line.showHighlight,
+    canvasShowsApplied: input.line.canvasShowsApplied,
+    nativeCanvasVisible: layers.showNativeCanvas,
+    source: showingOcr ? "ocr" : input.line.source,
+  });
+  return { ...layers, paintVisibleOverlayLabel };
 }
 
 export function shouldFlattenPageAsScan(input: {
