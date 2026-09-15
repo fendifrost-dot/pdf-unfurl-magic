@@ -9,12 +9,8 @@ import {
   Download,
   Eraser,
   FileText,
-  Highlighter,
-  ImageIcon,
   Loader2,
   Scissors,
-  Square,
-  Type,
   Undo2,
 } from "lucide-react";
 import { SiteHeader } from "@/components/site-header";
@@ -63,7 +59,6 @@ import {
 import {
   decodePageImage,
   extractImages,
-  type AnnotationBurn,
   type ImageEdit,
   type PdfImageRegion,
 } from "@/lib/pdf-images";
@@ -99,8 +94,6 @@ type Doc = {
 };
 
 type Edit = { line: TextLine; text: string };
-type Mode = "text" | "image" | "mark";
-type MarkTool = AnnotationBurn["kind"];
 
 const CANVAS_WIDTH = 720;
 
@@ -170,10 +163,6 @@ function Editor() {
   const [sourceLabel, setSourceLabel] = useState("Original embedded photo");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [mode, setMode] = useState<Mode>("text");
-  const [marks, setMarks] = useState<AnnotationBurn[]>([]);
-  const [markTool, setMarkTool] = useState<MarkTool>("redact");
-  const [draftMark, setDraftMark] = useState<Omit<AnnotationBurn, "id"> | null>(null);
   const [scale, setScale] = useState(1);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [status, setStatus] = useState<string | null>(null);
@@ -182,8 +171,6 @@ function Editor() {
   const [inspection, setInspection] = useState<TextEditInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const holderRef = useRef<HTMLDivElement>(null);
-  const pageBoxRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const previewTimer = useRef<number | null>(null);
 
@@ -193,7 +180,7 @@ function Editor() {
     : undefined;
   const editedIds = Object.keys(edits);
   const imageEditIds = Object.keys(imageEdits);
-  const pendingCount = editedIds.length + imageEditIds.length + marks.length;
+  const pendingCount = editedIds.length + imageEditIds.length;
 
   const clearPreview = () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -210,7 +197,6 @@ function Editor() {
       setDoc({ name, base: name.replace(/\.pdf$/i, ""), bytes, proxy, pageCount: proxy.numPages });
       setEdits({});
       setImageEdits({});
-      setMarks([]);
       setSelectedId(null);
       setSelectedImageId(null);
       setSourceCanvas(null);
@@ -224,17 +210,6 @@ function Editor() {
     } finally {
       setStatus(null);
     }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const sync = () => {
-      if (window.location.hash === "#images") setMode("image");
-      if (window.location.hash === "#marks") setMode("mark");
-    };
-    sync();
-    window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
   }, []);
 
   // Desktop app: pick up a file opened from File → Open PDF or the Finder.
@@ -430,20 +405,17 @@ function Editor() {
     setStatus("Building the sample quote");
     const bytes = await buildSamplePdf();
     await loadBytes("northgate-quote-sample.pdf", bytes.slice(0).buffer as ArrayBuffer);
-    setMode("image");
   };
 
   const select = (line: TextLine) => {
     setSelectedImageId(null);
     setSelectedId(line.id);
     setDraft(edits[line.id]?.text ?? line.text);
-    setMode("text");
   };
 
   const selectImage = (image: PdfImageRegion) => {
     setSelectedId(null);
     setSelectedImageId(image.id);
-    setMode("image");
   };
 
   const commit = () => {
@@ -483,12 +455,7 @@ function Editor() {
       const canvas = await fileToWorkingCanvas(file);
       setSourceCanvas(canvas);
       setSourceLabel(`Replacement · ${file.name}`);
-      setImageDraft((prev) => ({
-        ...DEFAULT_ADJUSTMENTS,
-        quality: prev.quality,
-        exposure: prev.exposure,
-        contrast: prev.contrast,
-      }));
+      setImageDraft(DEFAULT_ADJUSTMENTS);
     } catch {
       setError("That replacement image could not be read. Use a JPEG, PNG, or WebP.");
     } finally {
@@ -514,57 +481,6 @@ function Editor() {
     } finally {
       setPreviewBusy(false);
     }
-  };
-
-  const eventToPdf = (event: React.PointerEvent<HTMLDivElement>) => {
-    const box = pageBoxRef.current;
-    if (!box || !viewSize.width) return null;
-    const rect = box.getBoundingClientRect();
-    const pageWidth = viewSize.width / scale;
-    const pageHeight = viewSize.height / scale;
-    const x = ((event.clientX - rect.left) / rect.width) * pageWidth;
-    const y = pageHeight - ((event.clientY - rect.top) / rect.height) * pageHeight;
-    return { x, y };
-  };
-
-  const onMarkPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (mode !== "mark") return;
-    const point = eventToPdf(event);
-    if (!point) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = point;
-    setDraftMark({ page, kind: markTool, x: point.x, y: point.y, width: 0, height: 0 });
-  };
-
-  const onMarkPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current) return;
-    const point = eventToPdf(event);
-    if (!point) return;
-    const start = dragRef.current;
-    setDraftMark({
-      page,
-      kind: markTool,
-      x: Math.min(start.x, point.x),
-      y: Math.min(start.y, point.y),
-      width: Math.abs(point.x - start.x),
-      height: Math.abs(point.y - start.y),
-    });
-  };
-
-  const onMarkPointerUp = () => {
-    dragRef.current = null;
-  };
-
-  const keepMark = () => {
-    if (!draftMark || draftMark.width < 8 || draftMark.height < 8) return;
-    setMarks((prev) => [
-      ...prev,
-      {
-        ...draftMark,
-        id: `mark-${prev.length + 1}-${Math.round(draftMark.x)}-${Math.round(draftMark.y)}`,
-      },
-    ]);
-    setDraftMark(null);
   };
 
   const runCheck = async () => {
@@ -607,7 +523,7 @@ function Editor() {
         bytes: edit.output.bytes,
         mime: "image/jpeg" as const,
       }));
-      const bytes = await applyWorkshopPatches(doc.bytes, patches, imagePatches, marks);
+      const bytes = await applyWorkshopPatches(doc.bytes, patches, imagePatches, []);
       downloadBytes(bytes, `${doc.base}-edited.pdf`);
     } catch (e) {
       setError(
@@ -676,10 +592,6 @@ function Editor() {
     [images, scale, viewSize, selectedImageId, imageEdits],
   );
 
-  const markOverlay = [...marks.filter((m) => m.page === page), draftMark].filter(Boolean) as Array<
-    Omit<AnnotationBurn, "id"> & { id?: string }
-  >;
-
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
@@ -692,10 +604,8 @@ function Editor() {
               Edit the words or the photo. Leave the rest of the page alone.
             </h1>
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
-              Original pages stay as PDF objects — fonts, rules, and images you do not touch are not
-              rasterized. Click a run, rewrite it in a font already in the file, and export. No
-              white-out layer. Image studio is a document workshop, not Photoshop: replace, crop,
-              rotate, exposure, contrast, compress. Marks burn in only after you confirm them.
+              Original pages stay as PDF objects. Click a text run or one photo. Replace or crop
+              that photo; export leaves surrounding text and lines alone.
             </p>
           </div>
           {doc && (
@@ -766,7 +676,6 @@ function Editor() {
                     onClick={() => {
                       setSelectedId(null);
                       setSelectedImageId(null);
-                      setDraftMark(null);
                       setPage((p) => Math.max(1, p - 1));
                     }}
                     aria-label="Previous page"
@@ -783,7 +692,6 @@ function Editor() {
                     onClick={() => {
                       setSelectedId(null);
                       setSelectedImageId(null);
-                      setDraftMark(null);
                       setPage((p) => Math.min(doc.pageCount, p + 1));
                     }}
                     aria-label="Next page"
@@ -791,26 +699,6 @@ function Editor() {
                     <ChevronRight className="size-4" />
                   </Button>
                 </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-1 rounded-md bg-muted p-1">
-                {(
-                  [
-                    ["text", Type, "Text"],
-                    ["image", ImageIcon, "Image studio"],
-                    ["mark", Highlighter, "Marks"],
-                  ] as const
-                ).map(([value, Icon, label]) => (
-                  <Button
-                    key={value}
-                    size="sm"
-                    variant={mode === value ? "default" : "ghost"}
-                    className="flex-1"
-                    onClick={() => setMode(value)}
-                  >
-                    <Icon className="size-3.5" /> {label}
-                  </Button>
-                ))}
               </div>
 
               <div className="mt-4 max-h-[70vh] overflow-auto rounded-md bg-paper p-2 sm:p-3">
@@ -821,30 +709,22 @@ function Editor() {
                       <Loader2 className="mr-2 size-4 animate-spin" /> {status}…
                     </div>
                   ) : (
-                    <div
-                      ref={pageBoxRef}
-                      className="absolute inset-0"
-                      onPointerDown={mode === "mark" ? onMarkPointerDown : undefined}
-                      onPointerMove={mode === "mark" ? onMarkPointerMove : undefined}
-                      onPointerUp={mode === "mark" ? onMarkPointerUp : undefined}
-                    >
-                      {mode === "text" && textOverlay}
-                      {mode === "image" && imageOverlay}
-                      {mode === "image" &&
-                        Object.values(imageEdits)
-                          .filter(
-                            (edit) =>
-                              edit.region.page === page && edit.region.id !== selectedImageId,
-                          )
-                          .map((edit) => (
-                            <CommittedImageOverlay
-                              key={edit.region.id}
-                              edit={edit}
-                              scale={scale}
-                              viewSize={viewSize}
-                            />
-                          ))}
-                      {mode === "image" && selectedImage && previewUrl && (
+                    <div className="absolute inset-0">
+                      {textOverlay}
+                      {imageOverlay}
+                      {Object.values(imageEdits)
+                        .filter(
+                          (edit) => edit.region.page === page && edit.region.id !== selectedImageId,
+                        )
+                        .map((edit) => (
+                          <CommittedImageOverlay
+                            key={edit.region.id}
+                            edit={edit}
+                            scale={scale}
+                            viewSize={viewSize}
+                          />
+                        ))}
+                      {selectedImage && previewUrl && (
                         <img
                           src={previewUrl}
                           alt=""
@@ -859,115 +739,38 @@ function Editor() {
                           )}
                         />
                       )}
-                      {markOverlay.map((mark, index) => (
-                        <div
-                          key={mark.id ?? `draft-${index}`}
-                          style={boxStyle(mark.x, mark.y, mark.width, mark.height, scale, viewSize)}
-                          className={
-                            mark.kind === "redact"
-                              ? "pointer-events-none absolute bg-foreground/80"
-                              : "pointer-events-none absolute border-2 border-primary bg-primary/10"
-                          }
-                        />
-                      ))}
                     </div>
                   )}
                 </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                {mode === "text" &&
-                  `${lines.length} text runs on this page. Hover to see the boxes; click one to edit that run only.`}
-                {mode === "image" &&
-                  `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
-                {mode === "mark" &&
-                  "Drag a rectangle, then keep it to burn a shape or redact on export."}
+                {lines.length} text runs
+                {images.length
+                  ? ` · ${images.length} photo${images.length === 1 ? "" : "s"}`
+                  : ""}
+                . Click a line or one photo.
               </p>
             </div>
 
             <aside className="bench-panel flex flex-col p-4 sm:p-5">
-              {mode === "image" ? (
+              {selectedImage ? (
                 <ImageStudioPanel
-                  region={selectedImage ?? null}
+                  region={selectedImage}
                   imageCount={images.length}
                   draft={imageDraft}
                   previewUrl={previewUrl}
                   previewBusy={previewBusy}
-                  outputBytes={
-                    selectedImage
-                      ? (imageEdits[selectedImage.id]?.output.bytes.byteLength ?? null)
-                      : null
-                  }
                   sourceLabel={sourceLabel}
                   onChange={setImageDraft}
                   onReplace={(file) => void replaceImage(file)}
                   onCommit={() => void commitImage()}
                   onReset={() => void resetImage()}
                 />
-              ) : mode === "mark" ? (
-                <>
-                  <p className="eyebrow">Marks</p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Simple shapes only. Confirmed marks burn into the export. They do not become
-                    Photoshop layers.
-                  </p>
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <Button
-                      size="sm"
-                      variant={markTool === "redact" ? "default" : "secondary"}
-                      onClick={() => setMarkTool("redact")}
-                    >
-                      <Highlighter className="size-3.5" /> Redact
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={markTool === "rect" ? "default" : "secondary"}
-                      onClick={() => setMarkTool("rect")}
-                    >
-                      <Square className="size-3.5" /> Rectangle
-                    </Button>
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      disabled={!draftMark || draftMark.width < 8 || draftMark.height < 8}
-                      onClick={keepMark}
-                    >
-                      Keep this mark
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setDraftMark(null)}
-                      aria-label="Cancel draft mark"
-                    >
-                      <Undo2 className="size-3.5" />
-                    </Button>
-                  </div>
-                  {marks.length > 0 && (
-                    <ul className="mt-4 space-y-2 text-xs">
-                      {marks.map((mark) => (
-                        <li key={mark.id} className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">
-                            p{mark.page} · {mark.kind}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setMarks((prev) => prev.filter((m) => m.id !== mark.id))}
-                          >
-                            Remove
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
               ) : !selected ? (
                 <div className="py-8 text-center">
                   <p className="font-display text-base font-semibold">Nothing selected</p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Click any line on the page to open it here, or switch to Image studio.
+                    Click a text run or one photo on this page.
                   </p>
                 </div>
               ) : (
@@ -1109,12 +912,6 @@ function Editor() {
                         <span className="text-success">
                           {edit.output.width}×{edit.output.height} JPEG
                         </span>
-                      </li>
-                    ))}
-                    {marks.map((mark) => (
-                      <li key={mark.id} className="text-xs">
-                        <span className="text-gauge text-muted-foreground">p{mark.page}</span>{" "}
-                        <span className="text-success">{mark.kind}</span>
                       </li>
                     ))}
                   </ul>

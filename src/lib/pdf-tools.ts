@@ -266,6 +266,31 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
   y -= 16;
   write("SKU  NG-BENCH-40-OAK", { size: 10, font: mono });
 
+  // Page 2 must stay untouched so in-place text tests can prove an edit on
+  // page 1 does not flatten or rewrite the next page.
+  const page2 = doc.addPage([595, 842]);
+  page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });
+  page2.drawText("Reference code REF-4421. Do not amend this page.", {
+    x: 56,
+    y: 742,
+    size: 10,
+    font: body,
+    color: soft,
+  });
+  page2.drawLine({
+    start: { x: 56, y: 720 },
+    end: { x: 539, y: 720 },
+    thickness: 1,
+    color: rgb(0.75, 0.76, 0.78),
+  });
+  page2.drawText("Vector rule and original text objects must survive an edit on page 1.", {
+    x: 56,
+    y: 698,
+    size: 10,
+    font: serif,
+    color: ink,
+  });
+
   const appendix = doc.addPage([595, 842]);
   appendix.drawText("Photo appendix", { x: 56, y: 780, size: 20, font: bold, color: ink });
   appendix.drawText("Washed-out site shot — pull exposure down, then compress.", {
@@ -287,29 +312,6 @@ export async function buildSamplePdf(): Promise<Uint8Array> {
     y: 396,
     size: 10,
     font: body,
-    color: ink,
-  });
-
-  const page2 = doc.addPage([595, 842]);
-  page2.drawText("UNTOUCHED PAGE", { x: 56, y: 770, size: 16, font: bold, color: ink });
-  page2.drawText("Reference code REF-4421. Do not amend this page.", {
-    x: 56,
-    y: 742,
-    size: 10,
-    font: body,
-    color: soft,
-  });
-  page2.drawLine({
-    start: { x: 56, y: 720 },
-    end: { x: 539, y: 720 },
-    thickness: 1,
-    color: rgb(0.75, 0.76, 0.78),
-  });
-  page2.drawText("Vector rule and original text objects must survive an edit on page 1.", {
-    x: 56,
-    y: 698,
-    size: 10,
-    font: serif,
     color: ink,
   });
 
