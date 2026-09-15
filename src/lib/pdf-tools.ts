@@ -3,13 +3,14 @@
  * the original file on disk is never touched and nothing is uploaded.
  */
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { loadPdfDocument } from "./pdf-io";
 export type { TextPatch, TextEditReport, TextEditInspection } from "./pdf-text-edit";
 export { applyTextPatches, applyTextPatchesWithReport, inspectTextPatch } from "./pdf-text-edit";
 
 export type SplitOutput = { name: string; bytes: Uint8Array; pages: number };
 
 async function load(bytes: ArrayBuffer) {
-  return PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
+  return loadPdfDocument(bytes);
 }
 
 /** Split into fixed-size chunks so a huge file becomes several openable ones. */
