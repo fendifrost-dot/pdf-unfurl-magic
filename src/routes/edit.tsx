@@ -1154,7 +1154,7 @@ function Editor() {
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
-                  "Drag a highlight, underline, note, or redaction box, then keep it. Redaction burns a black box into the export copy."}
+                  "Drag a highlight, underline, note, or redaction box, then keep it. Highlights and notes save as real PDF annotations. Visual redact burns a black box — the words underneath can still be copied."}
               </p>
             </div>
 
@@ -1181,8 +1181,9 @@ function Editor() {
                 <>
                   <p className="eyebrow">Marks</p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Confirmed marks write onto the export copy. Redaction is an opaque black box.
-                    The original file is never changed. No comment threads.
+                    Highlights, notes, underlines, and rectangles save as PDF annotations other
+                    viewers can see. Visual redact is a black box only — it does not remove
+                    extractable text. The original file is never changed.
                   </p>
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <Button
@@ -1211,7 +1212,7 @@ function Editor() {
                       variant={markTool === "redact" ? "default" : "secondary"}
                       onClick={() => setMarkTool("redact")}
                     >
-                      <Square className="size-3.5" /> Redact
+                      <Square className="size-3.5" /> Visual redact
                     </Button>
                     <Button
                       size="sm"

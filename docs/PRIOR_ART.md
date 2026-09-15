@@ -14,11 +14,11 @@ Ordered by impact on headaches we still have, not by GitHub stars.
 | 2 | **Invisible OCR layer = text rendering mode 3** (port Tesseract/OCRmyPDF, keep `tesseract.js`) | **port algorithms**; keep existing **depend** | `src/lib/scan/pdf.ts`, `src/lib/pdf-scan-edit.ts` | **landed** | Acrobat, Tesseract’s PDF renderer, and OCRmyPDF use `/Tr 3` (neither fill nor stroke). Opacity-0 glyphs fail PDF/A and can reappear when flattened. Scan export and scan-lane PDFs now push `3 Tr` instead of `/ca 0`. |
 | 3 | **`signature_pad` (MIT)** | **depend** (landed) | `src/components/signature-capture.tsx` | **2–4 hours** | Homegrown pointer drawing is fine for MVP; `signature_pad` is the maintained 12k-star pad (velocity strokes, SVG/PNG, high-DPI). Drop-in for e-sign feel without DocuSign. |
 | 4 | **In-place image XObject replace** (port pdf-lib #175 / pdfcpu `images update`) | **port algorithms** on existing pdf-lib | `src/lib/pdf-images.ts`, `src/lib/pdf-tools.ts` | **1–2 days** | Image Studio currently paints a **white rectangle + new image** on top of the original XObject (same class of corruption as TouchUp whiteout). Reassigning the existing `/ImN` stream keeps text, rules, and file size honest. |
-| 5 | **pdf.js `AnnotationEditorLayer` we already ship** (`pdfjs-dist@4.10.38`) | **depend** (already); **port** save path | `src/lib/pdf-marks.ts`, `src/routes/edit.tsx` | **2–3 days** | Mozilla’s editor writes real `Highlight` / `Ink` / `FreeText` / `Stamp` annotations via `PDFDocumentProxy.saveDocument()`. Our marks are burned pdf-lib rectangles. Using the engine we already load avoids `pdfAnnotate` (stale) and AGPL e-sign suites. |
+| 5 | **pdf.js `AnnotationEditorLayer` we already ship** (`pdfjs-dist@4.10.38`) | **depend** (already); **port** save path | `src/lib/pdf-annotate-js.ts`, `src/lib/pdf-marks.ts`, `src/routes/edit.tsx` | **landed** | Mozilla’s editor writes real `Highlight` / `Ink` / `FreeText` / `Stamp` annotations via `PDFDocumentProxy.saveDocument()`. Highlight and note now serialize that payload and call `saveDocument()`. Underline / rectangle are native annot dicts (no 4.10 editor type). Visual redact stays a labeled burn. |
 
 **Do not do in the next two weeks:** OpenCV.js / jscanify as a dependency (~30 MB unpacked), scribe.js (AGPL), MuPDF.js (AGPL), Stirling as a vendored app, OCRmyPDF inside the browser, or any DocuSign-clone (OpenSign / Documenso / DocuSeal — all AGPL).
 
-**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run.
+**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run. #5 highlight/note save uses pdf.js `saveDocument()` (`src/lib/pdf-annotate-js.ts`); visual redact remains a labeled burn.
 
 ---
 
@@ -47,7 +47,7 @@ False leads from the brief: **Hopscotch** is LinkedIn’s old product-tour JS, n
 | OCR worker | `src/lib/scan/ocr.ts` | `tesseract.js` ^6 |
 | Searchable scan PDF | `src/lib/scan/pdf.ts` | JPEG page + Helvetica with `/Tr 3` |
 | E-sign + SHA-256 audit page | `src/lib/esign.ts`, `src/components/signature-capture.tsx` | pdf-lib overlay |
-| Highlight / note / **visual** redact | `src/lib/pdf-marks.ts` | Burned rectangles (text still extractable) |
+| Highlight / note / underline / rectangle | `src/lib/pdf-annotate-js.ts`, `src/lib/pdf-marks.ts` | Real PDF annots via pdf.js `saveDocument()` (Highlight / FreeText); native Underline / Square; **visual** redact still a burned rect (text still extractable) |
 | Image studio (detect / decode / overlay replace) | `src/lib/pdf-images.ts`, `src/lib/pdf-tools.ts` `applyWorkshopPatches` | PDF.js ops + pdf-lib draw |
 | Desktop shell | `desktop/main.cjs` | Electron + vite preview on 127.0.0.1 |
 | Render / parse | `package.json` | `pdf-lib` MIT, `pdfjs-dist` 4.10.38 Apache-2.0 |
@@ -344,7 +344,7 @@ Tesseract’s own searchable-PDF recipe (and OCRmyPDF) place glyphs with **text 
 | **Repo** | bundled in https://github.com/mozilla/pdf.js (Apache-2.0) |
 | **Does well** | FreeText, Ink, Stamp, Highlight as **real PDF annotations**. `saveDocument()` writes them. Other viewers see them. We already load pdfjs-dist **4.10.38** (Highlight exists in 4.x). |
 | **Does poorly** | Wiring a custom React viewer to `EventBus` / `AnnotationEditorUIManager` is fiddly. Round-trip edit-after-save has been historically incomplete for ink (improving upstream). Not a redaction tool. |
-| **Action** | **depend** (already). **port** a thin adapter instead of highkite/pdfAnnotate. |
+| **Action** | **depend** (already). Thin adapter **landed** in `src/lib/pdf-annotate-js.ts` (serialized editor payloads + `saveDocument()`, pdf-lib dict fallback). AnnotationEditorLayer UI is still not mounted. |
 | **Integration** | New `src/lib/pdf-annotate-js.ts` used by `src/routes/edit.tsx`; keep `pdf-marks.ts` for **burn-in export** when the user wants flattened print. |
 | **Effort** | **2–3 days**. |
 
@@ -479,7 +479,7 @@ Useful as tests of “does the page still text-select after replace?”. **skip*
 2. **OCR layer (day 2–3):** `/Tr 3` in `scan/pdf.ts` and scan-aware Edit export — **landed.** Remaining: self-host `eng.traineddata`; skip OCR when PDF.js already reports a text layer (edit/scan of born-digital files).
 3. **Signatures (day 3):** `signature_pad` in `signature-capture.tsx`. **Landed.**
 4. **Image XObject (days 4–5):** in-place replace in `pdf-tools.ts`; smoke `fixtures/image-and-text.pdf`.
-5. **Annotate (days 6–10):** pdf.js editor save **or** flatten-redact export — pick one; do not do both if fonts slip.
+5. **Annotate (days 6–10):** pdf.js editor save **or** flatten-redact export — pick one; do not do both if fonts slip. **Landed (partial):** highlight / FreeText via `saveDocument()`; visual redact still a burn, honestly labeled.
 
 If only **two** libraries get added: **`@pdf-lib/fontkit`** and **`signature_pad`**. Everything else in the top 5 is algorithm work on code we already own.
 

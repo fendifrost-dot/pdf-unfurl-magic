@@ -1,10 +1,14 @@
 /**
- * Smoke-check: marks append drawing ops; redaction burns a black box;
- * in-place text patches can still run first via applyWorkshopPatches.
+ * Smoke-check: highlight/note save as real PDF annotations; visual redact
+ * burns a black box without removing extractable text; in-place text patches
+ * can still run first via applyWorkshopPatches.
  */
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { applyPageMarks, exportFileName } from "../src/lib/pdf-marks.ts";
 import { applyWorkshopPatches, buildSamplePdf } from "../src/lib/pdf-tools.ts";
+import { listPageAnnotationSubtypes } from "../src/lib/pdf-annotate-js.ts";
+import { bytesToArrayBuffer } from "../src/lib/pdf-io.ts";
+import { listPageShownText } from "../src/lib/pdf-text-edit.ts";
 
 const sample = await buildSamplePdf();
 const marked = await applyPageMarks(sample, [
@@ -51,6 +55,18 @@ const name = exportFileName("quote", true, [
 ]);
 if (name !== "quote-redacted.pdf") throw new Error(`unexpected name ${name}`);
 
+const subtypes = await listPageAnnotationSubtypes(marked, 1);
+for (const needed of ["Highlight", "FreeText", "Underline"]) {
+  if (!subtypes.includes(needed)) {
+    throw new Error(`expected ${needed} annotation, got ${subtypes.join(",")}`);
+  }
+}
+
+const shown = await listPageShownText(bytesToArrayBuffer(marked), 1);
+if (!shown.includes("1,987.00")) {
+  throw new Error("highlight save removed extractable body text");
+}
+
 if (marked.byteLength <= sample.byteLength) {
   throw new Error("export copy did not grow after appending marks");
 }
@@ -66,9 +82,14 @@ const burned = await applyPageMarks(probeBytes, [
 if (burned.byteLength <= probeBytes.byteLength) {
   throw new Error("redaction did not append a burned box");
 }
+const secretStillThere = await listPageShownText(bytesToArrayBuffer(burned), 1);
+if (!secretStillThere.includes("SECRET")) {
+  throw new Error("visual redact must not pretend extractable text is gone");
+}
 
 console.log("smoke-annotate ok", {
   sample: sample.byteLength,
   marked: marked.byteLength,
   both: both.byteLength,
+  subtypes,
 });
