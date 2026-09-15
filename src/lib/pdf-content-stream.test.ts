@@ -3,8 +3,11 @@ import {
   collectTextShows,
   encodePdfLiteral,
   extractShownStrings,
+  findFuzzySpan,
   hasWhiteCoverRect,
   replaceShowText,
+  softMatchKey,
+  spliceHaystack,
   tokenizeContentStream,
   tokensToBytes,
 } from "./pdf-content-stream";
@@ -62,5 +65,26 @@ describe("content stream tokenizer", () => {
     const shows = collectTextShows(tokenizeContentStream(src));
     expect(shows[0]?.text).toBe("2,500.00");
     expect(shows[0]?.bytes.length).toBe(16);
+  });
+});
+
+describe("statement fragment matching", () => {
+  it("treats hyphen spacing as the same run", () => {
+    expect(softMatchKey("Debit- Debit")).toBe(softMatchKey("Debit - Debit"));
+  });
+
+  it("finds a PDF.js fragment inside a longer POS line", () => {
+    const hay = "06-06 POS Debit- Debit Card 6205 06-26 Amazon Mktp Us";
+    const span = findFuzzySpan(hay, "06 POS Debit- Debit Card 6205");
+    expect(span).toBeTruthy();
+    expect(hay.slice(span!.start, span!.end)).toContain("POS Debit- Debit Card 6205");
+    expect(spliceHaystack(hay, "06 POS Debit- Debit Card 6205", "06 POS Debit Card 6205")).toBe(
+      "06-06 POS Debit Card 6205 06-26 Amazon Mktp Us",
+    );
+  });
+
+  it("maps a stripped thousands comma back onto 2,500.00", () => {
+    expect(findFuzzySpan("2,500.00", "2 500.00")).toEqual({ start: 0, end: 8 });
+    expect(spliceHaystack("POS 2,500.00 BILL", "2 500.00", "2,750.00")).toBe("POS 2,750.00 BILL");
   });
 });

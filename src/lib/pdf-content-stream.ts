@@ -354,6 +354,87 @@ export function looseAmountKey(text: string): string {
   return textMatchKey(text).replace(/(?<=\d)[, ](?=\d{3}(?:\D|$))/g, "");
 }
 
+/**
+ * Matching-only key: treat “Debit- Debit” and “Debit - Debit” as the same run.
+ * Hyphens stay in the exported text; this is only for locating operators.
+ */
+export function softMatchKey(text: string): string {
+  return textMatchKey(text).replace(/\s*-\s*/g, "-");
+}
+
+function isThousandsComma(text: string, index: number): boolean {
+  return (
+    text[index] === "," && /\d/.test(text[index - 1] ?? "") && /\d/.test(text[index + 1] ?? "")
+  );
+}
+
+function isAlignSkipped(text: string, index: number): boolean {
+  const ch = text[index] ?? "";
+  if (!ch || /\s/.test(ch)) return true;
+  const folded = foldPdfPunctuation(ch);
+  if (!folded || /\s/.test(folded)) return true;
+  if (folded === "-" || folded === "\u00ad") return true;
+  if (isThousandsComma(text, index)) return true;
+  return false;
+}
+
+function alignChars(text: string): Array<{ ch: string; index: number }> {
+  const out: Array<{ ch: string; index: number }> = [];
+  for (let i = 0; i < text.length; i++) {
+    if (isAlignSkipped(text, i)) continue;
+    const folded = foldPdfPunctuation(text[i] ?? "");
+    if (!folded) continue;
+    out.push({ ch: folded, index: i });
+  }
+  return out;
+}
+
+/**
+ * Locate `needle` inside a longer show (statement lines, PDF.js fragments).
+ * Aligns letters/digits/currency while ignoring hyphen/space/thousands-comma
+ * differences so “06 POS Debit- Debit Card 6205” still hits the operator.
+ */
+export function findFuzzySpan(
+  haystack: string,
+  needle: string,
+): { start: number; end: number } | null {
+  if (!haystack || !needle.trim()) return null;
+  const exact = haystack.indexOf(needle);
+  if (exact >= 0) return { start: exact, end: exact + needle.length };
+
+  const foldedNeedle = foldPdfPunctuation(needle);
+  if (foldedNeedle && foldedNeedle !== needle) {
+    const foldedAt = haystack.indexOf(foldedNeedle);
+    if (foldedAt >= 0) return { start: foldedAt, end: foldedAt + foldedNeedle.length };
+  }
+
+  const h = alignChars(haystack);
+  const n = alignChars(needle);
+  if (n.length < 6 || h.length < n.length) return null;
+  for (let i = 0; i <= h.length - n.length; i++) {
+    let ok = true;
+    for (let j = 0; j < n.length; j++) {
+      if (h[i + j]?.ch !== n[j]?.ch) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    const start = h[i]?.index;
+    const last = h[i + n.length - 1]?.index;
+    if (start === undefined || last === undefined) return null;
+    return { start, end: last + 1 };
+  }
+  return null;
+}
+
+/** Replace a PDF.js fragment inside a content-stream show, keeping neighbors. */
+export function spliceHaystack(haystack: string, needle: string, next: string): string | null {
+  const span = findFuzzySpan(haystack, needle);
+  if (!span) return null;
+  return haystack.slice(0, span.start) + next + haystack.slice(span.end);
+}
+
 export function hasTextOperators(tokens: Token[]): boolean {
   return tokens.some(
     (token) =>

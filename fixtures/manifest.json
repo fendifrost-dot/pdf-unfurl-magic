@@ -38,7 +38,7 @@
       "pages": 1,
       "kind": "comma-amounts",
       "summary": "Comma amounts plus a multi-run POS line for text-extract / font-mimic QA.",
-      "bytes": 1317,
+      "bytes": 1376,
       "maxBytes": 12000
     },
     {

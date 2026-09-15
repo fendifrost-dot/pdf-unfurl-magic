@@ -189,6 +189,13 @@ async function commaAmounts() {
   page.drawText("Card 6205", { x: 128, y: 648, size: 11, font, color: ink });
 
   page.drawText("EUR — €40.00 on 2026-09-14", { x: 56, y: 616, size: 11, font, color: ink });
+  page.drawText("06-06 POS Debit- Debit Card 6205 06-26 Amazon Mktp Us", {
+    x: 56,
+    y: 584,
+    size: 10,
+    font,
+    color: ink,
+  });
   return doc.save();
 }
 

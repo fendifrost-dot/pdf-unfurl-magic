@@ -34,6 +34,7 @@ import {
   encodePdfHex,
   encodePdfLiteral,
   extractShownStrings,
+  findFuzzySpan,
   hasTextOperators,
   hasWhiteCoverRect,
   looseAmountKey,
@@ -41,6 +42,8 @@ import {
   removeShow,
   replaceShowBytes,
   replaceShowText,
+  softMatchKey,
+  spliceHaystack,
   textMatchKey,
   tokenizeContentStream,
   tokensToBytes,
@@ -265,18 +268,29 @@ type LocatedShows = { stream: PageStream; shows: TextShow[]; score: number };
 
 function joinedShowText(shows: TextShow[]): string[] {
   const raw = shows.map((show) => show.text);
-  return [raw.join(""), raw.join(" "), raw.join(" ").replace(/\s+/g, " ").trim()];
+  const spaced = raw.join(" ").replace(/\s+/g, " ").trim();
+  return [...new Set([raw.join(""), raw.join(" "), spaced])];
 }
 
 function textScoreForShows(shows: TextShow[], original: string): number | null {
   const origKey = textMatchKey(original);
   const origLoose = looseAmountKey(original);
+  const origSoft = softMatchKey(original);
   if (!origKey) return null;
+  let best: number | null = null;
   for (const candidate of joinedShowText(shows)) {
     if (textMatchKey(candidate) === origKey) return 1000;
-    if (origLoose && looseAmountKey(candidate) === origLoose) return 860;
+    if (origLoose && looseAmountKey(candidate) === origLoose) best = Math.max(best ?? 0, 860);
+    if (origSoft && softMatchKey(candidate) === origSoft) best = Math.max(best ?? 0, 840);
+    const span = findFuzzySpan(candidate, original);
+    if (span) {
+      const extra = Math.max(0, candidate.length - original.length);
+      // Prefer a span inside a single show (neighbors stay in that operator).
+      const base = shows.length === 1 ? 740 : 680;
+      best = Math.max(best ?? 0, base - extra * 0.05);
+    }
   }
-  return null;
+  return best;
 }
 
 function scoreShows(shows: TextShow[], patch: TextPatch, original: string): number | null {
@@ -311,10 +325,10 @@ function findShows(
       if (!first) continue;
       best = consider(stream, [first], best);
       const group = [first];
-      for (let j = i + 1; j < shows.length && group.length < 8; j++) {
+      for (let j = i + 1; j < shows.length && group.length < 16; j++) {
         const next = shows[j];
         if (!next || !sameBaseline(first, next)) break;
-        if (next.x + 1 < group[group.length - 1]!.x) break;
+        if (next.x + 4 < group[group.length - 1]!.x) break;
         group.push(next);
         best = consider(stream, [...group], best);
       }
@@ -331,12 +345,46 @@ function findShows(
     for (const show of collectTextShows(stream.tokens)) {
       if (Math.abs(show.y - patch.y) > Math.max(4, show.fontSize)) continue;
       if (Math.abs(show.x - patch.x) > Math.max(patch.width, 80)) continue;
-      if (looseAmountKey(show.text) !== origLoose) continue;
+      if (looseAmountKey(show.text) !== origLoose && !findFuzzySpan(show.text, original)) continue;
       const score = 400 - Math.hypot(show.x - patch.x, show.y - patch.y);
       if (!positional || score > positional.score) positional = { stream, shows: [show], score };
     }
   }
   return positional ? { stream: positional.stream, shows: positional.shows } : null;
+}
+
+function resolveWrite(
+  located: { shows: TextShow[] },
+  original: string,
+  nextText: string,
+): { text: string; dropRest: boolean; glyphSource: string } {
+  const shows = located.shows;
+  const head = shows[0];
+  if (!head) return { text: nextText, dropRest: false, glyphSource: original };
+
+  if (shows.length === 1) {
+    const spliced = spliceHaystack(head.text, original, nextText);
+    const exact =
+      textMatchKey(head.text) === textMatchKey(original) ||
+      softMatchKey(head.text) === softMatchKey(original) ||
+      (!!looseAmountKey(original) && looseAmountKey(head.text) === looseAmountKey(original));
+    if (exact) return { text: nextText, dropRest: false, glyphSource: head.text };
+    if (spliced) return { text: spliced, dropRest: false, glyphSource: head.text };
+    return { text: nextText, dropRest: false, glyphSource: head.text };
+  }
+
+  const joined = shows.map((show) => show.text).join("");
+  const joinedSp = shows.map((show) => show.text).join(" ");
+  const exactJoined = [joined, joinedSp].some(
+    (candidate) =>
+      textMatchKey(candidate) === textMatchKey(original) ||
+      softMatchKey(candidate) === softMatchKey(original),
+  );
+  if (exactJoined) return { text: nextText, dropRest: true, glyphSource: joined };
+  const spliced =
+    spliceHaystack(joined, original, nextText) ?? spliceHaystack(joinedSp, original, nextText);
+  if (spliced) return { text: spliced, dropRest: true, glyphSource: joined };
+  return { text: nextText, dropRest: true, glyphSource: joined };
 }
 
 function encodeReusingGlyphs(
@@ -646,13 +694,15 @@ export async function inspectTextPatch(
     fontFamily: patch.fontFamily,
     baseFont: fontInfo?.baseFont,
   });
-  const reuse = located ? canReuseEmbeddedFont(fontInfo, original, patch.text, head) : false;
-  const winAnsiMissing = charsMissingFromWinAnsi(patch.text);
+  const write = located ? resolveWrite(located, original, patch.text) : null;
+  const reuse =
+    located && write ? canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head) : false;
+  const winAnsiMissing = charsMissingFromWinAnsi(write?.text ?? patch.text);
   let missingGlyphs = reuse ? [] : winAnsiMissing;
   let unicodeRedraw = false;
   let unicodeLabel: string | undefined;
   if (!reuse && winAnsiMissing.length > 0 && match.kind !== "unsafe") {
-    const fallback = await resolveUnicodeFallback(patch.text, match);
+    const fallback = await resolveUnicodeFallback(write?.text ?? patch.text, match);
     if (fallback.ok) {
       missingGlyphs = [];
       unicodeRedraw = true;
@@ -743,39 +793,44 @@ export async function applyTextPatchesWithReport(
         continue;
       }
 
-      const reuse = canReuseEmbeddedFont(fontInfo, original, nextText, head);
-      const winAnsiMissing = charsMissingFromWinAnsi(nextText);
+      const write = resolveWrite(located, original, nextText);
+      const reuse = canReuseEmbeddedFont(fontInfo, write.glyphSource, write.text, head);
+      const winAnsiMissing = charsMissingFromWinAnsi(write.text);
       const systemBytes =
         patch.fontChoice?.source === "system" ? patch.fontChoice.embedBytes : undefined;
       const preferSystem = !!systemBytes && patch.fontChoice?.source === "system";
       const preferBundled = patch.fontChoice?.source === "bundled";
+      const writeWidth = Math.max(
+        patch.width,
+        write.dropRest
+          ? patch.width
+          : write.glyphSource.length * (head.fontSize || patch.fontSize) * 0.5,
+      );
+      const showsToDrop = write.dropRest ? located.shows.slice(1) : [];
 
       if (reuse && !preferSystem && !preferBundled) {
-        const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width);
-        dropTrailingShows(located.stream, located.shows.slice(1));
+        const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth);
+        dropTrailingShows(located.stream, showsToDrop);
+        const glyphBytes = write.dropRest ? concatShowBytes(located.shows) : head.bytes;
         const reusedBytes =
           looksLikeUtf16Be(head.bytes) || fontInfo?.cid
-            ? encodeReusingGlyphs(
-                located.shows.map((s) => s.text).join(""),
-                concatShowBytes(located.shows),
-                nextText,
-              )
+            ? encodeReusingGlyphs(write.glyphSource, glyphBytes, write.text)
             : null;
         if (reusedBytes) {
           located.stream.tokens = replaceShowBytes(
             located.stream.tokens,
             head,
             reusedBytes,
-            nextText,
+            write.text,
           );
         } else {
-          located.stream.tokens = replaceShowText(located.stream.tokens, head, nextText);
+          located.stream.tokens = replaceShowText(located.stream.tokens, head, write.text);
         }
         if (Math.abs(size - (head.fontSize || patch.fontSize)) > 0.05) {
           const shows = collectTextShows(located.stream.tokens);
           const again = shows.find(
             (s) =>
-              normalizePdfText(s.text) === normalizePdfText(nextText) &&
+              normalizePdfText(s.text) === normalizePdfText(write.text) &&
               Math.hypot(s.x - head.x, s.y - head.y) < 1.5,
           );
           if (again) updateTfSize(located.stream.tokens, again, size);
@@ -798,13 +853,21 @@ export async function applyTextPatchesWithReport(
         try {
           await registerPdfFontkit(doc);
           const sysFont = await doc.embedFont(systemBytes, { subset: true });
-          const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, sysFont);
+          const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth, sysFont);
           const fontKey = ensurePageFont(page, sysFont);
-          for (const show of [...located.shows].reverse()) {
+          const removed = write.dropRest ? located.shows : [head];
+          for (const show of [...removed].reverse()) {
             located.stream.tokens = removeShow(located.stream.tokens, show);
           }
-          const encoded = encodePdfHex(sysFont.encodeText(nextText).asBytes(), nextText);
-          appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size, encoded);
+          const encoded = encodePdfHex(sysFont.encodeText(write.text).asBytes(), write.text);
+          appendRedraw(
+            located.stream,
+            { ...patch, text: write.text },
+            head,
+            fontKey,
+            size,
+            encoded,
+          );
           located.stream.dirty = true;
           reports.push({
             page: patch.page,
@@ -825,7 +888,7 @@ export async function applyTextPatchesWithReport(
       }
 
       if (winAnsiMissing.length > 0 || preferBundled) {
-        const fallback = await resolveUnicodeFallback(nextText, match);
+        const fallback = await resolveUnicodeFallback(write.text, match);
         if (!fallback.ok) {
           reports.push(
             blockedReport(patch, match, describeFontMatch(match, fallback.missing), false),
@@ -833,13 +896,14 @@ export async function applyTextPatchesWithReport(
           continue;
         }
         const uniFont = await embedUnicodeFallbackFont(doc, fallback.face);
-        const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, uniFont);
+        const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth, uniFont);
         const fontKey = ensurePageFont(page, uniFont);
-        for (const show of [...located.shows].reverse()) {
+        const removed = write.dropRest ? located.shows : [head];
+        for (const show of [...removed].reverse()) {
           located.stream.tokens = removeShow(located.stream.tokens, show);
         }
-        const encoded = encodePdfHex(uniFont.encodeText(nextText).asBytes(), nextText);
-        appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size, encoded);
+        const encoded = encodePdfHex(uniFont.encodeText(write.text).asBytes(), write.text);
+        appendRedraw(located.stream, { ...patch, text: write.text }, head, fontKey, size, encoded);
         located.stream.dirty = true;
         reports.push({
           page: patch.page,
@@ -856,12 +920,13 @@ export async function applyTextPatchesWithReport(
       }
 
       const stdFont = await embed(match.standard);
-      const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, stdFont);
+      const size = shrinkSize(write.text, head.fontSize || patch.fontSize, writeWidth, stdFont);
       const fontKey = ensurePageFont(page, stdFont);
-      for (const show of [...located.shows].reverse()) {
+      const removedStd = write.dropRest ? located.shows : [head];
+      for (const show of [...removedStd].reverse()) {
         located.stream.tokens = removeShow(located.stream.tokens, show);
       }
-      appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size);
+      appendRedraw(located.stream, { ...patch, text: write.text }, head, fontKey, size);
       located.stream.dirty = true;
       reports.push({
         page: patch.page,

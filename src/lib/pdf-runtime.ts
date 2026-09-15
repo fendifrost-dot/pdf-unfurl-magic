@@ -226,32 +226,38 @@ export async function extractLines(
   try {
     const shows = await listPageTextShows(sourceBytes, pageNumber);
     if (shows.length === 0) return [];
-    return shows.map((show, index) => {
+    const showItems: RawTextItem[] = shows.map((show) => {
       const fontSize = show.fontSize || 10;
-      const estimatedWidth = Math.max(fontSize * 0.6, show.text.length * fontSize * 0.52);
+      return {
+        str: show.text,
+        x: show.x,
+        y: show.y,
+        w: Math.max(fontSize * 0.6, show.text.length * fontSize * 0.52),
+        h: fontSize,
+        fontName: show.fontName || "",
+        fontFamily: "",
+      };
+    });
+    return groupTextItems(showItems, pageNumber).map((line, index) => {
       const mapped = raw.filter((item) => {
-        if (Math.abs(item.y - show.y) > Math.max(3, fontSize * 0.4)) return false;
+        if (Math.abs(item.y - line.y) > Math.max(3, line.fontSize * 0.4)) return false;
         const itemRight = item.x + item.w;
-        const showRight = show.x + estimatedWidth;
-        const overlap = Math.min(itemRight, showRight) - Math.max(item.x, show.x);
-        return overlap > Math.min(item.w, estimatedWidth) * 0.35;
+        const lineRight = line.x + line.width;
+        const overlap = Math.min(itemRight, lineRight) - Math.max(item.x, line.x);
+        return overlap > Math.min(item.w, line.width) * 0.35;
       });
-      const x = mapped.length ? Math.min(...mapped.map((g) => g.x), show.x) : show.x;
+      const x = mapped.length ? Math.min(...mapped.map((g) => g.x), line.x) : line.x;
       const right = mapped.length
-        ? Math.max(...mapped.map((g) => g.x + g.w), show.x + estimatedWidth * 0.5)
-        : show.x + estimatedWidth;
+        ? Math.max(...mapped.map((g) => g.x + g.w), line.x + line.width)
+        : line.x + line.width;
       const pdfjsHint = mapped[0];
       return {
-        id: `p${pageNumber}-s${index}-${Math.round(show.x)}-${Math.round(show.y)}`,
-        page: pageNumber,
-        text: show.text,
+        ...line,
+        id: `p${pageNumber}-s${index}-${Math.round(x)}-${Math.round(line.y)}`,
         x,
-        y: show.y,
-        width: Math.max(right - x, fontSize * 0.6),
-        height: fontSize * 1.18,
-        fontSize,
-        fontName: show.fontName || pdfjsHint?.fontName || "",
-        fontFamily: pdfjsHint?.fontFamily || "",
+        width: Math.max(right - x, line.fontSize * 0.6),
+        fontName: line.fontName || pdfjsHint?.fontName || "",
+        fontFamily: pdfjsHint?.fontFamily || line.fontFamily,
         source: "content-stream" as const,
         hasTextOperator: true,
       };

@@ -29,4 +29,22 @@ describe("extractLines vs content stream", () => {
     expect(texts).toContain("1,987.00");
     expect(texts.some((t) => t === "1987.00")).toBe(false);
   });
+
+  it("keeps commas on the comma-amounts fixture and maps a statement fragment", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const buf = await readFile(join(process.cwd(), "fixtures/comma-amounts.pdf"));
+    const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    const shown = await listPageShownText(bytes, 1);
+    expect(shown).toContain("2,500.00");
+    expect(shown.some((t) => t.includes("POS Debit- Debit Card 6205"))).toBe(true);
+
+    const proxy = await getDocument({ data: new Uint8Array(bytes.slice(0)) }).promise;
+    const lines = await extractLines(proxy, 1, bytes);
+    const texts = lines.map((l) => l.text);
+    expect(texts).toContain("2,500.00");
+    expect(texts).toContain("1,987.00");
+    expect(texts.some((t) => t.includes("POS Debit"))).toBe(true);
+    expect(texts.some((t) => t === "2500.00" || t === "2 500.00")).toBe(false);
+  });
 });
