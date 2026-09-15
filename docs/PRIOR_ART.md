@@ -18,7 +18,7 @@ Ordered by impact on headaches we still have, not by GitHub stars.
 
 **Do not do in the next two weeks:** OpenCV.js / jscanify as a dependency (~30 MB unpacked), scribe.js (AGPL), MuPDF.js (AGPL), Stirling as a vendored app, OCRmyPDF inside the browser, or any DocuSign-clone (OpenSign / Documenso / DocuSeal — all AGPL).
 
-**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run. #5 highlight/note save uses pdf.js `saveDocument()` (`src/lib/pdf-annotate-js.ts`); visual redact remains a labeled burn.
+**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run. #5 highlight/note save uses pdf.js `saveDocument()` (`src/lib/pdf-annotate-js.ts`); visual redact remains a labeled burn. **AcroForm fill + flatten** uses pdf-lib `getForm()` / `flatten()` (`src/lib/pdf-acroform.ts`) — no OpenSign / Documenso / AGPL. XFA and field JavaScript are explicitly unsupported.
 
 ---
 
@@ -49,6 +49,7 @@ False leads from the brief: **Hopscotch** is LinkedIn’s old product-tour JS, n
 | E-sign + SHA-256 audit page | `src/lib/esign.ts`, `src/components/signature-capture.tsx` | pdf-lib overlay |
 | Highlight / note / underline / rectangle | `src/lib/pdf-annotate-js.ts`, `src/lib/pdf-marks.ts` | Real PDF annots via pdf.js `saveDocument()` (Highlight / FreeText); native Underline / Square; **visual** redact still a burned rect (text still extractable) |
 | Image studio (detect / decode / overlay replace) | `src/lib/pdf-images.ts`, `src/lib/pdf-tools.ts` `applyWorkshopPatches` | PDF.js ops + pdf-lib draw |
+| AcroForm fill + flatten | `src/lib/pdf-acroform.ts`, Edit Form mode | pdf-lib `PDFForm` (MIT) |
 | Desktop shell | `desktop/main.cjs` | Electron + vite preview on 127.0.0.1 |
 | Render / parse | `package.json` | `pdf-lib` MIT, `pdfjs-dist` 4.10.38 Apache-2.0 |
 

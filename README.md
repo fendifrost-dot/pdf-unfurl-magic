@@ -1,9 +1,9 @@
 # PDF Relief
 
 A PDF workshop that runs on your own machine — split, extract, merge, click-to-edit
-text, scan pages into a multi-page PDF, and **E-Sign** a PDF. There is no account, no
-database, and nothing is uploaded: files stay on the computer. Ships in two shapes from
-this one repo:
+text, fill and flatten AcroForm fields, scan pages into a multi-page PDF, and **E-Sign**
+a PDF. There is no account, no database, and nothing is uploaded: files stay on the
+computer. Ships in two shapes from this one repo:
 
 - **Browser** — the TanStack Start + Vite web app, including a phone-sized
   shell (bottom nav, large tap targets, camera scan, Save / Share).
@@ -46,6 +46,14 @@ Open-source reuse map (what to depend vs skip, including GPL/AGPL flags): [`docs
 
 The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
 server's port.
+
+## Fill and flatten forms
+
+Open `/edit` (or **Form** in the header). Drop an AcroForm PDF or **Load sample form**.
+The Form tab lists text, checkbox, radio, and dropdown widgets. Export fills the
+values, then flattens — appearances are merged into the page and widgets are removed.
+Files stay in the browser. **Not supported:** XFA / LiveCycle, field JavaScript
+(calculate / validate / format), rich-text values, or digital-signature fields.
 
 ## Scan pages
 

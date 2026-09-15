@@ -12,9 +12,15 @@ export type { AnnotationBurn, AnnotationKind } from "./pdf-images";
 export type PageMark = AnnotationBurn;
 export { partitionMarks } from "./pdf-annotate-js";
 
-export function exportFileName(base: string, hasEdits: boolean, marks: AnnotationBurn[]): string {
+export function exportFileName(
+  base: string,
+  hasEdits: boolean,
+  marks: AnnotationBurn[],
+  formFlattened = false,
+): string {
   if (marks.length) return `${base}-marked.pdf`;
-  if (hasEdits) return `${base}-edited.pdf`;
+  if (formFlattened && !hasEdits) return `${base}-filled.pdf`;
+  if (hasEdits || formFlattened) return `${base}-edited.pdf`;
   return `${base}-copy.pdf`;
 }
 

@@ -20,10 +20,12 @@ import {
   Type,
   Underline,
   Undo2,
+  ListChecks,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { ImageStudioPanel } from "@/components/image-studio-panel";
+import { AcroFormPanel } from "@/components/acroform-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,6 +94,15 @@ import {
   type ImageEdit,
   type PdfImageRegion,
 } from "@/lib/pdf-images";
+import {
+  buildSampleAcroFormPdf,
+  emptyAcroFormReport,
+  formValuesEqual,
+  inspectAcroForm,
+  valuesFromReport,
+  type AcroFormReport,
+  type AcroFormValue,
+} from "@/lib/pdf-acroform";
 
 export const Route = createFileRoute("/edit")({
   head: () => ({
@@ -124,7 +135,7 @@ type Doc = {
 };
 
 type Edit = { line: TextLine; text: string; fontChoiceId?: string };
-type Mode = "text" | "image" | "mark";
+type Mode = "text" | "image" | "mark" | "form";
 type MarkTool = AnnotationBurn["kind"];
 
 const CANVAS_WIDTH = 720;
@@ -224,6 +235,11 @@ function Editor() {
   const [scanByPage, setScanByPage] = useState<Record<number, ScanPageSession>>({});
   const [scanBusy, setScanBusy] = useState<string | null>(null);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
+  const [formReport, setFormReport] = useState<AcroFormReport>(emptyAcroFormReport);
+  const [formValues, setFormValues] = useState<Record<string, AcroFormValue>>({});
+  const [formOriginal, setFormOriginal] = useState<Record<string, AcroFormValue>>({});
+  const [formFlatten, setFormFlatten] = useState(true);
+  const [selectedFieldName, setSelectedFieldName] = useState<string | null>(null);
   const [fontCatalog, setFontCatalog] = useState<CatalogFont[]>([]);
   const [fontChoiceId, setFontChoiceId] = useState("");
   const holderRef = useRef<HTMLDivElement>(null);
@@ -246,7 +262,13 @@ function Editor() {
       session.originalJpeg &&
       (session.ocrLines.length > 0 || (session.replaceWithCleaned && session.enhancedJpeg)),
   ).length;
-  const pendingCount = editedIds.length + imageEditIds.length + marks.length + scanExportReady;
+  const formDirtyCount = formReport.fields.filter(
+    (field) => !formValuesEqual(formValues[field.name], formOriginal[field.name]),
+  ).length;
+  const formPending =
+    formReport.fillableCount > 0 && formFlatten ? Math.max(1, formDirtyCount) : formDirtyCount;
+  const pendingCount =
+    editedIds.length + imageEditIds.length + marks.length + scanExportReady + formPending;
   const scanSession = scanByPage[page] ?? emptyScanSession();
   const scanMode = shouldAutoExpandEnhance({
     looksScanned: !!scanReport?.looksScanned,
@@ -298,6 +320,10 @@ function Editor() {
         Object.values(prev).forEach(releaseScanSession);
         return {};
       });
+      setFormReport(emptyAcroFormReport());
+      setFormValues({});
+      setFormOriginal({});
+      setSelectedFieldName(null);
       setPage(1);
     } catch {
       setDoc(null);
@@ -314,6 +340,7 @@ function Editor() {
     const sync = () => {
       if (window.location.hash === "#images") setMode("image");
       if (window.location.hash === "#marks") setMode("mark");
+      if (window.location.hash === "#form") setMode("form");
       if (window.location.hash === "#enhance") {
         setMode("text");
         setEnhanceOpen(true);
@@ -323,6 +350,25 @@ function Editor() {
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
+
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    void inspectAcroForm(doc.bytes).then((report) => {
+      if (cancelled) return;
+      setFormReport(report);
+      const values = valuesFromReport(report);
+      setFormValues(values);
+      setFormOriginal(values);
+      const hash = typeof window === "undefined" ? "" : window.location.hash;
+      if (report.fillableCount > 0 && (hash === "#form" || hash === "")) {
+        setMode((current) => (hash === "#form" || current === "text" ? "form" : current));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc]);
 
   const enhancePageKey = `${doc?.name ?? ""}:${page}`;
 
@@ -583,6 +629,13 @@ function Editor() {
     const bytes = await buildSamplePdf();
     await loadBytes("northgate-quote-sample.pdf", bytes.slice(0).buffer as ArrayBuffer);
     setMode("image");
+  };
+
+  const openSampleForm = async () => {
+    setStatus("Building the sample AcroForm");
+    const bytes = await buildSampleAcroFormPdf();
+    await loadBytes("acroform-simple.pdf", bytes.slice(0).buffer as ArrayBuffer);
+    setMode("form");
   };
 
   const select = (line: TextLine) => {
@@ -901,12 +954,17 @@ function Editor() {
           })),
         });
       }
+      const formFill =
+        formReport.hasAcroForm && formReport.fillableCount > 0
+          ? { values: formValues, flatten: formFlatten }
+          : null;
       const bytes = await applyWorkshopPatches(
         doc.bytes,
         patches,
         imagePatches,
         marks,
         scanPatches,
+        formFill,
       );
       downloadBytes(
         bytes,
@@ -914,6 +972,7 @@ function Editor() {
           doc.base,
           patches.length + imagePatches.length + scanPatches.length > 0,
           marks,
+          !!formFill,
         ),
       );
     } catch (e) {
@@ -1016,8 +1075,9 @@ function Editor() {
             <p className="mt-4 max-w-3xl text-base leading-relaxed text-muted-foreground">
               Original pages stay as PDF objects — fonts, rules, and images you do not touch are not
               rasterized. Click a run, rewrite it in a font already in the file, and export. No
-              white-out layer. Image studio is a document workshop, not Photoshop: replace, crop,
-              rotate, exposure, contrast, compress. Marks burn in only after you confirm them.
+              white-out layer. Form mode fills AcroForm fields and flattens them on export. Image
+              studio is a document workshop, not Photoshop. Marks burn in only after you confirm
+              them.
             </p>
           </div>
           {doc && (
@@ -1075,11 +1135,15 @@ function Editor() {
                   <Button variant="outline" onClick={openSample}>
                     <FileText /> Load workshop notes
                   </Button>
+                  <Button variant="outline" onClick={() => void openSampleForm()}>
+                    <ListChecks /> Load sample form
+                  </Button>
                 </PdfDropZone>
                 <div className="bench-panel mt-5 p-4 text-sm text-muted-foreground">
-                  No document yet. Use a contract, handout, quote, or the workshop notes sample
-                  (photos + text). This editor is for documents you own — it will not help fake bank
-                  statements or other official records.
+                  No document yet. Use a contract, handout, quote, a fillable AcroForm, or the
+                  workshop notes sample. Form export fills fields then flattens them. This editor is
+                  for documents you own — it will not help fake bank statements or other official
+                  records.
                 </div>
               </>
             )}
@@ -1132,6 +1196,11 @@ function Editor() {
                     ["text", Type, "Text"],
                     ["image", ImageIcon, "Image studio"],
                     ["mark", Highlighter, "Marks"],
+                    [
+                      "form",
+                      ListChecks,
+                      formReport.fillableCount ? `Form (${formReport.fillableCount})` : "Form",
+                    ],
                   ] as const
                 ).map(([value, Icon, label]) => (
                   <Button
@@ -1141,9 +1210,11 @@ function Editor() {
                       mode === value && !(value === "text" && enhanceOpen) ? "default" : "ghost"
                     }
                     className="flex-1"
+                    data-testid={value === "form" ? "edit-mode-form" : undefined}
                     onClick={() => {
                       setMode(value);
                       if (value === "text" && !scanMode) setEnhanceOpen(false);
+                      if (value === "form") setEnhanceOpen(false);
                     }}
                   >
                     <Icon className="size-3.5" /> {label}
@@ -1204,6 +1275,36 @@ function Editor() {
                         />
                       )}
                       {mode === "text" && textOverlay}
+                      {mode === "form" &&
+                        formReport.fields.flatMap((field) =>
+                          field.widgets
+                            .filter((widget) => widget.page === page)
+                            .map((widget, index) => (
+                              <button
+                                key={`${field.name}-${index}`}
+                                type="button"
+                                title={field.name}
+                                data-testid={`acro-widget-${field.name}`}
+                                onClick={() => setSelectedFieldName(field.name)}
+                                style={boxStyle(
+                                  widget.x,
+                                  widget.y,
+                                  widget.width,
+                                  widget.height,
+                                  scale,
+                                  viewSize,
+                                )}
+                                className={[
+                                  "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors",
+                                  selectedFieldName === field.name
+                                    ? "border-primary bg-primary/25"
+                                    : "border-primary/50 bg-primary/10 hover:border-primary hover:bg-primary/20",
+                                ].join(" ")}
+                              >
+                                <span className="sr-only">Form field: {field.name}</span>
+                              </button>
+                            )),
+                        )}
                       {mode === "image" && imageOverlay}
                       {mode === "image" &&
                         Object.values(imageEdits)
@@ -1272,11 +1373,28 @@ function Editor() {
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
                   "Drag a highlight, underline, note, or cover box, then keep it. Highlights and notes save as real PDF annotations. A cover box draws an opaque box over the area in the exported copy — the text or image underneath is still in the file and can be recovered."}
+                {mode === "form" &&
+                  (formReport.fillableCount
+                    ? `${formReport.fillableCount} fillable AcroForm field${formReport.fillableCount === 1 ? "" : "s"}. Click a box or use the list. Export fills, then flattens to a static PDF.`
+                    : "No AcroForm widgets on this file. XFA / LiveCycle packets are not supported.")}
               </p>
             </div>
 
             <aside className="bench-panel flex flex-col p-4 sm:p-5">
-              {mode === "image" ? (
+              {mode === "form" ? (
+                <AcroFormPanel
+                  report={formReport}
+                  values={formValues}
+                  selectedName={selectedFieldName}
+                  flatten={formFlatten}
+                  onFlattenChange={setFormFlatten}
+                  onSelect={(name, fieldPage) => {
+                    setSelectedFieldName(name);
+                    if (fieldPage && fieldPage !== page) setPage(fieldPage);
+                  }}
+                  onChange={(name, value) => setFormValues((prev) => ({ ...prev, [name]: value }))}
+                />
+              ) : mode === "image" ? (
                 <ImageStudioPanel
                   region={selectedImage ?? null}
                   imageCount={images.length}
@@ -1608,6 +1726,29 @@ function Editor() {
                         <span className="text-success">{mark.kind}</span>
                       </li>
                     ))}
+                    {formReport.fields
+                      .filter(
+                        (field) =>
+                          !formValuesEqual(formValues[field.name], formOriginal[field.name]),
+                      )
+                      .map((field) => (
+                        <li key={field.name} className="text-xs">
+                          <span className="text-gauge text-muted-foreground">
+                            form {field.name}
+                          </span>{" "}
+                          <span className="text-success">
+                            {Array.isArray(formValues[field.name])
+                              ? (formValues[field.name] as string[]).join(", ")
+                              : String(formValues[field.name] ?? "")}
+                          </span>
+                        </li>
+                      ))}
+                    {formFlatten && formReport.fillableCount > 0 && formDirtyCount === 0 && (
+                      <li className="text-xs">
+                        <span className="text-gauge text-muted-foreground">form</span>{" "}
+                        <span className="text-success">flatten on export</span>
+                      </li>
+                    )}
                   </ul>
                 </>
               )}
