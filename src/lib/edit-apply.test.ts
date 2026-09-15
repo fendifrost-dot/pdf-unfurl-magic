@@ -294,6 +294,14 @@ describe("Apply / Enhance exit contracts", () => {
         looksScanned: true,
       }),
     ).toBe(true);
+    expect(
+      preferOcrOverlay({
+        enhanceOpen: true,
+        ocrLineCount: 40,
+        looksScanned: false,
+        nativeLineCount: 292,
+      }),
+    ).toBe(false);
   });
 
   it("does not flatten a page as a scan when native edits exist", () => {
@@ -313,6 +321,27 @@ describe("Apply / Enhance exit contracts", () => {
         replaceWithCleaned: false,
         hasNativeEdits: false,
         ocrLineCount: 125,
+        looksScanned: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldFlattenPageAsScan({
+        hasOriginalJpeg: true,
+        hasOcrEdits: false,
+        replaceWithCleaned: false,
+        hasNativeEdits: false,
+        ocrLineCount: 104,
+        looksScanned: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFlattenPageAsScan({
+        hasOriginalJpeg: true,
+        hasOcrEdits: false,
+        replaceWithCleaned: false,
+        hasNativeEdits: false,
+        ocrLineCount: 40,
+        looksScanned: true,
       }),
     ).toBe(true);
   });

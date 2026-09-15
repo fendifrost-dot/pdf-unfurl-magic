@@ -682,22 +682,22 @@ function Editor() {
           setViewSize({ width: viewport.width, height: viewport.height });
         }
         const ocrLines = scanByPage[page]?.ocrLines ?? [];
-        setNativeLines(pageLines);
-        setLines(
-          linesForTextEdit({
-            enhanceOpen: enhanceOpenRef.current,
-            ocrLines,
-            nativeLines: pageLines,
-            looksScanned: false,
-          }),
-        );
-        setImages(pageImages);
         const report = await inspectPageScan(
           doc.bytes,
           page,
           pageLines.map((line) => line.text),
         );
         if (cancelled) return;
+        setNativeLines(pageLines);
+        setLines(
+          linesForTextEdit({
+            enhanceOpen: enhanceOpenRef.current,
+            ocrLines,
+            nativeLines: pageLines,
+            looksScanned: report.looksScanned,
+          }),
+        );
+        setImages(pageImages);
         setScanReport(report);
         if (report.looksScanned) {
           setScanByPage((prev) => (prev[page] ? prev : { ...prev, [page]: emptyScanSession() }));
@@ -1566,6 +1566,15 @@ function Editor() {
     try {
       const flattenedPages = new Set<number>();
       for (const [pageKey, session] of Object.entries(scanByPage)) {
+        const pageNo = Number(pageKey);
+        const report =
+          pageNo === page && scanReport
+            ? scanReport
+            : await inspectPageScan(
+                doc.bytes,
+                pageNo,
+                session.ocrLines.map((line) => line.text),
+              );
         if (
           shouldFlattenPageAsScan({
             hasOriginalJpeg: !!session.originalJpeg,
@@ -1575,9 +1584,10 @@ function Editor() {
               (edit) => edit.line.page === Number(pageKey) && edit.line.source !== "ocr",
             ),
             ocrLineCount: session.ocrLines.length,
+            looksScanned: report.looksScanned,
           })
         ) {
-          flattenedPages.add(Number(pageKey));
+          flattenedPages.add(pageNo);
         }
       }
       const patches: TextPatch[] = [];

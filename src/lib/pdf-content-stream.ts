@@ -50,6 +50,13 @@ export type TextShow = {
   textMatrix: AffineMatrix;
   /** Tz horizontal scaling, 1 = 100%. */
   horizScale: number;
+  /** PDF text rendering mode (`Tr`). Default fill is 0. */
+  textRenderingMode: number;
+  /**
+   * True when a `Tr` operator was issued after the current `BT`. pdf-lib
+   * `drawText` wraps q/BT/ET/Q, so a `3 Tr` pushed *before* BT does not count.
+   */
+  trInTextObject: boolean;
 };
 
 const WS = new Set([0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20]);
@@ -632,10 +639,11 @@ export function shiftShowUserPosition(
 type GState = {
   ctm: Matrix;
   fill: { r: number; g: number; b: number };
+  tr: number;
 };
 
 function cloneState(state: GState): GState {
-  return { ctm: [...state.ctm] as Matrix, fill: { ...state.fill } };
+  return { ctm: [...state.ctm] as Matrix, fill: { ...state.fill }, tr: state.tr };
 }
 
 function num(token: Token | undefined): number {
@@ -740,7 +748,7 @@ function tjTextFromOperands(operands: Token[]): string {
 export function collectTextShows(tokens: Token[]): TextShow[] {
   const shows: TextShow[] = [];
   const stack: GState[] = [];
-  let g: GState = { ctm: [...IDENTITY] as Matrix, fill: { r: 0, g: 0, b: 0 } };
+  let g: GState = { ctm: [...IDENTITY] as Matrix, fill: { r: 0, g: 0, b: 0 }, tr: 0 };
   let textMatrix: Matrix = [...IDENTITY] as Matrix;
   let textLineMatrix: Matrix = [...IDENTITY] as Matrix;
   let fontName = "";
@@ -748,6 +756,7 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
   let leading = 0;
   let horizScale = 1;
   let inText = false;
+  let trInTextObject = false;
 
   const significant = tokens
     .map((token, index) => ({ token, index }))
@@ -810,14 +819,22 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
       }
       continue;
     }
+    if (op === "Tr") {
+      const p = prev(1);
+      g.tr = num(p[0]);
+      if (inText) trInTextObject = true;
+      continue;
+    }
     if (op === "BT") {
       inText = true;
+      trInTextObject = false;
       textMatrix = [...IDENTITY] as Matrix;
       textLineMatrix = [...IDENTITY] as Matrix;
       continue;
     }
     if (op === "ET") {
       inText = false;
+      trInTextObject = false;
       continue;
     }
     if (op === "Tf") {
@@ -891,6 +908,8 @@ export function collectTextShows(tokens: Token[]): TextShow[] {
         ctm: [...g.ctm] as AffineMatrix,
         textMatrix: [...textMatrix] as AffineMatrix,
         horizScale,
+        textRenderingMode: g.tr,
+        trInTextObject,
       });
       continue;
     }
@@ -943,6 +962,19 @@ export function removeShow(tokens: Token[], show: TextShow): Token[] {
 
 export function extractShownStrings(tokens: Token[]): string[] {
   return collectTextShows(tokens).map((s) => s.text);
+}
+
+/**
+ * True when the show fills/strokes glyphs. `3 Tr` only hides text if it was
+ * issued *inside* the current BT — a Tr pushed before pdf-lib's q/BT wrapper
+ * does not count (viewers may reset text state at BT).
+ */
+export function showPaintsVisibleGlyphs(
+  show: Pick<TextShow, "textRenderingMode" | "trInTextObject">,
+): boolean {
+  const hidden = show.textRenderingMode === 3 || show.textRenderingMode === 7;
+  if (hidden && show.trInTextObject) return false;
+  return true;
 }
 
 export function hasWhiteCoverRect(

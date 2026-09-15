@@ -7,6 +7,7 @@ import {
   hasWhiteCoverRect,
   replaceShowText,
   sameVisibleRun,
+  showPaintsVisibleGlyphs,
   shiftShowUserPosition,
   softMatchKey,
   spliceHaystack,
@@ -43,6 +44,17 @@ describe("content stream tokenizer", () => {
     expect(extractShownStrings(tokens)).toEqual(["2,257.00"]);
     expect(extractShownStrings(tokens)).not.toContain("1,987.00");
     expect(hasWhiteCoverRect(tokens, { x: 490, y: 500, width: 50, height: 14 })).toBe(false);
+  });
+
+  it("treats 3 Tr outside BT as still painting glyphs", () => {
+    const outside = collectTextShows(tokenizeContentStream("3 Tr BT /F1 10 Tf (Hello) Tj ET"));
+    expect(outside[0]?.textRenderingMode).toBe(3);
+    expect(outside[0]?.trInTextObject).toBe(false);
+    expect(showPaintsVisibleGlyphs(outside[0]!)).toBe(true);
+
+    const inside = collectTextShows(tokenizeContentStream("BT 3 Tr /F1 10 Tf (Hello) Tj ET"));
+    expect(inside[0]?.trInTextObject).toBe(true);
+    expect(showPaintsVisibleGlyphs(inside[0]!)).toBe(false);
   });
 
   it("skips inline image data so BI...EI is not mistaken for text", () => {
