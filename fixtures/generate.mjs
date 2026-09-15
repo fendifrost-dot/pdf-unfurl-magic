@@ -156,6 +156,41 @@ async function imageAndText() {
   return doc.save();
 }
 
+async function commaAmounts() {
+  const doc = await PDFDocument.create();
+  await stamp(doc, "comma-amounts");
+  const page = doc.addPage(A4);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  page.drawText("PDF Relief fixture: comma amounts", {
+    x: 56,
+    y: 780,
+    size: 18,
+    font: bold,
+    color: ink,
+  });
+  page.drawText("Keep commas, currency, and hyphen-minus through select, edit, export.", {
+    x: 56,
+    y: 754,
+    size: 10,
+    font,
+    color: soft,
+  });
+
+  page.drawText("Card 6205 POS debit", { x: 56, y: 710, size: 11, font, color: ink });
+  page.drawText("2,500.00", { x: 420, y: 710, size: 11, font: bold, color: ink });
+
+  page.drawText("Total due", { x: 320, y: 680, size: 12, font: bold, color: ink });
+  page.drawText("1,987.00", { x: 420, y: 680, size: 12, font: bold, color: ink });
+
+  page.drawText("POS Debit", { x: 56, y: 648, size: 11, font, color: ink });
+  page.drawText("Card 6205", { x: 128, y: 648, size: 11, font, color: ink });
+
+  page.drawText("EUR — €40.00 on 2026-09-14", { x: 56, y: 616, size: 11, font, color: ink });
+  return doc.save();
+}
+
 async function multiPage() {
   const doc = await PDFDocument.create();
   await stamp(doc, "multi-page");
@@ -213,6 +248,14 @@ const BUILDERS = [
     summary: "Embedded PNG plus a caption. Image must remain a PDF image object.",
     build: imageAndText,
     maxBytes: 20_000,
+  },
+  {
+    file: "comma-amounts.pdf",
+    pages: 1,
+    kind: "comma-amounts",
+    summary: "Comma amounts plus a multi-run POS line for text-extract / font-mimic QA.",
+    build: commaAmounts,
+    maxBytes: 12_000,
   },
   {
     file: "multi-page.pdf",
