@@ -6,6 +6,7 @@ import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { installMapPolyfills } from "./map-polyfill";
 import { isDesktopApp } from "./desktop";
 import { saveBytes } from "./file-export";
+import { listPageTextShows } from "./pdf-text-edit";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -107,12 +108,10 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
     let text = "";
     let cursor: number | null = null;
     for (const g of group) {
-      if (
-        cursor !== null &&
-        !text.endsWith(" ") &&
-        shouldInsertJoinSpace(text, g, cursor, fontSize)
-      ) {
-        text += " ";
+      if (cursor !== null && !text.endsWith(" ") && !text.endsWith(",")) {
+        const recovered = recoverThousandsComma(text, g, cursor, fontSize);
+        if (recovered) text += recovered;
+        else if (shouldInsertJoinSpace(text, g, cursor, fontSize)) text += " ";
       }
       text += g.str;
       cursor = g.x + g.w;
@@ -132,6 +131,19 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       hasTextOperator: true,
     };
   });
+}
+
+function recoverThousandsComma(
+  prevText: string,
+  next: RawTextItem,
+  cursor: number,
+  fontSize: number,
+): "," | "" {
+  if (!/\d$/.test(prevText) || !/^\d{3}(?:\D|$)/.test(next.str)) return "";
+  if (prevText.endsWith(",") || next.str.startsWith(",")) return "";
+  const gap = next.x - cursor;
+  if (gap < -1 || gap > fontSize * 0.55) return "";
+  return ",";
 }
 
 function shouldInsertJoinSpace(
@@ -207,20 +219,22 @@ export async function extractLines(
   if (!sourceBytes) return pdfjsLines;
 
   try {
-    const { listPageTextShows } = await import("./pdf-text-edit");
     const shows = await listPageTextShows(sourceBytes, pageNumber);
     if (shows.length === 0) return [];
     return shows.map((show, index) => {
       const fontSize = show.fontSize || 10;
+      const estimatedWidth = Math.max(fontSize * 0.6, show.text.length * fontSize * 0.52);
       const mapped = raw.filter((item) => {
         if (Math.abs(item.y - show.y) > Math.max(3, fontSize * 0.4)) return false;
-        const right = show.x + Math.max(item.w, fontSize * Math.max(1, show.text.length * 0.5));
-        return item.x + item.w >= show.x - 2 && item.x <= right + 2;
+        const itemRight = item.x + item.w;
+        const showRight = show.x + estimatedWidth;
+        const overlap = Math.min(itemRight, showRight) - Math.max(item.x, show.x);
+        return overlap > Math.min(item.w, estimatedWidth) * 0.35;
       });
       const x = mapped.length ? Math.min(...mapped.map((g) => g.x), show.x) : show.x;
       const right = mapped.length
-        ? Math.max(...mapped.map((g) => g.x + g.w), show.x + fontSize)
-        : show.x + Math.max(fontSize * 0.6, show.text.length * fontSize * 0.5);
+        ? Math.max(...mapped.map((g) => g.x + g.w), show.x + estimatedWidth * 0.5)
+        : show.x + estimatedWidth;
       const pdfjsHint = mapped[0];
       return {
         id: `p${pageNumber}-s${index}-${Math.round(show.x)}-${Math.round(show.y)}`,
@@ -233,11 +247,12 @@ export async function extractLines(
         fontSize,
         fontName: show.fontName || pdfjsHint?.fontName || "",
         fontFamily: pdfjsHint?.fontFamily || "",
-        source: "content-stream",
+        source: "content-stream" as const,
         hasTextOperator: true,
       };
     });
-  } catch {
+  } catch (error) {
+    console.error("content-stream text extract failed; using PDF.js runs", error);
     return pdfjsLines;
   }
 }

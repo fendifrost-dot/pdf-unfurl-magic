@@ -49,6 +49,17 @@ describe("groupTextItems", () => {
     );
     expect(lines.map((l) => l.text)).toEqual(["2,500.00"]);
   });
+
+  it("reconstructs a thousands comma when PDF.js dropped the punctuation item", () => {
+    const lines = groupTextItems(
+      [
+        { str: "1", x: 490, y: 400, w: 7, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+        { str: "987.00", x: 499, y: 400, w: 36, h: 11, fontName: "F2", fontFamily: "Helvetica" },
+      ],
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(["1,987.00"]);
+  });
 });
 
 describe("safe text replace", () => {
