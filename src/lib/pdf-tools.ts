@@ -8,6 +8,7 @@ import { encodeDemoPhoto } from "./tiny-png";
 import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
+import { burnMarksOnPages } from "./pdf-marks";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 export type { TextPatch, TextEditReport, TextEditInspection } from "./pdf-text-edit";
 export { applyTextPatches, applyTextPatchesWithReport, inspectTextPatch } from "./pdf-text-edit";
@@ -116,30 +117,9 @@ export async function applyWorkshopPatches(
     });
   }
 
-  for (const mark of marks) {
-    const page = pages[mark.page - 1];
-    if (!page) continue;
-    if (mark.kind === "redact") {
-      page.drawRectangle({
-        x: mark.x,
-        y: mark.y,
-        width: mark.width,
-        height: mark.height,
-        color: rgb(0.06, 0.06, 0.07),
-      });
-    } else {
-      page.drawRectangle({
-        x: mark.x,
-        y: mark.y,
-        width: mark.width,
-        height: mark.height,
-        borderColor: rgb(0.48, 0.27, 0.14),
-        borderWidth: 1.35,
-        color: rgb(1, 1, 1),
-        opacity: 0,
-        borderOpacity: 1,
-      });
-    }
+  if (marks.length) {
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    await burnMarksOnPages(pages, marks, font);
   }
 
   return doc.save();

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { FilePenLine, FileStack, ScanLine, Scissors } from "lucide-react";
+import { FilePenLine, FileStack, Highlighter, ScanLine, Scissors } from "lucide-react";
 
 const TOOLS = [
   {
@@ -7,6 +7,13 @@ const TOOLS = [
     title: "Edit",
     body: "Open a PDF and tap a line.",
     icon: FilePenLine,
+  },
+  {
+    to: "/edit" as const,
+    hash: "marks",
+    title: "Mark",
+    body: "Highlight, note, or redact.",
+    icon: Highlighter,
   },
   {
     to: "/split" as const,
@@ -32,13 +39,14 @@ export function ToolShortcuts() {
   return (
     <section aria-label="PDF tools" className="mx-auto max-w-5xl px-4 pb-10 sm:px-8">
       <p className="eyebrow">On this phone or computer</p>
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
         {TOOLS.map((tool) => {
           const Icon = tool.icon;
           return (
             <Link
-              key={tool.to}
+              key={`${tool.to}-${"hash" in tool ? tool.hash : "root"}`}
               to={tool.to}
+              {...("hash" in tool && tool.hash ? { hash: tool.hash } : {})}
               className="bench-panel flex min-h-[7.5rem] flex-col justify-between p-4 touch-manipulation transition-colors active:bg-accent"
             >
               <Icon className="size-5 text-primary" aria-hidden />

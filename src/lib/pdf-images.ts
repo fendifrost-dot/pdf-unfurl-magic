@@ -251,14 +251,17 @@ export type ImagePatch = {
   mime: "image/jpeg" | "image/png";
 };
 
+export type AnnotationKind = "rect" | "redact" | "highlight" | "underline" | "note";
+
 export type AnnotationBurn = {
   id: string;
   page: number;
-  kind: "rect" | "redact";
+  kind: AnnotationKind;
   x: number;
   y: number;
   width: number;
   height: number;
+  text?: string;
 };
 
 export type ImageEdit = {

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { AlertTriangle, Loader2, Scissors, Layers, FileStack } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { AlertTriangle, Highlighter, Loader2, Scissors, Layers, FileStack } from "lucide-react";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,8 +81,15 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
           <h3 className="mt-1 font-display text-2xl font-semibold">Drop a PDF here</h3>
           <p className="mt-1 max-w-lg text-sm text-muted-foreground">
             Everything runs on a copy held in this tab. Your original file is never modified and
-            never leaves the machine.
+            never leaves the machine. Highlight, notes, and redaction boxes live in the page editor.
           </p>
+          <div className="mt-3">
+            <Button asChild size="sm" variant="outline" className="min-h-11 touch-manipulation">
+              <Link to="/edit" hash="marks">
+                <Highlighter className="size-3.5" /> Mark or redact
+              </Link>
+            </Button>
+          </div>
         </div>
         {loaded && (
           <Badge variant="secondary" className="text-gauge">

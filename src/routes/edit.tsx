@@ -14,7 +14,9 @@ import {
   Loader2,
   Scissors,
   Square,
+  StickyNote,
   Type,
+  Underline,
   Undo2,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
@@ -39,6 +41,7 @@ import {
   inspectTextPatch,
   type TextPatch,
 } from "@/lib/pdf-tools";
+import { exportFileName } from "@/lib/pdf-marks";
 import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
@@ -555,12 +558,30 @@ function Editor() {
   };
 
   const keepMark = () => {
-    if (!draftMark || draftMark.width < 8 || draftMark.height < 8) return;
+    if (!draftMark) return;
+    let next = draftMark;
+    const tiny = next.width < 8 || next.height < 8;
+    if (tiny && next.kind === "note") {
+      const pageWidth = viewSize.width / scale;
+      const pageHeight = viewSize.height / scale;
+      const width = Math.min(140, pageWidth);
+      const height = Math.min(72, pageHeight);
+      next = {
+        ...next,
+        x: Math.min(Math.max(0, next.x), Math.max(0, pageWidth - width)),
+        y: Math.min(Math.max(0, next.y - height), Math.max(0, pageHeight - height)),
+        width,
+        height,
+        text: "",
+      };
+    } else if (tiny) {
+      return;
+    }
     setMarks((prev) => [
       ...prev,
       {
-        ...draftMark,
-        id: `mark-${prev.length + 1}-${Math.round(draftMark.x)}-${Math.round(draftMark.y)}`,
+        ...next,
+        id: `mark-${prev.length + 1}-${Math.round(next.x)}-${Math.round(next.y)}`,
       },
     ]);
     setDraftMark(null);
@@ -607,7 +628,10 @@ function Editor() {
         mime: "image/jpeg" as const,
       }));
       const bytes = await applyWorkshopPatches(doc.bytes, patches, imagePatches, marks);
-      downloadBytes(bytes, `${doc.base}-edited.pdf`);
+      downloadBytes(
+        bytes,
+        exportFileName(doc.base, patches.length + imagePatches.length > 0, marks),
+      );
     } catch (e) {
       setError(
         e instanceof Error
@@ -871,10 +895,22 @@ function Editor() {
                           style={boxStyle(mark.x, mark.y, mark.width, mark.height, scale, viewSize)}
                           className={
                             mark.kind === "redact"
-                              ? "pointer-events-none absolute bg-foreground/80"
-                              : "pointer-events-none absolute border-2 border-primary bg-primary/10"
+                              ? "pointer-events-none absolute bg-black"
+                              : mark.kind === "highlight"
+                                ? "pointer-events-none absolute border border-amber-500/70 bg-amber-300/45"
+                                : mark.kind === "underline"
+                                  ? "pointer-events-none absolute bg-transparent shadow-[inset_0_-3px_0_0_rgb(185,50,35)]"
+                                  : mark.kind === "note"
+                                    ? "pointer-events-none absolute overflow-hidden border border-amber-700/40 bg-amber-200/95 text-[10px] leading-tight text-foreground/80"
+                                    : "pointer-events-none absolute border-2 border-primary bg-primary/10"
                           }
-                        />
+                        >
+                          {mark.kind === "note" ? (
+                            <span className="block truncate px-1 py-0.5">
+                              {mark.text || "Note"}
+                            </span>
+                          ) : null}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -886,7 +922,7 @@ function Editor() {
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
-                  "Drag a rectangle, then keep it to burn a shape or redact on export."}
+                  "Drag a highlight, underline, note, or redaction box, then keep it. Redaction burns a black box into the export copy."}
               </p>
             </div>
 
@@ -913,16 +949,37 @@ function Editor() {
                 <>
                   <p className="eyebrow">Marks</p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Simple shapes only. Confirmed marks burn into the export. They do not become
-                    Photoshop layers.
+                    Confirmed marks write onto the export copy. Redaction is an opaque black box.
+                    The original file is never changed. No comment threads.
                   </p>
                   <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      variant={markTool === "highlight" ? "default" : "secondary"}
+                      onClick={() => setMarkTool("highlight")}
+                    >
+                      <Highlighter className="size-3.5" /> Highlight
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={markTool === "underline" ? "default" : "secondary"}
+                      onClick={() => setMarkTool("underline")}
+                    >
+                      <Underline className="size-3.5" /> Underline
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={markTool === "note" ? "default" : "secondary"}
+                      onClick={() => setMarkTool("note")}
+                    >
+                      <StickyNote className="size-3.5" /> Note
+                    </Button>
                     <Button
                       size="sm"
                       variant={markTool === "redact" ? "default" : "secondary"}
                       onClick={() => setMarkTool("redact")}
                     >
-                      <Highlighter className="size-3.5" /> Redact
+                      <Square className="size-3.5" /> Redact
                     </Button>
                     <Button
                       size="sm"
@@ -936,7 +993,10 @@ function Editor() {
                     <Button
                       size="sm"
                       className="flex-1"
-                      disabled={!draftMark || draftMark.width < 8 || draftMark.height < 8}
+                      disabled={
+                        !draftMark ||
+                        (draftMark.kind !== "note" && (draftMark.width < 8 || draftMark.height < 8))
+                      }
                       onClick={keepMark}
                     >
                       Keep this mark
@@ -953,17 +1013,35 @@ function Editor() {
                   {marks.length > 0 && (
                     <ul className="mt-4 space-y-2 text-xs">
                       {marks.map((mark) => (
-                        <li key={mark.id} className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">
-                            p{mark.page} · {mark.kind}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setMarks((prev) => prev.filter((m) => m.id !== mark.id))}
-                          >
-                            Remove
-                          </Button>
+                        <li key={mark.id} className="space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">
+                              p{mark.page} · {mark.kind}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                setMarks((prev) => prev.filter((m) => m.id !== mark.id))
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                          {mark.kind === "note" && (
+                            <Textarea
+                              value={mark.text ?? ""}
+                              rows={2}
+                              placeholder="Sticky note text"
+                              onChange={(e) =>
+                                setMarks((prev) =>
+                                  prev.map((m) =>
+                                    m.id === mark.id ? { ...m, text: e.target.value } : m,
+                                  ),
+                                )
+                              }
+                            />
+                          )}
                         </li>
                       ))}
                     </ul>

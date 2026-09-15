@@ -3,12 +3,17 @@ import { Menu, Pencil, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
-const LINKS = [
-  { to: "/edit" as const, label: "Edit" },
-  { to: "/split" as const, label: "Split" },
-  { to: "/merge" as const, label: "Merge" },
-  { to: "/scan" as const, label: "Scan" },
-  { to: "/sign" as const, label: "E-Sign" },
+const LINKS: Array<{
+  to: "/edit" | "/split" | "/merge" | "/scan" | "/sign";
+  label: string;
+  hash?: string;
+}> = [
+  { to: "/edit", label: "Edit" },
+  { to: "/edit", hash: "marks", label: "Mark" },
+  { to: "/split", label: "Split" },
+  { to: "/merge", label: "Merge" },
+  { to: "/scan", label: "Scan" },
+  { to: "/sign", label: "E-Sign" },
 ];
 
 export function SiteHeader() {
@@ -27,7 +32,12 @@ export function SiteHeader() {
         </Link>
         <nav className="hidden items-center gap-5 text-sm text-muted-foreground xl:flex">
           {LINKS.map((link) => (
-            <Link key={link.to} to={link.to} className="transition-colors hover:text-foreground">
+            <Link
+              key={`${link.to}-${link.hash ?? "root"}`}
+              to={link.to}
+              {...(link.hash ? { hash: link.hash } : {})}
+              className="transition-colors hover:text-foreground"
+            >
               {link.label}
             </Link>
           ))}
@@ -56,8 +66,9 @@ export function SiteHeader() {
           <div className="mx-auto flex max-w-5xl flex-col gap-1">
             {LINKS.map((link) => (
               <Link
-                key={link.to}
+                key={`${link.to}-${link.hash ?? "root"}`}
                 to={link.to}
+                {...(link.hash ? { hash: link.hash } : {})}
                 onClick={() => setOpen(false)}
                 className="min-h-12 rounded-md px-3 py-3 text-sm touch-manipulation hover:bg-accent"
               >
