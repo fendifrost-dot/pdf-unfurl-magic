@@ -1,5 +1,22 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  setTextRenderingMode,
+  TextRenderingMode,
+  type PDFPage,
+} from "pdf-lib";
 import type { OcrWord } from "./types";
+
+/** Searchable OCR glyphs: neither fill nor stroke (`3 Tr`). Not opacity:0. */
+export function setInvisibleOcrTextMode(page: PDFPage) {
+  page.pushOperators(setTextRenderingMode(TextRenderingMode.Invisible));
+}
+
+/** Restore filled glyphs after an invisible OCR layer (`0 Tr`). */
+export function setFillTextMode(page: PDFPage) {
+  page.pushOperators(setTextRenderingMode(TextRenderingMode.Fill));
+}
 
 export type ScanPdfPage = {
   jpeg: Uint8Array;
@@ -18,8 +35,8 @@ function pagePoints(widthPx: number, heightPx: number): { width: number; height:
 }
 
 /**
- * Image-first PDF. OCR words are drawn invisible on top so search works
- * without replacing the scanned page.
+ * Image-first PDF. OCR words use text rendering mode 3 (invisible) so search
+ * works without painting over the scanned page or relying on opacity:0.
  */
 export async function buildScanPdf(pages: ScanPdfPage[]): Promise<Uint8Array> {
   if (pages.length === 0) throw new Error("Add at least one page before exporting.");
@@ -35,6 +52,7 @@ export async function buildScanPdf(pages: ScanPdfPage[]): Promise<Uint8Array> {
     pdfPage.drawImage(image, { x: 0, y: 0, width: size.width, height: size.height });
 
     if (!page.words?.length) continue;
+    setInvisibleOcrTextMode(pdfPage);
     for (const word of page.words) {
       const boxW = ((word.x1 - word.x0) / page.width) * size.width;
       const boxH = ((word.y1 - word.y0) / page.height) * size.height;
@@ -48,7 +66,6 @@ export async function buildScanPdf(pages: ScanPdfPage[]): Promise<Uint8Array> {
           size: fontSize,
           font,
           color: rgb(0, 0, 0),
-          opacity: 0,
           maxWidth: Math.max(boxW, fontSize),
         });
       } catch {

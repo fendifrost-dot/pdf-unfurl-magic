@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { encodePng } from "./tiny-png";
+import { bytesToLatin1 } from "./pdf-content-stream";
 import { listPageShownText, decodePageContent, applyTextPatches } from "./pdf-text-edit";
 import { groupOcrWords } from "./scan/ocr";
 import {
@@ -187,6 +188,10 @@ describe("scan-aware export", () => {
     expect(shown).not.toContain("1,987.00");
     expect(shown).toContain("SCAN FIXTURE");
     expect(await decodePageContent(out.slice().buffer as ArrayBuffer, 2)).toBe(page2Before);
+
+    const raw = bytesToLatin1(out);
+    expect(raw).toMatch(/\b3\s+Tr\b/);
+    expect(raw).not.toMatch(/\/ca\s+0/);
   });
 
   it("does not send scan OCR edits through the in-place text engine", async () => {

@@ -11,7 +11,7 @@ Ordered by impact on headaches we still have, not by GitHub stars.
 | # | Win | Action | Where it lands | Effort | Why now |
 | --- | --- | --- | --- | --- | --- |
 | 1 | **`@pdf-lib/fontkit` + SIL OFL Liberation/Noto** | **depend** fontkit; **vendor** OFL `.ttf` (subset at embed time) | `src/lib/pdf-font-match.ts`, `src/lib/pdf-text-edit.ts` | **1–2 days** | WinAnsi Standard 14 cannot encode most of the world. Today we block or redraw Helvetica. Embedding a metric-compatible face (Liberation Sans ≈ Arial/Helvetica) is the only permissive, browser-safe way to stop `?` glyphs without Creative Cloud. |
-| 2 | **Invisible OCR layer = text rendering mode 3** (port Tesseract/OCRmyPDF, keep `tesseract.js`) | **port algorithms**; keep existing **depend** | `src/lib/scan/pdf.ts`, `src/lib/scan/ocr.ts` | **4–8 hours** | We already run Tesseract.js and stamp words with `opacity: 0`. Acrobat, Tesseract’s PDF renderer, and OCRmyPDF use `/Tr 3` (neither fill nor stroke). Opacity-0 glyphs fail PDF/A and can reappear when flattened. Highest OCR quality-per-hour change. |
+| 2 | **Invisible OCR layer = text rendering mode 3** (port Tesseract/OCRmyPDF, keep `tesseract.js`) | **port algorithms**; keep existing **depend** | `src/lib/scan/pdf.ts`, `src/lib/pdf-scan-edit.ts` | **landed** | Acrobat, Tesseract’s PDF renderer, and OCRmyPDF use `/Tr 3` (neither fill nor stroke). Opacity-0 glyphs fail PDF/A and can reappear when flattened. Scan export and scan-lane PDFs now push `3 Tr` instead of `/ca 0`. |
 | 3 | **`signature_pad` (MIT)** | **depend** (landed) | `src/components/signature-capture.tsx` | **2–4 hours** | Homegrown pointer drawing is fine for MVP; `signature_pad` is the maintained 12k-star pad (velocity strokes, SVG/PNG, high-DPI). Drop-in for e-sign feel without DocuSign. |
 | 4 | **In-place image XObject replace** (port pdf-lib #175 / pdfcpu `images update`) | **port algorithms** on existing pdf-lib | `src/lib/pdf-images.ts`, `src/lib/pdf-tools.ts` | **1–2 days** | Image Studio currently paints a **white rectangle + new image** on top of the original XObject (same class of corruption as TouchUp whiteout). Reassigning the existing `/ImN` stream keeps text, rules, and file size honest. |
 | 5 | **pdf.js `AnnotationEditorLayer` we already ship** (`pdfjs-dist@4.10.38`) | **depend** (already); **port** save path | `src/lib/pdf-marks.ts`, `src/routes/edit.tsx` | **2–3 days** | Mozilla’s editor writes real `Highlight` / `Ink` / `FreeText` / `Stamp` annotations via `PDFDocumentProxy.saveDocument()`. Our marks are burned pdf-lib rectangles. Using the engine we already load avoids `pdfAnnotate` (stale) and AGPL e-sign suites. |
@@ -45,7 +45,7 @@ False leads from the brief: **Hopscotch** is LinkedIn’s old product-tour JS, n
 | Font family / WinAnsi / “?” block | `src/lib/pdf-font-match.ts` | Standard 14 only |
 | Scan detect + warp + enhance | `src/lib/scan/detect.ts`, `warp.ts`, `enhance.ts`, `geometry.ts` | Canvas, Otsu, homography |
 | OCR worker | `src/lib/scan/ocr.ts` | `tesseract.js` ^6 |
-| Searchable scan PDF | `src/lib/scan/pdf.ts` | JPEG page + `opacity: 0` Helvetica |
+| Searchable scan PDF | `src/lib/scan/pdf.ts` | JPEG page + Helvetica with `/Tr 3` |
 | E-sign + SHA-256 audit page | `src/lib/esign.ts`, `src/components/signature-capture.tsx` | pdf-lib overlay |
 | Highlight / note / **visual** redact | `src/lib/pdf-marks.ts` | Burned rectangles (text still extractable) |
 | Image studio (detect / decode / overlay replace) | `src/lib/pdf-images.ts`, `src/lib/pdf-tools.ts` `applyWorkshopPatches` | PDF.js ops + pdf-lib draw |
@@ -271,7 +271,7 @@ PDF.js already resolves embedded fonts for rendering. We can read **widths / ToU
 | **Integration** | `src/lib/scan/ocr.ts`, `desktop/copy-worker.cjs` (copy wasm + traineddata like the pdf.js worker). |
 | **Effort** | **half day** to self-host models; **hours** for `/Tr 3`. |
 
-Tesseract’s own searchable-PDF recipe (and OCRmyPDF) place glyphs with **text rendering mode 3**. Port that into `buildScanPdf` instead of `opacity: 0`. Use fontkit/Noto if a word is not WinAnsi (same as §2).
+Tesseract’s own searchable-PDF recipe (and OCRmyPDF) place glyphs with **text rendering mode 3**. `buildScanPdf` and scan-aware Edit export now push `3 Tr` instead of `opacity: 0`. Use fontkit/Noto if a word is not WinAnsi (same as §2).
 
 ### OCRmyPDF
 
@@ -476,7 +476,7 @@ Useful as tests of “does the page still text-select after replace?”. **skip*
 ## Suggested 2-week sequence (tickets)
 
 1. **Fonts (days 1–2):** `npm i @pdf-lib/fontkit`; vendor Liberation Sans/Serif/Mono + Noto Sans under `public/fonts/` with OFL `LICENSE`; extend `pdf-font-match.ts` + tests in `src/lib/pdf-font-match.test.ts` / `pdf-text-edit.test.ts` so `Ł` does not become `?`.
-2. **OCR layer (day 2–3):** `/Tr 3` in `scan/pdf.ts`; self-host `eng.traineddata`; skip OCR when PDF.js already reports a text layer (edit/scan of born-digital files).
+2. **OCR layer (day 2–3):** `/Tr 3` in `scan/pdf.ts` and scan-aware Edit export — **landed.** Remaining: self-host `eng.traineddata`; skip OCR when PDF.js already reports a text layer (edit/scan of born-digital files).
 3. **Signatures (day 3):** `signature_pad` in `signature-capture.tsx`. **Landed.**
 4. **Image XObject (days 4–5):** in-place replace in `pdf-tools.ts`; smoke `fixtures/image-and-text.pdf`.
 5. **Annotate (days 6–10):** pdf.js editor save **or** flatten-redact export — pick one; do not do both if fonts slip.

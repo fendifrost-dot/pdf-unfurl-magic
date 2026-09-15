@@ -26,6 +26,7 @@ import { renderPageToImageData, type TextLine } from "./pdf-runtime";
 import { enhanceImage } from "./scan/enhance";
 import { canvasFromImageData } from "./scan/image";
 import { recognizePageLines, groupOcrWords } from "./scan/ocr";
+import { setFillTextMode, setInvisibleOcrTextMode } from "./scan/pdf";
 import type { EnhancePreset, OcrLineBox } from "./scan/types";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
@@ -391,6 +392,7 @@ async function drawScanPage(doc: PDFDocument, page: PDFPage, patch: ScanPageExpo
     const boxH = Math.max(8, line.height);
     try {
       if (changed) {
+        setFillTextMode(page);
         page.drawRectangle({
           x,
           y,
@@ -407,13 +409,13 @@ async function drawScanPage(doc: PDFDocument, page: PDFPage, patch: ScanPageExpo
           maxWidth: boxW,
         });
       } else {
+        setInvisibleOcrTextMode(page);
         page.drawText(text, {
           x,
           y: y + Math.max(1, (boxH - size) * 0.2),
           size,
           font,
           color: rgb(0, 0, 0),
-          opacity: 0,
           maxWidth: boxW,
         });
       }
