@@ -73,7 +73,12 @@ export async function applyTextPatch(bytes, text = "patched by smoke") {
   return doc.save();
 }
 
-export function assertExportSizeSane(label, exportedBytes, sourceBytes, { minRatio = 0.15, maxRatio = 4 } = {}) {
+export function assertExportSizeSane(
+  label,
+  exportedBytes,
+  sourceBytes,
+  { minRatio = 0.15, maxRatio = 4 } = {},
+) {
   const out = exportedBytes.byteLength;
   const src = sourceBytes.byteLength;
   if (out < 200) throw new Error(`${label}: export is empty (${out} bytes)`);

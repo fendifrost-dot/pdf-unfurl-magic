@@ -40,7 +40,10 @@ test("each fixture loads with the advertised page count and stays small", async 
     assert.equal(doc.getPageCount(), item.pages, item.file);
     assert.equal(await getPageCount(bytes), item.pages, `${item.file} getPageCount`);
     assert.ok(bytes.byteLength > 200, `${item.file} too small`);
-    assert.ok(bytes.byteLength <= item.maxBytes, `${item.file} ${bytes.byteLength} > ${item.maxBytes}`);
+    assert.ok(
+      bytes.byteLength <= item.maxBytes,
+      `${item.file} ${bytes.byteLength} > ${item.maxBytes}`,
+    );
     assert.match(Buffer.from(bytes).toString("latin1"), /^%PDF-/);
   }
 });
@@ -69,12 +72,21 @@ test("multi-page split / extract / merge: page counts and export sizes are sane"
 });
 
 test("a one-line text-patch export stays in a sane size band", async () => {
-  for (const name of ["simple-text.pdf", "multi-font.pdf", "lines-and-text.pdf", "image-and-text.pdf"]) {
+  for (const name of [
+    "simple-text.pdf",
+    "multi-font.pdf",
+    "lines-and-text.pdf",
+    "image-and-text.pdf",
+  ]) {
     const { bytes } = await loadFixture(name);
     const exported = await applyTextPatch(bytes, "SMOKE_PATCH");
     assert.equal(await getPageCount(exported), 1, name);
     assert.match(Buffer.from(exported.subarray(0, 5)).toString("latin1"), /%PDF-/);
-    assert.notEqual(exported.byteLength, new Uint8Array(bytes).byteLength, `${name} patch should rewrite bytes`);
+    assert.notEqual(
+      exported.byteLength,
+      new Uint8Array(bytes).byteLength,
+      `${name} patch should rewrite bytes`,
+    );
     assertExportSizeSane(`${name} patched`, exported, bytes, { minRatio: 0.5, maxRatio: 3 });
   }
 });

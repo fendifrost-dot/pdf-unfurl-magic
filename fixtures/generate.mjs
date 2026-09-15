@@ -56,10 +56,34 @@ async function multiFont() {
   const times = await doc.embedFont(StandardFonts.TimesRoman);
   const courier = await doc.embedFont(StandardFonts.Courier);
 
-  page.drawText("PDF Relief fixture: multi-font", { x: 56, y: 780, size: 18, font: bold, color: ink });
-  page.drawText("Helvetica body — default workshop copy.", { x: 56, y: 740, size: 12, font: helvetica, color: ink });
-  page.drawText("Times-Roman — a serif amount line: 1,987.00", { x: 56, y: 716, size: 12, font: times, color: ink });
-  page.drawText("Courier SKU  NG-BENCH-40MM", { x: 56, y: 692, size: 12, font: courier, color: ink });
+  page.drawText("PDF Relief fixture: multi-font", {
+    x: 56,
+    y: 780,
+    size: 18,
+    font: bold,
+    color: ink,
+  });
+  page.drawText("Helvetica body — default workshop copy.", {
+    x: 56,
+    y: 740,
+    size: 12,
+    font: helvetica,
+    color: ink,
+  });
+  page.drawText("Times-Roman — a serif amount line: 1,987.00", {
+    x: 56,
+    y: 716,
+    size: 12,
+    font: times,
+    color: ink,
+  });
+  page.drawText("Courier SKU  NG-BENCH-40MM", {
+    x: 56,
+    y: 692,
+    size: 12,
+    font: courier,
+    color: ink,
+  });
   page.drawText("Helvetica-Bold label", { x: 56, y: 668, size: 12, font: bold, color: ink });
   return doc.save();
 }
@@ -71,7 +95,13 @@ async function linesAndText() {
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  page.drawText("PDF Relief fixture: lines + text", { x: 56, y: 780, size: 18, font: bold, color: ink });
+  page.drawText("PDF Relief fixture: lines + text", {
+    x: 56,
+    y: 780,
+    size: 18,
+    font: bold,
+    color: ink,
+  });
   page.drawText("Form-style rules. Neighbouring lines must survive a one-box edit.", {
     x: 56,
     y: 754,
@@ -107,7 +137,13 @@ async function imageAndText() {
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const image = await doc.embedPng(BLUE_PIXEL_PNG);
 
-  page.drawText("PDF Relief fixture: image + text", { x: 56, y: 780, size: 18, font: bold, color: ink });
+  page.drawText("PDF Relief fixture: image + text", {
+    x: 56,
+    y: 780,
+    size: 18,
+    font: bold,
+    color: ink,
+  });
   page.drawImage(image, { x: 56, y: 640, width: 160, height: 96 });
   page.drawText("Caption: blue placeholder PNG. The photo must not flatten when text is edited.", {
     x: 56,
