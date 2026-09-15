@@ -37,6 +37,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 ## Editor (`/edit`)
 
 - [ ] Drop `simple-text.pdf`. Badge **1 / 1**. Toolbar shows **Text / Image studio / Marks / Enhance**. Side panel has collapsed **Enhance & OCR this page** (optional copy; OCR does not start by itself). Click `REPLACE_ME`, change the words, **Apply to page** (the on-page box shows the new text), **Export**. Re-open the export: new text is there; file is still a few KB. The original file on disk is unchanged until Export.
+- [ ] Drop `redact-secret.pdf`. Marks → **Redact (permanent)** over `SECRET`, export. Re-open: `SECRET` is not selectable / not in copy-paste; `KEEP` and `VISIBLE` remain. Repeat with **Cover box**: `SECRET` is still extractable.
 - [ ] Drop `multi-font.pdf`. Click the Times amount and the Courier SKU. Neighbouring fonts must still look like themselves after export (no whole-page Helvetica flatten).
 - [ ] Drop `lines-and-text.pdf`. Edit one amount. Table rules and the signature line stay put.
 - [ ] Drop `image-and-text.pdf`. Edit the caption. The blue image is still an image, not a smeared bitmap of the whole page.
@@ -80,5 +81,6 @@ Use the committed files in `fixtures/` — not a real client PDF.
 | `fixtures/comma-amounts.pdf` | 1 | Comma amounts + multi-run POS line |
 | `fixtures/multi-page.pdf` | 3 | Split, extract, merge, untouched pages |
 | `fixtures/scan-image-only.pdf` | 1 | Scan-aware Enhance / OCR (no text operators) |
+| `fixtures/redact-secret.pdf` | 1 | Permanent redact: `SECRET` must vanish; Cover box must not |
 
 Regenerate fixtures with `npm run fixtures:generate` only if you change `fixtures/generate.mjs`.

@@ -60,14 +60,16 @@ describe("pdf.js editor payloads", () => {
   });
 
   it("sends redact to the burn lane and underline/rect to native annots", () => {
-    const { burn, editor, native } = partitionMarks([
+    const { burn, editor, native, erase } = partitionMarks([
       highlightMark(),
       { id: "r", page: 1, kind: "redact", x: 0, y: 0, width: 10, height: 10 },
+      { id: "e", page: 1, kind: "erase", x: 0, y: 0, width: 10, height: 10 },
       { id: "u", page: 1, kind: "underline", x: 0, y: 0, width: 10, height: 10 },
       { id: "b", page: 1, kind: "rect", x: 0, y: 0, width: 10, height: 10 },
     ]);
     expect(editor.map((m) => m.kind)).toEqual(["highlight"]);
     expect(burn.map((m) => m.kind)).toEqual(["redact"]);
+    expect(erase.map((m) => m.kind)).toEqual(["erase"]);
     expect(native.map((m) => m.kind)).toEqual(["underline", "rect"]);
   });
 });

@@ -9,8 +9,9 @@ import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
 import { replaceImageXObject } from "./pdf-image-xobject";
-import { applyBurnAndNativeMarks, partitionMarks } from "./pdf-marks";
+import { applyBurnAndNativeMarks } from "./pdf-marks";
 import { saveEditorAnnotations } from "./pdf-annotate-js";
+import { editorMarksForSave } from "./pdf-redact";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 export type {
@@ -100,7 +101,8 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
 /**
  * Apply in-place text rewrites first, then rebuild any scan-aware pages
  * (image + OCR text layer), then replace photo XObjects in place (no whiteout),
- * burn visual redacts, and write highlight/note as real PDF annotations.
+ * permanently erase `erase` marks, burn cover boxes, and write highlight/note
+ * as real PDF annotations.
  * Overlay white-rect + stacked drawImage is only used when no identifiable
  * image XObject exists on the page.
  */
@@ -147,7 +149,7 @@ export async function applyWorkshopPatches(
   }
 
   let out = await doc.save();
-  const { editor } = partitionMarks(marks);
+  const editor = editorMarksForSave(marks);
   if (editor.length) {
     out = (await saveEditorAnnotations(out, editor)).bytes;
   }

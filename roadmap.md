@@ -19,7 +19,7 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] Prior-art / OSS reuse map (`docs/PRIOR_ART.md`) — pick libraries instead of rebuilding OCR/edit
 - [x] PRIOR_ART #1: `@pdf-lib/fontkit` + bundled Liberation Sans / Noto Sans (SIL OFL) so WinAnsi-missing edits embed a real TTF instead of writing `?`
 - [x] PRIOR_ART #2: OCR searchable layer uses PDF text rendering mode `/Tr 3` instead of opacity:0 (`src/lib/scan/pdf.ts`, scan-aware Edit export)
-- [x] PRIOR_ART #5: pdf.js `saveDocument()` for highlight / FreeText notes (`src/lib/pdf-annotate-js.ts`). Visual redact stays a labeled burn.
+- [x] PRIOR_ART #5: pdf.js `saveDocument()` for highlight / FreeText notes (`src/lib/pdf-annotate-js.ts`). Cover box stays a labeled burn. Permanent redact (`erase`) strips text operators + punches simple image XObjects.
 - [ ] Next 2 weeks (see PRIOR_ART top 5): in-place image XObject replace
 - [ ] Do not npm AGPL (scribe.js, OpenSign, Documenso, MuPDF.js) or ship OpenCV.js (~30 MB) without a lazy Electron-only path
 - [ ] Later (not this workshop): brushes, generative fill, CMYK print
