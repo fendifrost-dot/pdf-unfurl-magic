@@ -81,6 +81,11 @@ export type TextPatch = {
   fontName?: string;
   fontFamily?: string;
   fontChoice?: FontChoice;
+  /**
+   * Member boxes for marquee / multi-run selections. Locate and rewrite only
+   * operators that intersect these, not everything in the union gutter.
+   */
+  coverBoxes?: Array<{ x: number; y: number; width: number; height: number }>;
 };
 
 export type TextEditMethod =
@@ -331,14 +336,29 @@ function showWidth(show: TextShow): number {
   return Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5);
 }
 
+function showOverlapsBox(
+  show: TextShow,
+  box: { x: number; y: number; width: number; height: number },
+  fallbackFontSize: number,
+): boolean {
+  const showW = showWidth(show);
+  const showH = Math.max(show.fontSize || fallbackFontSize, 4);
+  const pad = Math.max(4, showH * 0.3);
+  const overlapX =
+    Math.min(show.x + showW, box.x + box.width + pad) - Math.max(show.x, box.x - pad);
+  if (overlapX <= 0) return false;
+  const overlapY =
+    Math.min(show.y + showH, box.y + (box.height || showH)) - Math.max(show.y, box.y);
+  if (overlapY > 0) return true;
+  const band = Math.max(4, Math.max(showH, box.height || showH) * 0.55);
+  return Math.abs(show.y - box.y) <= band;
+}
+
 function showOverlapsPatch(show: TextShow, patch: TextPatch): boolean {
-  const band = Math.max(4, Math.max(show.fontSize, patch.fontSize || 10) * 0.55);
-  if (Math.abs(show.y - patch.y) > band) return false;
-  const pad = Math.max(4, (patch.fontSize || 10) * 0.3);
-  const overlap =
-    Math.min(show.x + showWidth(show), patch.x + patch.width + pad) -
-    Math.max(show.x, patch.x - pad);
-  return overlap > 0;
+  const boxes = patch.coverBoxes?.length
+    ? patch.coverBoxes
+    : [{ x: patch.x, y: patch.y, width: patch.width, height: patch.height }];
+  return boxes.some((box) => showOverlapsBox(show, box, patch.fontSize || 10));
 }
 
 function findShowsByBox(streams: PageStream[], patch: TextPatch): LocatedShows | null {

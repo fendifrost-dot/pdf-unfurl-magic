@@ -21,6 +21,8 @@ import {
   Underline,
   Undo2,
   ListChecks,
+  MousePointer2,
+  BoxSelect,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
@@ -65,6 +67,20 @@ import {
   textPageFooter,
 } from "@/lib/edit-apply";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
+import { OcrVerifyPanel } from "@/components/ocr-verify-panel";
+import {
+  applyMarqueeToLines,
+  coverBoxesFromLine,
+  type PdfRect,
+  type TextSelectMode,
+} from "@/lib/text-select";
+import {
+  applyOcrVerifyDecision,
+  collectUncertainSnippets,
+  ocrVerifyBlocksApply,
+  pendingOcrSnippets,
+  type OcrVerifyDecision,
+} from "@/lib/ocr-verify";
 import {
   emptyScanSession,
   enhancePageForScan,
@@ -265,9 +281,12 @@ function Editor() {
   const [selectedFieldName, setSelectedFieldName] = useState<string | null>(null);
   const [fontCatalog, setFontCatalog] = useState<CatalogFont[]>([]);
   const [fontChoiceId, setFontChoiceId] = useState("");
+  const [textSelectMode, setTextSelectMode] = useState<TextSelectMode>("line");
+  const [draftMarquee, setDraftMarquee] = useState<PdfRect | null>(null);
   const holderRef = useRef<HTMLDivElement>(null);
   const pageBoxRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeRef = useRef<PdfRect | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const previewTimer = useRef<number | null>(null);
   const scanByPageRef = useRef(scanByPage);
@@ -301,10 +320,28 @@ function Editor() {
     enhanceOpen,
     ocrLineCount: scanSession.ocrLines.length,
   });
+  const ocrVerify = scanSession.ocrVerify ?? [];
+  const marqueeEnabled = mode === "text" && textSelectMode === "marquee" && !showingOcr;
   const selectedIsOcr = selected?.source === "ocr";
   const selectedParent = selected ? parentLineFor(lines, selected) : undefined;
   const editingRun = !!selected && !!selectedParent && selectedParent.id !== selected.id;
   const fullLine = selected && !selectedIsOcr ? expandToFullLine(lines, selected) : null;
+  const selectedVerifyPending = ocrVerifyBlocksApply({
+    source: selected?.source,
+    lineId: selected?.id,
+    snippets: ocrVerify,
+  });
+  const applyEnabled = selected
+    ? canApplyTextEdit({
+        selectedIsOcr,
+        source: selected.source,
+        deferToScan: inspection?.deferToScan,
+        canCommitSafely: canCommitSafely(inspection, draft.trim(), selected.text),
+        looksScanned,
+        hasTextOperator: selected.hasTextOperator,
+        ocrVerifyPending: selectedVerifyPending,
+      })
+    : false;
   const panelReport: PageScanReport = scanReport ?? {
     looksScanned,
     reason: looksScanned ? "image-only" : "ok",
@@ -611,6 +648,7 @@ function Editor() {
     }
     let cancelled = false;
     setInspecting(true);
+    const coverBoxes = coverBoxesFromLine(selected);
     const probe: TextPatch = {
       page: selected.page,
       x: selected.x,
@@ -623,6 +661,7 @@ function Editor() {
       ...(selected.rawText ? { rawText: selected.rawText } : {}),
       fontName: selected.fontName,
       fontFamily: selected.fontFamily,
+      ...(coverBoxes ? { coverBoxes } : {}),
     };
     const timer = window.setTimeout(() => {
       void inspectTextPatch(doc.bytes, probe)
@@ -723,7 +762,7 @@ function Editor() {
       if (!session) return prev;
       return {
         ...prev,
-        [page]: { ...session, ocrLines: [] },
+        [page]: { ...session, ocrLines: [], ocrVerify: [] },
       };
     });
     setEdits((prev) => {
@@ -776,16 +815,7 @@ function Editor() {
   const commit = () => {
     if (!selected) return;
     const text = draft.trim();
-    if (
-      !canApplyTextEdit({
-        selectedIsOcr,
-        source: selected.source,
-        deferToScan: inspection?.deferToScan,
-        canCommitSafely: canCommitSafely(inspection, text, selected.text),
-        looksScanned,
-        hasTextOperator: selected.hasTextOperator,
-      })
-    ) {
+    if (!applyEnabled) {
       return;
     }
     setEdits((prev) => {
@@ -822,6 +852,7 @@ function Editor() {
         result.pageWidth,
         result.pageHeight,
       );
+      const ocrVerifySnippets = collectUncertainSnippets(ocrLines);
       const preview = new Blob([result.enhancedJpeg.bytes.slice() as unknown as BlobPart], {
         type: "image/jpeg",
       });
@@ -837,6 +868,7 @@ function Editor() {
             enhancedJpeg: result.enhancedJpeg,
             enhancedPreviewUrl: previewUrl,
             ocrLines,
+            ocrVerify: ocrVerifySnippets,
             pageWidth: result.pageWidth,
             pageHeight: result.pageHeight,
           },
@@ -961,6 +993,74 @@ function Editor() {
     dragRef.current = null;
   };
 
+  const onTextMarqueeDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!marqueeEnabled) return;
+    const point = eventToPdf(event);
+    if (!point) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = point;
+    const rect = { x: point.x, y: point.y, width: 0, height: 0 };
+    marqueeRef.current = rect;
+    setDraftMarquee(rect);
+  };
+
+  const onTextMarqueeMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!marqueeEnabled || !dragRef.current) return;
+    const point = eventToPdf(event);
+    if (!point) return;
+    const start = dragRef.current;
+    const rect = {
+      x: Math.min(start.x, point.x),
+      y: Math.min(start.y, point.y),
+      width: Math.abs(point.x - start.x),
+      height: Math.abs(point.y - start.y),
+    };
+    marqueeRef.current = rect;
+    setDraftMarquee(rect);
+  };
+
+  const onTextMarqueeUp = () => {
+    if (!marqueeEnabled) {
+      dragRef.current = null;
+      marqueeRef.current = null;
+      setDraftMarquee(null);
+      return;
+    }
+    const rect = marqueeRef.current;
+    dragRef.current = null;
+    marqueeRef.current = null;
+    setDraftMarquee(null);
+    if (!rect) return;
+    const source = nativeLines.length ? nativeLines : lines;
+    const { lines: next, joined } = applyMarqueeToLines(source, rect);
+    if (!joined) return;
+    setNativeLines(next);
+    setLines(next);
+    select(joined);
+  };
+
+  const decideOcrVerify = (snippetId: string, decision: OcrVerifyDecision) => {
+    const current = scanByPage[page] ?? emptyScanSession();
+    const result = applyOcrVerifyDecision(
+      current.ocrLines,
+      current.ocrVerify ?? [],
+      snippetId,
+      decision,
+    );
+    patchScanSession({ ocrLines: result.lines, ocrVerify: result.snippets });
+    if (preferOcrOverlay({ enhanceOpen, ocrLineCount: result.lines.length }) || showingOcr) {
+      setLines(result.lines);
+    }
+    const stillSelected = selectedId ? findLineOrMember(result.lines, selectedId) : undefined;
+    if (selectedId && !stillSelected) {
+      setSelectedId(null);
+      setDraft("");
+    } else if (stillSelected) {
+      setDraft(edits[stillSelected.id]?.text ?? stillSelected.text);
+    }
+  };
+
   const keepMark = () => {
     if (!draftMark) return;
     let next = draftMark;
@@ -1035,6 +1135,7 @@ function Editor() {
         if (option?.source === "system" && option.postscriptName) {
           embedBytes = (await loadSystemFontBytes(option.postscriptName)) ?? undefined;
         }
+        const coverBoxes = coverBoxesFromLine(line);
         patches.push({
           page: line.page,
           x: line.x,
@@ -1047,6 +1148,7 @@ function Editor() {
           ...(line.rawText ? { rawText: line.rawText } : {}),
           fontName: line.fontName,
           fontFamily: line.fontFamily,
+          ...(coverBoxes ? { coverBoxes } : {}),
           ...(option
             ? {
                 fontChoice: {
@@ -1167,6 +1269,7 @@ function Editor() {
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
               "absolute min-h-[22px] cursor-text touch-manipulation overflow-hidden rounded-[2px] border text-left transition-colors [@media(pointer:fine)]:min-h-0",
+              marqueeEnabled ? "pointer-events-none" : "",
               isSelected
                 ? overlay.isLivePreview || isEdited
                   ? "border-success bg-paper text-foreground shadow-sm"
@@ -1194,7 +1297,7 @@ function Editor() {
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, scale, viewSize, selectedId, edits, draft, looksScanned, showingOcr],
+    [lines, scale, viewSize, selectedId, edits, draft, looksScanned, showingOcr, marqueeEnabled],
   );
 
   const imageOverlay = useMemo(
@@ -1377,7 +1480,11 @@ function Editor() {
                     }
                     className="flex-1"
                     data-testid={
-                      value === "form" ? "edit-mode-form" : value === "text" ? "edit-mode-text" : undefined
+                      value === "form"
+                        ? "edit-mode-form"
+                        : value === "text"
+                          ? "edit-mode-text"
+                          : undefined
                     }
                     onClick={() => {
                       setMode(value);
@@ -1407,6 +1514,35 @@ function Editor() {
                 </Button>
               </div>
 
+              {mode === "text" && !showingOcr && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">Text pick</p>
+                  <div className="flex gap-1 rounded-md bg-muted p-1">
+                    <Button
+                      size="sm"
+                      variant={textSelectMode === "line" ? "default" : "ghost"}
+                      data-testid="text-select-line"
+                      onClick={() => setTextSelectMode("line")}
+                    >
+                      <MousePointer2 className="size-3.5" /> Line
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={textSelectMode === "marquee" ? "default" : "ghost"}
+                      data-testid="text-select-marquee"
+                      onClick={() => setTextSelectMode("marquee")}
+                    >
+                      <BoxSelect className="size-3.5" /> Select any
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {textSelectMode === "marquee"
+                      ? "Drag a rectangle over any runs — including a label and its amount."
+                      : "Click a row to edit the whole line. Shift-click a fragment for one run."}
+                  </p>
+                </div>
+              )}
+
               {looksScanned && mode === "text" && !showingOcr && (
                 <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5">
                   <ScanLine className="mt-0.5 size-4 shrink-0 text-warning" />
@@ -1414,7 +1550,7 @@ function Editor() {
                     <p className="text-sm font-semibold">This page looks scanned</p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       {scanReport?.message ||
-                        "Enhance page and OCR to edit amounts without painting Helvetica over the image."}
+                        "Enhance page and OCR to edit amounts without painting Helvetica over the image. Damaged lettering goes Enhance → Verify → Edit."}
                     </p>
                   </div>
                 </div>
@@ -1426,8 +1562,9 @@ function Editor() {
                   <div>
                     <p className="text-sm font-semibold">OCR boxes on this page</p>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Click a line, edit it, Apply to page, then Export. Or press Text / Done to
-                      return to native PDF lines.
+                      {pendingOcrSnippets(ocrVerify).length > 0
+                        ? "Verify uncertain OCR in the side panel (Accept, Correct, or Skip) before Apply. Enhance → Verify → Edit."
+                        : "Click a line, edit it, Apply to page, then Export. Or press Text / Done to return to native PDF lines."}
                     </p>
                   </div>
                 </div>
@@ -1455,10 +1592,41 @@ function Editor() {
                   ) : (
                     <div
                       ref={pageBoxRef}
-                      className="absolute inset-0"
-                      onPointerDown={mode === "mark" ? onMarkPointerDown : undefined}
-                      onPointerMove={mode === "mark" ? onMarkPointerMove : undefined}
-                      onPointerUp={mode === "mark" ? onMarkPointerUp : undefined}
+                      className={
+                        marqueeEnabled ? "absolute inset-0 cursor-crosshair" : "absolute inset-0"
+                      }
+                      onPointerDown={
+                        mode === "mark"
+                          ? onMarkPointerDown
+                          : marqueeEnabled
+                            ? onTextMarqueeDown
+                            : undefined
+                      }
+                      onPointerMove={
+                        mode === "mark"
+                          ? onMarkPointerMove
+                          : marqueeEnabled
+                            ? onTextMarqueeMove
+                            : undefined
+                      }
+                      onPointerUp={
+                        mode === "mark"
+                          ? onMarkPointerUp
+                          : marqueeEnabled
+                            ? onTextMarqueeUp
+                            : undefined
+                      }
+                      onPointerCancel={
+                        mode === "mark"
+                          ? onMarkPointerUp
+                          : marqueeEnabled
+                            ? () => {
+                                dragRef.current = null;
+                                marqueeRef.current = null;
+                                setDraftMarquee(null);
+                              }
+                            : undefined
+                      }
                     >
                       {scanSession.replaceWithCleaned && scanSession.enhancedPreviewUrl && (
                         <img
@@ -1468,6 +1636,22 @@ function Editor() {
                         />
                       )}
                       {mode === "text" && textOverlay}
+                      {marqueeEnabled &&
+                        draftMarquee &&
+                        draftMarquee.width + draftMarquee.height > 0 && (
+                          <div
+                            data-testid="text-marquee-rect"
+                            style={boxStyle(
+                              draftMarquee.x,
+                              draftMarquee.y,
+                              draftMarquee.width,
+                              draftMarquee.height,
+                              scale,
+                              viewSize,
+                            )}
+                            className="pointer-events-none absolute border border-dashed border-primary bg-primary/10"
+                          />
+                        )}
                       {mode === "form" &&
                         formReport.fields.flatMap((field) =>
                           field.widgets
@@ -1749,6 +1933,24 @@ function Editor() {
                     onDone={exitEnhanceToText}
                     onClearOcr={clearOcrForPage}
                   />
+                  {scanSession.ocrLines.length > 0 && (
+                    <div className="mt-4">
+                      <OcrVerifyPanel
+                        snippets={ocrVerify}
+                        ocrLineCount={scanSession.ocrLines.length}
+                        busy={scanBusy}
+                        onDecide={decideOcrVerify}
+                        onEnhanceAgain={() => {
+                          setEnhancePanelOpen(true);
+                          window.requestAnimationFrame(() => {
+                            const panel = document.getElementById("enhance-page-panel");
+                            panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+                          });
+                          void enhanceAndOcr();
+                        }}
+                      />
+                    </div>
+                  )}
                   <Separator className="my-5" />
                   {!selected ? (
                     <div className="py-8 text-center">
@@ -1759,10 +1961,14 @@ function Editor() {
                       </p>
                       <p className="mt-2 text-sm text-muted-foreground">
                         {scanSession.ocrLines.length > 0
-                          ? "Click an OCR line above or a box on the page."
+                          ? pendingOcrSnippets(ocrVerify).length > 0
+                            ? "Verify uncertain OCR above, then click a confirmed line."
+                            : "Click an OCR line above or a box on the page."
                           : lines.length === 0 && doc
                             ? "Use Enhance & OCR this page when this is a scan or the picture is hard to read. A Safe edit here would paint over the image."
-                            : "Click any line on the page to open it here, or switch to Image studio. Enhance is optional if picking feels wrong."}
+                            : textSelectMode === "marquee"
+                              ? "Drag a rectangle across any text runs, then edit the merged draft."
+                              : "Click any line on the page to open it here, or switch to Image studio. Enhance is optional if picking feels wrong."}
                       </p>
                       {lines.length === 0 && doc && (
                         <Button asChild className="mt-4" variant="secondary" size="sm">
@@ -1854,20 +2060,7 @@ function Editor() {
                           className="flex-1"
                           data-testid="apply-edit"
                           onClick={commit}
-                          disabled={
-                            !canApplyTextEdit({
-                              selectedIsOcr,
-                              source: selected.source,
-                              deferToScan: inspection?.deferToScan,
-                              canCommitSafely: canCommitSafely(
-                                inspection,
-                                draft.trim(),
-                                selected.text,
-                              ),
-                              looksScanned,
-                              hasTextOperator: selected.hasTextOperator,
-                            })
-                          }
+                          disabled={!applyEnabled}
                         >
                           {APPLY_EDIT_LABEL}
                         </Button>
@@ -1880,6 +2073,11 @@ function Editor() {
                           <Undo2 className="size-3.5" />
                         </Button>
                       </div>
+                      {selectedVerifyPending && (
+                        <p className="mt-3 text-sm text-warning" data-testid="ocr-verify-gate">
+                          Accept, correct, or skip this OCR snippet before Apply.
+                        </p>
+                      )}
                       {applyNotice && (
                         <p
                           className="mt-3 text-sm font-medium text-success"

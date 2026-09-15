@@ -17,7 +17,7 @@ export function pendingExportBanner(count: number): string {
 
 export function ocrReadyNextStep(count: number): string {
   const noun = count === 1 ? "1 OCR line" : `${count} OCR lines`;
-  return `${noun} ready. Click a line, edit it, Apply to page, then Export.`;
+  return `${noun} ready. Verify uncertain glyphs first, then click a line, edit it, Apply to page, then Export.`;
 }
 
 export function textPageFooter(input: {
@@ -64,10 +64,7 @@ export function nextEnhanceOpen(input: {
   return input.looksScanned;
 }
 
-export function preferOcrOverlay(input: {
-  enhanceOpen: boolean;
-  ocrLineCount: number;
-}): boolean {
+export function preferOcrOverlay(input: { enhanceOpen: boolean; ocrLineCount: number }): boolean {
   return input.enhanceOpen && input.ocrLineCount > 0;
 }
 
@@ -87,8 +84,11 @@ export function canApplyTextEdit(input: {
   hasTextOperator?: boolean | undefined;
   /** Ignored. Kept so callers cannot accidentally reintroduce scanMode gating. */
   scanMode?: boolean | undefined;
+  /** Uncertain OCR snippets must be accepted, corrected, or skipped first. */
+  ocrVerifyPending?: boolean | undefined;
 }): boolean {
   void input.scanMode;
+  if (input.ocrVerifyPending) return false;
   if (input.selectedIsOcr || input.source === "ocr") return true;
   if (input.deferToScan) return false;
   if (input.looksScanned && input.hasTextOperator === false) return false;
