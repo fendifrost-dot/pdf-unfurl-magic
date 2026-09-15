@@ -11,6 +11,7 @@ import {
   splitDraftAcrossRuns,
   type TextPatchMember,
 } from "./pdf-text-edit";
+import { visualRowBands } from "./text-select";
 
 export const APPLY_EDIT_LABEL = "Apply to page";
 
@@ -150,7 +151,7 @@ export function emptySelectionCopy(input: {
     title: "Nothing selected",
     body:
       input.textSelectMode === "marquee"
-        ? "Drag a rectangle across any text runs, then edit the merged draft."
+        ? "Drag a rectangle across any text runs or several statement rows, then edit each selected row in the chunk editor."
         : "Click any line on the page to open it here, or switch to Image studio. Enhance is optional if picking feels wrong.",
   };
 }
@@ -541,9 +542,159 @@ export function memberColumnLabel(groupText: string, index: number, groupTexts: 
   return `Column ${index + 1}`;
 }
 
+function trimmedMembers(line: LineLike): ColumnField["runs"] {
+  return (line.members?.length ? line.members : []).filter((run) => run.text.trim());
+}
+
+function lineFromBand(parent: LineLike, band: ColumnField["runs"]): LineLike {
+  const sorted = [...band].sort((a, b) => locateX(a) - locateX(b));
+  const first = sorted[0]!;
+  const x = Math.min(...sorted.map((run) => locateX(run)));
+  const y = Math.min(...sorted.map((run) => locateY(run)));
+  const right = Math.max(...sorted.map((run) => locateX(run) + run.width));
+  const top = Math.max(...sorted.map((run) => locateY(run) + run.height));
+  const fontSize = Math.max(...sorted.map((run) => run.fontSize));
+  const text = sorted
+    .map((run) => run.text)
+    .join(" ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+  return {
+    id: `${parent.id}-y${Math.round(y)}`,
+    x,
+    y,
+    originX: x,
+    originY: y,
+    width: Math.max(right - x, fontSize * 0.6),
+    height: Math.max(top - y, fontSize * 1.18),
+    fontSize,
+    fontName: first.fontName,
+    fontFamily: first.fontFamily,
+    text,
+    members: sorted,
+  };
+}
+
+/** Split a joined marquee / multi-run selection into one line per visual row. */
+export function visualRowsForLine(line: LineLike): LineLike[] {
+  const members = trimmedMembers(line);
+  if (members.length < 2) return [line];
+  const bands = visualRowBands(members);
+  if (bands.length <= 1) return [line];
+  return bands.map((band) => lineFromBand(line, band));
+}
+
+export function isChunkSelection(line: LineLike): boolean {
+  return visualRowsForLine(line).length > 1;
+}
+
+export function runCountForLine(line: LineLike): number {
+  const members = trimmedMembers(line);
+  return Math.max(members.length, 1);
+}
+
+export type ChunkRow = {
+  id: string;
+  index: number;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontName: string;
+  fontFamily: string;
+  fields: ColumnField[];
+  runCount: number;
+};
+
+export function chunkRowsForSelection(line: LineLike): ChunkRow[] {
+  return visualRowsForLine(line).map((row, index) => {
+    const fields = columnFieldsForLine(row);
+    const members = trimmedMembers(row);
+    return {
+      id: row.id,
+      index,
+      text: row.text,
+      x: row.x,
+      y: row.y,
+      width: row.width,
+      height: row.height,
+      fontSize: row.fontSize,
+      fontName: row.fontName,
+      fontFamily: row.fontFamily,
+      fields,
+      runCount: Math.max(members.length, 1),
+    };
+  });
+}
+
+export function seedChunkDrafts(
+  rows: ChunkRow[],
+  stored?: Record<string, string>,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.fields.length > 1) {
+      for (const field of row.fields) {
+        next[field.id] = stored?.[field.id] ?? field.text;
+      }
+    } else {
+      next[row.id] = stored?.[row.id] ?? row.text;
+    }
+  }
+  return next;
+}
+
+export function joinChunkDrafts(rows: ChunkRow[], drafts: Record<string, string>): string {
+  return rows
+    .map((row) =>
+      row.fields.length > 1
+        ? joinColumnDrafts(row.fields, drafts)
+        : (drafts[row.id] ?? row.text).trim(),
+    )
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
+export function collectChunkMemberTexts(
+  rows: ChunkRow[],
+  drafts: Record<string, string>,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.fields.length > 1) {
+      for (const field of row.fields) {
+        next[field.id] = drafts[field.id] ?? field.text;
+      }
+    } else {
+      next[row.id] = drafts[row.id] ?? row.text;
+    }
+  }
+  return next;
+}
+
+export function selectionEditTitle(input: {
+  selectedIsOcr?: boolean;
+  editingRun?: boolean;
+  rowCount: number;
+  runCount: number;
+}): string {
+  if (input.selectedIsOcr) {
+    return input.rowCount > 1 ? `Editing ${input.rowCount} OCR lines` : "Editing one OCR line";
+  }
+  if (input.rowCount > 1) {
+    return `Editing ${input.rowCount} lines / ${input.runCount} runs`;
+  }
+  if (input.editingRun) return "Editing one run";
+  return "Editing one line";
+}
+
 export function columnFieldsForLine(line: LineLike): ColumnField[] {
-  const members = (line.members?.length ? line.members : []).filter((run) => run.text.trim());
+  const members = trimmedMembers(line);
   if (members.length < 2) return [];
+  // Never cluster amount columns down a page — that mashes 1 357 22 2 744 into one field.
+  if (visualRowBands(members).length > 1) return [];
   const groups = clusterRunsByExtractColumn(members);
   if (groups.length < 2) return [];
   const texts = groups.map((group) =>
@@ -616,14 +767,21 @@ export function remapColumnMemberTexts(input: {
   return out;
 }
 
-export function membersForLinePatch(
+function membersForSingleRowPatch(
   line: LineLike,
   drafts?: Record<string, string>,
+  forceMembers = false,
 ): TextPatchMember[] | undefined {
   const fields = columnFieldsForLine(line);
   if (fields.length < 2) {
     const runs = line.members?.length ? line.members : [];
-    if (runs.length <= 1) return undefined;
+    if (runs.length <= 1) {
+      const run = runs[0];
+      if (!run) return undefined;
+      const next = drafts?.[run.id] ?? drafts?.[line.id] ?? run.text;
+      if (!forceMembers && next === run.text) return undefined;
+      return [patchMemberFromRun(run, next)];
+    }
     const next = drafts?.[line.id] ?? line.text;
     const parts = splitDraftAcrossRuns(
       runs.map((run) => ({ text: run.text })),
@@ -650,4 +808,20 @@ export function membersForLinePatch(
     });
   });
   return members;
+}
+
+export function membersForLinePatch(
+  line: LineLike,
+  drafts?: Record<string, string>,
+): TextPatchMember[] | undefined {
+  const rows = visualRowsForLine(line);
+  if (rows.length > 1) {
+    const members: TextPatchMember[] = [];
+    for (const row of rows) {
+      const parts = membersForSingleRowPatch(row, drafts, true);
+      if (parts) members.push(...parts);
+    }
+    return members.length ? members : undefined;
+  }
+  return membersForSingleRowPatch(line, drafts);
 }

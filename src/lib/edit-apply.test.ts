@@ -24,10 +24,14 @@ import {
   textOverlayChromeClass,
   textPageFooter,
   textPickVisible,
+  chunkRowsForSelection,
   columnFieldsForLine,
+  joinChunkDrafts,
   memberColumnLabel,
   membersForLinePatch,
   remapColumnMemberTexts,
+  seedChunkDrafts,
+  selectionEditTitle,
 } from "./edit-apply";
 
 const safeInspection: TextEditInspection = {
@@ -104,6 +108,16 @@ describe("Apply / Enhance exit contracts", () => {
         textSelectMode: "line",
       }).body,
     ).toMatch(/click any line on the page/i);
+    expect(
+      emptySelectionCopy({
+        showingOcr: false,
+        ocrLineCount: 0,
+        pendingVerify: 0,
+        hasDoc: true,
+        lineCount: 40,
+        textSelectMode: "marquee",
+      }).body,
+    ).toMatch(/chunk editor/i);
     expect(
       emptySelectionCopy({
         showingOcr: true,
@@ -967,5 +981,83 @@ describe("Apply / Enhance exit contracts", () => {
     expect(remapped.desc).toBe("06-06 Paid From merchant");
     expect(remapped.amt).toBe("500.00");
     expect(remapped.bal).toBe("4,972.29");
+  });
+
+  it("titles a multi-row selection as N lines / N runs, not one line", () => {
+    expect(selectionEditTitle({ rowCount: 1, runCount: 3 })).toBe("Editing one line");
+    expect(selectionEditTitle({ rowCount: 1, runCount: 1, editingRun: true })).toBe(
+      "Editing one run",
+    );
+    expect(selectionEditTitle({ rowCount: 3, runCount: 9 })).toBe("Editing 3 lines / 9 runs");
+    expect(selectionEditTitle({ selectedIsOcr: true, rowCount: 1, runCount: 1 })).toBe(
+      "Editing one OCR line",
+    );
+  });
+
+  it("does not mash amount columns when a marquee spans two statement rows", () => {
+    const member = (
+      id: string,
+      text: string,
+      x: number,
+      y: number,
+      width: number,
+      fontName = "F1",
+    ) => ({
+      id,
+      x,
+      y,
+      originY: y,
+      width,
+      height: 10,
+      fontSize: 8,
+      fontName,
+      fontFamily: "Helvetica",
+      text,
+    });
+    const line = {
+      id: "chunk",
+      x: 14,
+      y: 380,
+      width: 551,
+      height: 30,
+      fontSize: 8,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "06-08 Paid To - Synchrony 500.00 4,972.29\n06-09 Paid To - Apple 250.00 1,834.34",
+      members: [
+        member("d1", "06-08 Paid To - Synchrony", 14, 400, 280),
+        member("a1", "500.00", 409, 400, 48, "F2"),
+        member("b1", "4,972.29", 517, 400, 48, "F2"),
+        member("d2", "06-09 Paid To - Apple", 14, 380, 240),
+        member("a2", "250.00", 409, 380, 48, "F2"),
+        member("b2", "1,834.34", 517, 380, 48, "F2"),
+      ],
+    };
+    expect(columnFieldsForLine(line)).toEqual([]);
+    const rows = chunkRowsForSelection(line);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.fields.map((field) => ({ label: field.label, text: field.text }))).toEqual([
+      { label: "Description", text: "06-08 Paid To - Synchrony" },
+      { label: "Amount", text: "500.00" },
+      { label: "Balance", text: "4,972.29" },
+    ]);
+    expect(rows[1]?.fields.map((field) => ({ label: field.label, text: field.text }))).toEqual([
+      { label: "Description", text: "06-09 Paid To - Apple" },
+      { label: "Amount", text: "250.00" },
+      { label: "Balance", text: "1,834.34" },
+    ]);
+    const drafts = seedChunkDrafts(rows, { d1: "06-08 Paid From - Synchrony" });
+    expect(drafts.a1).toBe("500.00");
+    expect(drafts.a2).toBe("250.00");
+    expect(joinChunkDrafts(rows, drafts)).not.toMatch(/1 357|500\.00 250\.00/);
+    const members = membersForLinePatch(line, drafts);
+    expect(members?.find((item) => item.originalText === "500.00")).toMatchObject({
+      text: "500.00",
+      x: 409,
+    });
+    expect(members?.find((item) => item.originalText === "250.00")).toMatchObject({
+      text: "250.00",
+      x: 409,
+    });
   });
 });
