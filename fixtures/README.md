@@ -18,8 +18,9 @@ npm run fixtures:generate
 | `multi-page.pdf` | 3 | Split / extract / merge, page-count badge, untouched-page regression. Markers `PAGE_MARKER_1`…`3`. |
 | `scan-image-only.pdf` | 1 | Full-page bitmap, no text operators. Scan-aware Enhance / OCR. |
 | `redact-secret.pdf` | 1 | `KEEP` / `SECRET` / `VISIBLE` plus a magenta-cyan PNG. Permanent redact QA. |
+| `acroform-blank.pdf` | 1 | Five AcroForm widgets (name, email, city, size, agree). Email has format/calculate JS so Form UI must warn. |
 
-AcroForm fill/flatten tests generate their own sample via `buildSampleAcroFormPdf()` in `src/lib/pdf-acroform.ts` (text, checkbox, radio, dropdown). Run `fixtures:generate` after adding a committed `acroform-simple.pdf` builder if you want that file on disk for manual QA.
+AcroForm fill/flatten tests also generate a sample via `buildSampleAcroFormPdf()` in `src/lib/pdf-acroform.ts`. The committed `acroform-blank.pdf` is the same builder with `includeFieldJs: true`.
 
 Sizes are capped in `manifest.json` (`maxBytes`). The smoke harness fails if a fixture grows past that cap.
 

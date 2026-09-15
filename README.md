@@ -51,9 +51,13 @@ server's port.
 
 Open `/edit` (or **Form** in the header). Drop an AcroForm PDF or **Load sample form**.
 The Form tab lists text, checkbox, radio, and dropdown widgets. Export fills the
-values, then flattens — appearances are merged into the page and widgets are removed.
+values, then flattens by default — appearances are merged into the page and widgets
+are removed. Turning flatten off keeps widgets interactive and writes appearance
+streams plus `/NeedAppearances` so Preview and Chrome still show the typed values.
 Files stay in the browser. **Not supported:** XFA / LiveCycle, field JavaScript
 (calculate / validate / format), rich-text values, or digital-signature fields.
+The Form UI warns in the same honest voice as XFA when calculate/validate/format
+actions are present — totals will not recalculate.
 
 ## Scan pages
 

@@ -486,6 +486,22 @@ If only **two** libraries get added: **`@pdf-lib/fontkit`** and **`signature_pad
 
 ---
 
+## 7) AcroForm fill (appearance streams, NeedAppearances, XFA refuse)
+
+**Problem:** Setting `/V` on a widget is not enough. Preview and Chrome paint the appearance stream (`/AP`). A filled but non-flattened export with a blank `/AP` looks empty. Acrobat’s `/NeedAppearances` flag asks the viewer to rebuild those streams from `/V`. Field JavaScript (calculate / validate / format) and LiveCycle XFA do not run in this app.
+
+| | |
+| --- | --- |
+| **Stack** | pdf-lib `PDFForm` (MIT) — already depended. `src/lib/pdf-acroform.ts`, Edit Form mode. |
+| **Do** | `form.updateFieldAppearances()` after fill. When `flatten === false`, also set `/NeedAppearances true` so widgets stay interactive **and** show values. Flatten still burns `/AP` into the page and drops widgets. |
+| **Refuse** | XFA / LiveCycle packets (warn + throw if there are no AcroForm widgets). Field JavaScript — detect `/AA` / `/A`, warn unmistakably that totals will not recalculate. Same honesty as XFA. |
+| **Skip** | OpenSign, Documenso, DocuSeal, pdf-lib-plus, pdf-form-lib, any AGPL form suite. No new form dependencies. |
+| **Fixture** | `fixtures/acroform-blank.pdf` (generated) — five typed widgets and a real `/AcroForm` dict. Email carries dummy format/calculate JS so QA can see the warning. |
+
+**2-week verdict:** stay on pdf-lib form APIs. Appearance streams + NeedAppearances are the Preview/Chrome gate. Do not vendor an AGPL form filler to get calculate scripts.
+
+---
+
 ## Research notes / what we did not treat as a library
 
 - **Hopscotch** — product tours, not PDFs.

@@ -190,7 +190,7 @@ Tier 1 — build these next, they are where the app will actually break:
 | --- | --- | --- |
 | `rotated-pages.pdf` | 3 pages with `/Rotate` 0 / 90 / 270 | Editor coordinates, scan export, signature placement |
 | `mixed-page-sizes.pdf` | Letter + A4 + Legal in one file | Merge, split, signature placement, canvas scaling |
-| `acroform-blank.pdf` | Fillable form: text fields, checkbox, radio, dropdown | Form fill (the Acrobat must-have). Also: does edit destroy the form dict? |
+| `acroform-blank.pdf` | Fillable form: text fields, checkbox, radio, dropdown (**generated** in `fixtures/`) | Form fill (the Acrobat must-have). Also: does edit destroy the form dict? Email field has dummy format/calculate JS — Form UI must warn that totals will not recalculate. |
 | `no-embedded-fonts.pdf` | Text referencing a non-embedded font | Font matching on edit — most likely silent-corruption path |
 | `scanned-skew.pdf` | Page-as-JPEG, 3° skew, JPEG artifacts, no text layer | Edit with nothing to click, OCR, image studio selection |
 | `password-open.pdf` | User password `pdfrelief` | Open path — must fail *gracefully* with a prompt, not a white screen |
