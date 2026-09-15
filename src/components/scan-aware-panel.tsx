@@ -5,21 +5,28 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ENHANCE_PRESETS, type EnhancePreset } from "@/lib/scan";
 import type { PageScanReport, ScanPageSession } from "@/lib/pdf-scan-edit";
+import type { TextLine } from "@/lib/pdf-runtime";
 
 export function ScanAwarePanel({
   report,
   session,
   busy,
+  selectedId,
+  editedIds,
   onPreset,
   onReplaceToggle,
   onEnhanceAndOcr,
+  onSelectLine,
 }: {
   report: PageScanReport;
   session: ScanPageSession;
   busy: string | null;
+  selectedId: string | null;
+  editedIds: string[];
   onPreset: (preset: EnhancePreset) => void;
   onReplaceToggle: (value: boolean) => void;
   onEnhanceAndOcr: () => void;
+  onSelectLine: (line: TextLine) => void;
 }) {
   const ocrCount = session.ocrLines.length;
   return (
@@ -87,10 +94,32 @@ export function ScanAwarePanel({
       </Button>
 
       {ocrCount > 0 ? (
-        <p className="text-xs leading-relaxed text-success">
-          {ocrCount} OCR line{ocrCount === 1 ? "" : "s"} ready. Click a box to edit; export writes
-          those lines as a text layer on the page image.
-        </p>
+        <div>
+          <p className="text-xs leading-relaxed text-success">
+            {ocrCount} OCR line{ocrCount === 1 ? "" : "s"} ready. Click a line here or a box on the
+            page. Export writes a text layer on the page image, not a white-out.
+          </p>
+          <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+            {session.ocrLines.map((line) => (
+              <li key={line.id}>
+                <button
+                  type="button"
+                  className={[
+                    "w-full truncate rounded-md border px-2 py-1.5 text-left text-xs",
+                    selectedId === line.id
+                      ? "border-primary bg-primary/15"
+                      : editedIds.includes(line.id)
+                        ? "border-success/60 bg-success/10"
+                        : "border-border/70 hover:border-primary/50",
+                  ].join(" ")}
+                  onClick={() => onSelectLine(line)}
+                >
+                  {line.text}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : (
         <p className="text-xs leading-relaxed text-muted-foreground">
           Ghost text from the file is not rewritten in place — that is the Helvetica / Unsafe

@@ -42,7 +42,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Drop `image-and-text.pdf`. Edit the caption. The blue image is still an image, not a smeared bitmap of the whole page.
 - [ ] Drop `multi-page.pdf`. Step **1 / 3 → 3 / 3**. Edit page 1 only, export, re-open: pages 2 and 3 still show `PAGE_MARKER_2` and `PAGE_MARKER_3`.
 
-- [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned**. Font is not Helvetica Unsafe. **Enhance page & OCR**, click `AMOUNT 1987.00` (or the OCR box Tesseract found), change the figure, **Keep this change**, **Export**. Re-open: new amount is there; no white-out rectangle over the rest of the page. Leave **Replace with cleaned image** off once, then on once.
+- [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned** (not Helvetica Unsafe). **Enhance page & OCR**. Click an OCR line in the side list (the synthetic 5×7 bitmap may OCR as fragments; a real statement scan yields amounts/labels), edit it, **Keep this change**, **Export**. Re-open: the new text is in the file as a text layer; the page picture remains unless **Replace with cleaned image** is on. Leave that toggle off once, then on once. Confirm `simple-text.pdf` still has **Safe in-place rewrite** and no scan banner.
 
 ## Scan (`/scan`) — skip if that PR is not merged
 

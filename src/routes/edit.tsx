@@ -813,9 +813,11 @@ function Editor() {
                 ? "border-primary bg-primary/25"
                 : isEdited
                   ? "border-success/70 bg-success/20"
-                  : scanMode && line.source !== "ocr"
-                    ? "border-dashed border-warning/70 bg-warning/15"
-                    : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
+                  : line.source === "ocr"
+                    ? "border-primary/70 bg-primary/15"
+                    : scanMode
+                      ? "border-dashed border-warning/70 bg-warning/15"
+                      : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
             ].join(" ")}
           >
             <span className="sr-only">Edit: {line.text}</span>
@@ -1248,6 +1250,9 @@ function Editor() {
                       onPreset={(preset) => patchScanSession({ preset })}
                       onReplaceToggle={(value) => patchScanSession({ replaceWithCleaned: value })}
                       onEnhanceAndOcr={() => void enhanceAndOcr()}
+                      selectedId={selectedId}
+                      editedIds={editedIds}
+                      onSelectLine={select}
                     />
                   )}
                   {scanMode && selected && <Separator className="my-5" />}
