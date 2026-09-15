@@ -56,7 +56,7 @@ Install the `.dmg` to `/Applications`, first-launch via Control-click → Open (
 | # | Action | Expect | P/F |
 | --- | --- | --- | --- |
 | B1 | **File → Editor**, open `simple-text.pdf` | Page renders, badge **1 / 1**, text boxes highlight on hover | ☐ |
-| B2 | Click `REPLACE_ME`, type a longer string, **Keep this change** | Side panel accepts it; on-page preview updates; no full-page re-render flash | ☐ |
+| B2 | Click `REPLACE_ME`, type a longer string, **Apply to page** | Side panel accepts it; on-page overlay shows the new text (green/edited); Export CTA appears; no full-page re-render flash | ☐ |
 | B3 | **Export** | **Native Save dialog** with a sane default filename. Not a silent `~/Downloads` drop | ☐ |
 | B4 | Open the export in Preview | New text present, correct position, file still a few KB | ☐ |
 | B5 | `ls -l` the source `simple-text.pdf` | Byte size and mtime unchanged. **Any change here is a P0** | ☐ |

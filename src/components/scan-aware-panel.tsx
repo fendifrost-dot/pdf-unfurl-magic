@@ -1,4 +1,4 @@
-import { ChevronDown, Loader2, ScanLine, Sparkles } from "lucide-react";
+import { ChevronDown, Loader2, ScanLine, Sparkles, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import {
   enhanceEntryCopy,
   shouldAutoExpandEnhance,
 } from "@/lib/enhance-entry";
+import { ocrReadyNextStep } from "@/lib/edit-apply";
 import type { PageScanReport, ScanPageSession } from "@/lib/pdf-scan-edit";
 import type { TextLine } from "@/lib/pdf-runtime";
 
@@ -25,6 +26,8 @@ export function ScanAwarePanel({
   onReplaceToggle,
   onEnhanceAndOcr,
   onSelectLine,
+  onDone,
+  onClearOcr,
 }: {
   report: PageScanReport;
   session: ScanPageSession;
@@ -37,6 +40,8 @@ export function ScanAwarePanel({
   onReplaceToggle: (value: boolean) => void;
   onEnhanceAndOcr: () => void;
   onSelectLine: (line: TextLine) => void;
+  onDone: () => void;
+  onClearOcr?: () => void;
 }) {
   const ocrCount = session.ocrLines.length;
   const emphasized = shouldAutoExpandEnhance({
@@ -152,10 +157,7 @@ export function ScanAwarePanel({
 
             {ocrCount > 0 ? (
               <div>
-                <p className="text-xs leading-relaxed text-success">
-                  {ocrCount} OCR line{ocrCount === 1 ? "" : "s"} ready. Click a line here or a box
-                  on the page. Export writes a text layer on the page image, not a white-out.
-                </p>
+                <p className="text-xs leading-relaxed text-success">{ocrReadyNextStep(ocrCount)}</p>
                 <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                   {session.ocrLines.map((line) => (
                     <li key={line.id}>
@@ -167,10 +169,11 @@ export function ScanAwarePanel({
                             ? "border-primary bg-primary/15"
                             : editedIds.includes(line.id)
                               ? "border-success/60 bg-success/10"
-                              : "border-border/70 hover:border-primary/50",
+                              : "border-dashed border-primary/45 hover:border-primary/70",
                         ].join(" ")}
                         onClick={() => onSelectLine(line)}
                       >
+                        {editedIds.includes(line.id) ? "Applied · " : ""}
                         {line.text}
                       </button>
                     </li>
@@ -184,6 +187,30 @@ export function ScanAwarePanel({
                   : "Native text stays click-to-edit. Enhance does not run until you press the button."}
               </p>
             )}
+
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full min-h-11"
+                data-testid="enhance-done"
+                onClick={onDone}
+              >
+                <Type className="size-3.5" /> Done / Back to text editing
+              </Button>
+              {ocrCount > 0 && onClearOcr ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full"
+                  data-testid="enhance-clear-ocr"
+                  onClick={onClearOcr}
+                >
+                  Clear OCR for this page
+                </Button>
+              ) : null}
+            </div>
           </div>
         </CollapsibleContent>
       </div>

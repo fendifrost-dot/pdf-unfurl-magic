@@ -51,6 +51,19 @@ import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { FontPicker } from "@/components/font-picker";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
+import {
+  APPLY_EDIT_LABEL,
+  APPLY_SUCCESS_MESSAGE,
+  ORIGINAL_UNCHANGED_HINT,
+  canApplyTextEdit,
+  enhanceOpenAfterTextChip,
+  nextEnhanceOpen,
+  overlayApplyState,
+  pendingExportBanner,
+  preferOcrOverlay,
+  shouldFlattenPageAsScan,
+  textPageFooter,
+} from "@/lib/edit-apply";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
 import {
   emptyScanSession,
@@ -63,7 +76,7 @@ import {
   type ScanPageSession,
 } from "@/lib/pdf-scan-edit";
 import { disposeOcr, type EnhancePreset } from "@/lib/scan";
-import { ENHANCE_CHIP_LABEL, shouldAutoExpandEnhance } from "@/lib/enhance-entry";
+import { ENHANCE_CHIP_LABEL } from "@/lib/enhance-entry";
 import {
   defaultFontChoiceId,
   loadSystemFontBytes,
@@ -242,6 +255,9 @@ function Editor() {
   const [scanByPage, setScanByPage] = useState<Record<number, ScanPageSession>>({});
   const [scanBusy, setScanBusy] = useState<string | null>(null);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
+  const [nativeLines, setNativeLines] = useState<TextLine[]>([]);
+  const [applyNotice, setApplyNotice] = useState<string | null>(null);
+  const [showOriginalHint, setShowOriginalHint] = useState(false);
   const [formReport, setFormReport] = useState<AcroFormReport>(emptyAcroFormReport);
   const [formValues, setFormValues] = useState<Record<string, AcroFormValue>>({});
   const [formOriginal, setFormOriginal] = useState<Record<string, AcroFormValue>>({});
@@ -257,6 +273,9 @@ function Editor() {
   const scanByPageRef = useRef(scanByPage);
   scanByPageRef.current = scanByPage;
   const enhancePageKeyRef = useRef("");
+  const enhanceDismissedRef = useRef(false);
+  const enhanceOpenRef = useRef(false);
+  enhanceOpenRef.current = enhanceOpen;
 
   const selected = selectedId ? findLineOrMember(lines, selectedId) : undefined;
   const selectedImage = selectedImageId
@@ -277,8 +296,9 @@ function Editor() {
   const pendingCount =
     editedIds.length + imageEditIds.length + marks.length + scanExportReady + formPending;
   const scanSession = scanByPage[page] ?? emptyScanSession();
-  const scanMode = shouldAutoExpandEnhance({
-    looksScanned: !!scanReport?.looksScanned,
+  const looksScanned = !!scanReport?.looksScanned;
+  const showingOcr = preferOcrOverlay({
+    enhanceOpen,
     ocrLineCount: scanSession.ocrLines.length,
   });
   const selectedIsOcr = selected?.source === "ocr";
@@ -286,9 +306,9 @@ function Editor() {
   const editingRun = !!selected && !!selectedParent && selectedParent.id !== selected.id;
   const fullLine = selected && !selectedIsOcr ? expandToFullLine(lines, selected) : null;
   const panelReport: PageScanReport = scanReport ?? {
-    looksScanned: scanMode,
-    reason: scanMode ? "image-only" : "ok",
-    message: scanMode ? "Enhance page and OCR to edit amounts without a white-out." : "",
+    looksScanned,
+    reason: looksScanned ? "image-only" : "ok",
+    message: looksScanned ? "Enhance page and OCR to edit amounts without a white-out." : "",
     showCount: 0,
     imageCount: 0,
     pdfJsLineCount: lines.length,
@@ -323,6 +343,10 @@ function Editor() {
       setSourceCanvas(null);
       setInspection(null);
       setScanReport(null);
+      setNativeLines([]);
+      setApplyNotice(null);
+      setShowOriginalHint(false);
+      enhanceDismissedRef.current = false;
       setScanByPage((prev) => {
         Object.values(prev).forEach(releaseScanSession);
         return {};
@@ -381,17 +405,19 @@ function Editor() {
 
   useEffect(() => {
     const pageChanged = enhancePageKeyRef.current !== enhancePageKey;
-    enhancePageKeyRef.current = enhancePageKey;
+    if (pageChanged) {
+      enhancePageKeyRef.current = enhancePageKey;
+      enhanceDismissedRef.current = false;
+    }
     const hashEnhance = typeof window !== "undefined" && window.location.hash === "#enhance";
-    const auto = shouldAutoExpandEnhance({
+    const open = nextEnhanceOpen({
+      userClosed: enhanceDismissedRef.current,
       looksScanned: !!scanReport?.looksScanned,
       ocrLineCount: scanSession.ocrLines.length,
+      hashEnhance,
     });
-    if (auto || hashEnhance) {
-      setEnhanceOpen(true);
-      return;
-    }
-    if (pageChanged) setEnhanceOpen(false);
+    if (open) setEnhanceOpen(true);
+    else if (pageChanged) setEnhanceOpen(false);
   }, [enhancePageKey, scanReport?.looksScanned, scanSession.ocrLines.length]);
 
   // Desktop app: pick up a file opened from File → Open PDF or the Finder.
@@ -441,8 +467,16 @@ function Editor() {
         }
         setScale(viewport.scale);
         setViewSize({ width: viewport.width, height: viewport.height });
-        const ocrLines = scanByPage[page]?.ocrLines;
-        setLines(ocrLines?.length ? ocrLines : pageLines);
+        const ocrLines = scanByPage[page]?.ocrLines ?? [];
+        setNativeLines(pageLines);
+        setLines(
+          preferOcrOverlay({
+            enhanceOpen: enhanceOpenRef.current,
+            ocrLineCount: ocrLines.length,
+          })
+            ? ocrLines
+            : pageLines,
+        );
         setImages(pageImages);
         const report = await inspectPageScan(
           doc.bytes,
@@ -570,7 +604,7 @@ function Editor() {
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
 
   useEffect(() => {
-    if (!doc || !selected || selected.source === "ocr" || scanReport?.looksScanned) {
+    if (!doc || !selected || selected.source === "ocr") {
       setInspection(null);
       setInspecting(false);
       return;
@@ -629,7 +663,7 @@ function Editor() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [doc, selected, draft, scanReport?.looksScanned]);
+  }, [doc, selected, draft]);
 
   const openSample = async () => {
     setStatus("Building the sample quote");
@@ -652,17 +686,84 @@ function Editor() {
     setMode("text");
   };
 
+  const focusTextDraft = () => {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>("[data-testid=edit-draft]")?.focus();
+    });
+  };
+
+  const setEnhancePanelOpen = (open: boolean) => {
+    if (open) {
+      enhanceDismissedRef.current = false;
+      setEnhanceOpen(true);
+      if (scanSession.ocrLines.length) setLines(scanSession.ocrLines);
+      return;
+    }
+    enhanceDismissedRef.current = true;
+    setEnhanceOpen(enhanceOpenAfterTextChip());
+    if (typeof window !== "undefined" && window.location.hash === "#enhance") {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+    if (selected?.source === "ocr") {
+      setSelectedId(null);
+      setDraft("");
+    }
+    if (nativeLines.length) setLines(nativeLines);
+  };
+
+  const exitEnhanceToText = () => {
+    setMode("text");
+    setEnhancePanelOpen(false);
+    focusTextDraft();
+  };
+
+  const clearOcrForPage = () => {
+    setScanByPage((prev) => {
+      const session = prev[page];
+      if (!session) return prev;
+      return {
+        ...prev,
+        [page]: { ...session, ocrLines: [] },
+      };
+    });
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const [id, edit] of Object.entries(next)) {
+        if (edit.line.source === "ocr" && edit.line.page === page) delete next[id];
+      }
+      return next;
+    });
+    if (selected?.source === "ocr") {
+      setSelectedId(null);
+      setDraft("");
+    }
+    if (nativeLines.length) setLines(nativeLines);
+    setEnhancePanelOpen(false);
+    setMode("text");
+  };
+
+  useEffect(() => {
+    const ocr = scanByPage[page]?.ocrLines ?? [];
+    if (preferOcrOverlay({ enhanceOpen, ocrLineCount: ocr.length })) {
+      setLines(ocr);
+    } else if (nativeLines.length) {
+      setLines(nativeLines);
+    }
+  }, [enhanceOpen, nativeLines, page, scanByPage]);
+
   const expandSelectedLine = () => {
     if (!selected) return;
     const joined = expandToFullLine(lines, selected);
     if (!joined) return;
     const band = Math.max(3, selected.fontSize * 0.5);
-    setLines((prev) => {
+    const merge = (prev: TextLine[]) => {
       const kept = prev.filter(
         (line) => !(line.page === selected.page && Math.abs(line.y - selected.y) <= band),
       );
       return [...kept, joined].sort((a, b) => b.y - a.y || a.x - b.x);
-    });
+    };
+    setNativeLines(merge);
+    setLines(merge);
     select(joined);
   };
 
@@ -675,14 +776,27 @@ function Editor() {
   const commit = () => {
     if (!selected) return;
     const text = draft.trim();
-    if (selected.source !== "ocr" && scanMode) return;
-    if (text && text !== selected.text && !canCommitSafely(inspection, text, selected.text)) return;
+    if (
+      !canApplyTextEdit({
+        source: selected.source,
+        deferToScan: inspection?.deferToScan,
+        canCommitSafely: canCommitSafely(inspection, text, selected.text),
+        looksScanned,
+        hasTextOperator: selected.hasTextOperator,
+      })
+    ) {
+      return;
+    }
     setEdits((prev) => {
       const next = { ...prev };
       if (!text || text === selected.text) delete next[selected.id];
       else next[selected.id] = { line: selected, text, fontChoiceId };
       return next;
     });
+    if (text && text !== selected.text) {
+      setApplyNotice(APPLY_SUCCESS_MESSAGE);
+      setShowOriginalHint(true);
+    }
   };
 
   const patchScanSession = (partial: Partial<ScanPageSession>) => {
@@ -730,6 +844,8 @@ function Editor() {
       setLines(ocrLines);
       setSelectedId(null);
       setDraft("");
+      enhanceDismissedRef.current = false;
+      setEnhanceOpen(true);
       if (ocrLines.length === 0) {
         setError(
           "OCR did not find readable lines on this page. Try another enhance preset, then run it again.",
@@ -894,9 +1010,25 @@ function Editor() {
     if (!doc) return;
     setStatus("Writing the edited boxes");
     try {
+      const flattenedPages = new Set<number>();
+      for (const [pageKey, session] of Object.entries(scanByPage)) {
+        if (
+          shouldFlattenPageAsScan({
+            hasOriginalJpeg: !!session.originalJpeg,
+            hasOcrEdits: session.ocrLines.some((line) => !!edits[line.id]),
+            replaceWithCleaned: session.replaceWithCleaned,
+            hasNativeEdits: Object.values(edits).some(
+              (edit) => edit.line.page === Number(pageKey) && edit.line.source !== "ocr",
+            ),
+            ocrLineCount: session.ocrLines.length,
+          })
+        ) {
+          flattenedPages.add(Number(pageKey));
+        }
+      }
       const patches: TextPatch[] = [];
       for (const { line, text, fontChoiceId: editFontId } of Object.values(edits)) {
-        if (line.source === "ocr" || scanByPage[line.page]?.ocrLines.length) continue;
+        if (line.source === "ocr" || flattenedPages.has(line.page)) continue;
         const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
         let embedBytes: Uint8Array | undefined;
         if (option?.source === "system" && option.postscriptName) {
@@ -939,12 +1071,12 @@ function Editor() {
       }));
       const scanPatches: ScanPageExport[] = [];
       for (const [pageKey, session] of Object.entries(scanByPage)) {
+        if (!flattenedPages.has(Number(pageKey))) continue;
         const jpeg =
           session.replaceWithCleaned && session.enhancedJpeg
             ? session.enhancedJpeg
             : session.originalJpeg;
         if (!jpeg) continue;
-        if (!session.ocrLines.length && !session.replaceWithCleaned) continue;
         scanPatches.push({
           page: Number(pageKey),
           imageBytes: jpeg.bytes,
@@ -996,11 +1128,26 @@ function Editor() {
   const textOverlay = useMemo(
     () =>
       lines.map((line) => {
-        const isEdited = !!edits[line.id];
+        const overlay = overlayApplyState({
+          lineId: line.id,
+          originalText: line.text,
+          appliedText: edits[line.id]?.text,
+          selectedId,
+          draft,
+          memberIds: line.members?.map((run) => run.id),
+        });
+        const memberEdited = line.members?.some((run) => !!edits[run.id]);
+        const isEdited = overlay.isEdited || !!memberEdited;
+        const isSelected =
+          selectedId === line.id || line.members?.some((run) => run.id === selectedId);
+        const showLabel = overlay.isLivePreview || isEdited;
         return (
           <button
             key={line.id}
             type="button"
+            data-testid="text-overlay"
+            data-edited={isEdited ? "true" : "false"}
+            data-overlay-text={overlay.displayText}
             onClick={(event) => {
               if (event.shiftKey && line.members && line.members.length > 1) {
                 const rect = event.currentTarget.getBoundingClientRect();
@@ -1014,28 +1161,39 @@ function Editor() {
               }
               select(line);
             }}
-            title={line.text}
-            data-text={line.text}
+            title={overlay.displayText}
+            data-text={overlay.displayText}
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
-              "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors [@media(pointer:fine)]:min-h-0",
-              selectedId === line.id || line.members?.some((run) => run.id === selectedId)
-                ? "border-primary bg-primary/25"
+              "absolute min-h-[22px] cursor-text touch-manipulation overflow-hidden rounded-[2px] border text-left transition-colors [@media(pointer:fine)]:min-h-0",
+              isSelected
+                ? overlay.isLivePreview || isEdited
+                  ? "border-success bg-paper text-foreground shadow-sm"
+                  : "border-primary bg-primary/25"
                 : isEdited
-                  ? "border-success/70 bg-success/20"
+                  ? "border-success bg-paper text-foreground shadow-sm"
                   : line.source === "ocr"
-                    ? "border-primary/70 bg-primary/15"
-                    : scanMode
+                    ? "border-dashed border-primary/55 bg-primary/10"
+                    : looksScanned && !showingOcr
                       ? "border-dashed border-warning/70 bg-warning/15"
                       : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
             ].join(" ")}
           >
-            <span className="sr-only">Edit: {line.text}</span>
+            {showLabel ? (
+              <span
+                className="block h-full w-full truncate px-0.5 font-medium leading-[1.15]"
+                style={{ fontSize: `${Math.max(9, Math.min(22, line.fontSize * scale * 0.92))}px` }}
+              >
+                {overlay.displayText}
+              </span>
+            ) : (
+              <span className="sr-only">Edit: {line.text}</span>
+            )}
           </button>
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, scale, viewSize, selectedId, edits, scanMode],
+    [lines, scale, viewSize, selectedId, edits, draft, looksScanned, showingOcr],
   );
 
   const imageOverlay = useMemo(
@@ -1217,11 +1375,13 @@ function Editor() {
                       mode === value && !(value === "text" && enhanceOpen) ? "default" : "ghost"
                     }
                     className="flex-1"
-                    data-testid={value === "form" ? "edit-mode-form" : undefined}
+                    data-testid={
+                      value === "form" ? "edit-mode-form" : value === "text" ? "edit-mode-text" : undefined
+                    }
                     onClick={() => {
                       setMode(value);
-                      if (value === "text" && !scanMode) setEnhanceOpen(false);
-                      if (value === "form") setEnhanceOpen(false);
+                      if (value === "text") exitEnhanceToText();
+                      if (value === "form") setEnhancePanelOpen(false);
                     }}
                   >
                     <Icon className="size-3.5" /> {label}
@@ -1234,7 +1394,7 @@ function Editor() {
                   data-testid="edit-mode-enhance"
                   onClick={() => {
                     setMode("text");
-                    setEnhanceOpen(true);
+                    setEnhancePanelOpen(true);
                     window.requestAnimationFrame(() => {
                       const panel = document.getElementById("enhance-page-panel");
                       panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -1246,7 +1406,7 @@ function Editor() {
                 </Button>
               </div>
 
-              {scanMode && mode === "text" && (
+              {looksScanned && mode === "text" && !showingOcr && (
                 <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5">
                   <ScanLine className="mt-0.5 size-4 shrink-0 text-warning" />
                   <div>
@@ -1256,6 +1416,31 @@ function Editor() {
                         "Enhance page and OCR to edit amounts without painting Helvetica over the image."}
                     </p>
                   </div>
+                </div>
+              )}
+
+              {showingOcr && mode === "text" && (
+                <div className="mt-4 flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2.5">
+                  <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <div>
+                    <p className="text-sm font-semibold">OCR boxes on this page</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Click a line, edit it, Apply to page, then Export. Or press Text / Done to
+                      return to native PDF lines.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {editedIds.length > 0 && (
+                <div
+                  className="mt-4 sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2.5"
+                  data-testid="pending-export-banner"
+                >
+                  <p className="text-sm font-semibold">{pendingExportBanner(editedIds.length)}</p>
+                  <Button size="sm" onClick={() => void exportPdf()} disabled={!!status}>
+                    <Download className="size-3.5" /> Export
+                  </Button>
                 </div>
               )}
 
@@ -1373,11 +1558,13 @@ function Editor() {
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
                 {mode === "text" &&
-                  (scanMode
-                    ? scanSession.ocrLines.length
-                      ? `${scanSession.ocrLines.length} OCR lines on this page. Click one to edit; export writes a text layer on the page image.`
-                      : "This page looks scanned. Ghost boxes are not real text operators — use Enhance page & OCR in the side panel."
-                    : `${lines.length} text line${lines.length === 1 ? "" : "s"} on this page. Click a row to edit the whole line; Shift-click a fragment for one run.`)}
+                  textPageFooter({
+                    showingOcr,
+                    ocrLineCount: scanSession.ocrLines.length,
+                    looksScanned,
+                    nativeLineCount: nativeLines.length || lines.length,
+                    pendingTextEdits: editedIds.length,
+                  })}
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
@@ -1551,13 +1738,15 @@ function Editor() {
                     session={scanSession}
                     busy={scanBusy}
                     open={enhanceOpen}
-                    onOpenChange={setEnhanceOpen}
+                    onOpenChange={setEnhancePanelOpen}
                     onPreset={(preset) => patchScanSession({ preset })}
                     onReplaceToggle={(value) => patchScanSession({ replaceWithCleaned: value })}
                     onEnhanceAndOcr={() => void enhanceAndOcr()}
                     selectedId={selectedId}
                     editedIds={editedIds}
                     onSelectLine={select}
+                    onDone={exitEnhanceToText}
+                    onClearOcr={clearOcrForPage}
                   />
                   <Separator className="my-5" />
                   {!selected ? (
@@ -1662,13 +1851,23 @@ function Editor() {
                         <Button
                           size="sm"
                           className="flex-1"
+                          data-testid="apply-edit"
                           onClick={commit}
                           disabled={
-                            !selectedIsOcr &&
-                            (scanMode || !canCommitSafely(inspection, draft, selected.text))
+                            !canApplyTextEdit({
+                              source: selected.source,
+                              deferToScan: inspection?.deferToScan,
+                              canCommitSafely: canCommitSafely(
+                                inspection,
+                                draft.trim(),
+                                selected.text,
+                              ),
+                              looksScanned,
+                              hasTextOperator: selected.hasTextOperator,
+                            })
                           }
                         >
-                          Keep this change
+                          {APPLY_EDIT_LABEL}
                         </Button>
                         <Button
                           size="sm"
@@ -1679,6 +1878,19 @@ function Editor() {
                           <Undo2 className="size-3.5" />
                         </Button>
                       </div>
+                      {applyNotice && (
+                        <p
+                          className="mt-3 text-sm font-medium text-success"
+                          data-testid="apply-notice"
+                        >
+                          {applyNotice}
+                        </p>
+                      )}
+                      {showOriginalHint && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {ORIGINAL_UNCHANGED_HINT}
+                        </p>
+                      )}
                       <p className="mt-3 text-xs text-muted-foreground">
                         Original: <code className="font-mono">{selected.text}</code>
                       </p>
@@ -1730,7 +1942,25 @@ function Editor() {
               {pendingCount > 0 && (
                 <>
                   <Separator className="my-5" />
-                  <p className="eyebrow">Pending edits</p>
+                  <div
+                    className="rounded-md border border-success/40 bg-success/10 p-3"
+                    data-testid="sidebar-export"
+                  >
+                    <p className="text-sm font-semibold">
+                      {pendingExportBanner(editedIds.length || pendingCount)}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {ORIGINAL_UNCHANGED_HINT}
+                    </p>
+                    <Button
+                      className="mt-3 w-full min-h-11"
+                      onClick={() => void exportPdf()}
+                      disabled={!!status}
+                    >
+                      <Download className="mr-1.5 size-3.5" /> Export
+                    </Button>
+                  </div>
+                  <p className="eyebrow mt-5">Pending edits</p>
                   <ul className="mt-2 space-y-2">
                     {Object.values(edits).map(({ line, text }) => (
                       <li key={line.id} className="text-xs">

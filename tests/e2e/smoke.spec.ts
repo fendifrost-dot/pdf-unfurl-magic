@@ -61,7 +61,7 @@ test.describe("PDF Relief fixture smoke", () => {
     await line.click();
     const box = page.locator("textarea").first();
     await box.fill("Playwright patched docket");
-    await page.getByRole("button", { name: /Keep this change/i }).click();
+    await page.getByRole("button", { name: /Apply to page/i }).click();
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
