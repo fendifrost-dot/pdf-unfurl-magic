@@ -263,6 +263,10 @@ function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: 
   const recovered = recoverThousandsComma(prevText, fake, prev.x + prev.width, fontSize, prev.x);
   if (recovered) return recovered;
   if (shouldInsertJoinSpace(prevText, fake, prev.x + prev.width, fontSize)) return " ";
+  const nextMoney = looksLikeMoneyColumn(next.text);
+  const prevMoney = looksLikeMoneyColumn(prev.text);
+  if (nextMoney && !prevMoney && !prevText.endsWith(" ")) return " ";
+  if (nextMoney && prevMoney && !prevText.endsWith(" ")) return " ";
   // PDF.js sometimes over-reports width so a far amount looks like it abuts
   // the label. Still insert a space between two word-sized runs.
   if (
@@ -278,7 +282,7 @@ function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: 
 }
 
 export function joinRunsToLine(runs: TextLine[]): TextLine {
-  const sorted = [...runs].sort((a, b) => a.x - b.x);
+  const sorted = [...runs].filter((run) => run.text.trim()).sort((a, b) => a.x - b.x);
   const first = sorted[0];
   if (!first) {
     return {
@@ -358,6 +362,33 @@ export function joinRunsToLine(runs: TextLine[]): TextLine {
 }
 
 /**
+ * PDF.js baselines can drift a few points after an in-place rewrite (new
+ * glyphs, a Standard-14 stand-in, or a longer Paid From string). Content-
+ * stream originY stays put. Match either, with a band wide enough for that
+ * drift but tighter than a typical statement row pitch (~12pt).
+ */
+export function onSameVisualRow(
+  a: Pick<TextLine, "page" | "y" | "originY" | "fontSize">,
+  b: Pick<TextLine, "page" | "y" | "originY" | "fontSize">,
+): boolean {
+  if (a.page !== b.page) return false;
+  const em = Math.max(a.fontSize || 0, b.fontSize || 0, 8);
+  const ay = a.originY;
+  const by = b.originY;
+  const streamTol = Math.max(3, em * 0.5);
+  // Prefer content-stream origin when both runs have it — PDF.js y can drift
+  // after a rewrite without moving the operator, and must not glue the next row.
+  if (typeof ay === "number" && typeof by === "number") {
+    return Math.abs(ay - by) <= streamTol;
+  }
+  const pdfTol = Math.max(8, em);
+  if (Math.abs(a.y - b.y) <= pdfTol) return true;
+  if (typeof ay === "number" && Math.abs(ay - b.y) <= pdfTol) return true;
+  if (typeof by === "number" && Math.abs(by - a.y) <= pdfTol) return true;
+  return false;
+}
+
+/**
  * Merge adjacent runs on one baseline into a clickable row. A large gutter
  * (amount column) stays a separate box so a total can still be edited alone.
  * Use `expandToFullLine` to include those columns.
@@ -365,13 +396,12 @@ export function joinRunsToLine(runs: TextLine[]): TextLine {
 export function mergeLinesByBaseline(runs: TextLine[]): TextLine[] {
   if (runs.length === 0) return [];
   if (runs.length === 1) return [joinRunsToLine(runs)];
-  const sorted = [...runs].sort((a, b) => b.y - a.y || a.x - b.x);
+  const sorted = [...runs].filter((run) => run.text.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
   const bands: TextLine[][] = [];
   for (const run of sorted) {
     const band = bands[bands.length - 1];
     const anchor = band?.[0];
-    const yTol = Math.max(3, Math.max(run.fontSize, anchor?.fontSize ?? run.fontSize) * 0.5);
-    if (band && anchor && Math.abs(anchor.y - run.y) <= yTol) band.push(run);
+    if (band && anchor && onSameVisualRow(anchor, run)) band.push(run);
     else bands.push([run]);
   }
   const out: TextLine[] = [];
@@ -407,10 +437,7 @@ export function mergeLinesByBaseline(runs: TextLine[]): TextLine[] {
  * returns that line — never null — so UI can call this again after a merge.
  */
 export function expandToFullLine(lines: TextLine[], selected: TextLine): TextLine | null {
-  const band = Math.max(3, selected.fontSize * 0.5);
-  const mates = lines.filter(
-    (line) => line.page === selected.page && Math.abs(line.y - selected.y) <= band,
-  );
+  const mates = lines.filter((line) => onSameVisualRow(selected, line));
   const runs = mates.flatMap((line) => (line.members?.length ? line.members : [line]));
   if (runs.length === 0) {
     return (selected.members?.length ?? 0) >= 2 && lines.some((line) => line.id === selected.id)
@@ -459,17 +486,21 @@ export function splitLineByColumnShows(
       })),
     };
   }
+  const lineY = line.originY ?? line.y;
+  const xHits = shows.filter((show) => {
+    const showW = estimatedShowWidth(show);
+    const overlap = Math.min(show.x + showW, line.x + line.width) - Math.max(show.x, line.x);
+    return overlap > Math.min(showW, line.width) * 0.2;
+  });
+  const nearest = xHits.reduce<(typeof shows)[number] | null>(
+    (best, show) => (!best || Math.abs(show.y - lineY) < Math.abs(best.y - lineY) ? show : best),
+    null,
+  );
+  const streamY = nearest?.y ?? lineY;
   const band = Math.max(3, line.fontSize * 0.5);
-  const hits = shows
-    .filter((show) => {
-      if (Math.abs(show.y - line.y) > band) return false;
-      const showW = estimatedShowWidth(show);
-      const overlap = Math.min(show.x + showW, line.x + line.width) - Math.max(show.x, line.x);
-      return overlap > Math.min(showW, line.width) * 0.2;
-    })
-    .sort((a, b) => a.x - b.x);
+  const hits = xHits.filter((show) => Math.abs(show.y - streamY) <= band).sort((a, b) => a.x - b.x);
   if (hits.length < 2) {
-    return { ...line, originX: line.originX ?? line.x, originY: line.originY ?? line.y };
+    return { ...line, originX: line.originX ?? line.x, originY: nearest?.y ?? line.y };
   }
   const groups: Array<typeof hits> = [];
   let current: typeof hits = [];
@@ -535,14 +566,18 @@ function attachStreamHints(
   run: TextLine,
   shows: Array<{ text: string; x: number; y: number; fontSize: number }>,
 ): TextLine {
-  const band = Math.max(3, run.fontSize * 0.5);
-  const hits = shows.filter((show) => {
-    if (Math.abs(show.y - run.y) > band) return false;
+  const xHits = shows.filter((show) => {
     const showW = Math.max(show.fontSize * 0.6, show.text.length * show.fontSize * 0.5);
     const overlap = Math.min(show.x + showW, run.x + run.width) - Math.max(show.x, run.x);
     return overlap > Math.min(showW, run.width) * 0.25;
   });
-  if (hits.length === 0) return run;
+  if (xHits.length === 0) return run;
+  const nearest = xHits.reduce((best, show) =>
+    Math.abs(show.y - run.y) < Math.abs(best.y - run.y) ? show : best,
+  );
+  const streamY = nearest.y;
+  const band = Math.max(3, run.fontSize * 0.5);
+  const hits = xHits.filter((show) => Math.abs(show.y - streamY) <= band);
   const streamText = hits
     .slice()
     .sort((a, b) => a.x - b.x)
@@ -552,6 +587,8 @@ function attachStreamHints(
   return {
     ...run,
     text: display,
+    originX: run.originX ?? run.x,
+    originY: streamY,
     ...(streamText && streamText !== display ? { rawText: streamText } : {}),
     source: "content-stream",
     hasTextOperator: true,
@@ -572,9 +609,11 @@ function collectPdfjsItems(
   for (const item of items) {
     if (typeof item.str !== "string") continue;
     const str = item.str;
-    // Keep punctuation-only runs (comma, period, currency). Skip blank items.
-    if (!str) continue;
-    if (!str.trim() && !PUNCT_ONLY.test(str)) continue;
+    // Keep punctuation-only runs (comma, period, currency). Skip blank and
+    // whitespace-only items — PDF.js often invents a wide gutter " " between
+    // a description and the amount column, which inflates width and breaks
+    // baseline grouping after a slightly longer rewrite (Paid To → Paid From).
+    if (!str.trim()) continue;
     const t = item.transform ?? [];
     const height = Math.abs(t[3] ?? 0) || Math.abs(item.height ?? 0) || 10;
     const fontName = typeof item.fontName === "string" ? item.fontName : "";

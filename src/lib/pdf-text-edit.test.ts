@@ -149,6 +149,7 @@ describe("looksLikeAmountText", () => {
     expect(looksLikeMoneyColumn("(250.00)")).toBe(true);
     expect(looksLikeMoneyColumn("1,834.34")).toBe(true);
     expect(looksLikeMoneyColumn("4220268")).toBe(false);
+    expect(looksLikeMoneyColumn("12408508")).toBe(false);
   });
 });
 
@@ -177,6 +178,24 @@ describe("clusterBoxesByColumn", () => {
     expect(groups[0]?.[0]?.text).toMatch(/Paid To/);
     expect(groups[1]?.[0]?.x).toBe(400);
     expect(groups[2]?.[0]?.x).toBe(500);
+  });
+
+  it("treats trailing-minus statement amounts as their own money columns", () => {
+    const groups = clusterBoxesByColumn([
+      {
+        x: 14,
+        width: 380,
+        fontSize: 8,
+        text: "05-22 Paid To - Applecard Gsbank Payment Chk 12408508",
+      },
+      { x: 409, width: 40, fontSize: 8, text: "250.00-" },
+      { x: 517, width: 44, fontSize: 8, text: "1,834.34" },
+    ]);
+    expect(groups.map((group) => group.map((box) => box.text).join(" "))).toEqual([
+      "05-22 Paid To - Applecard Gsbank Payment Chk 12408508",
+      "250.00-",
+      "1,834.34",
+    ]);
   });
 
   it("splits a trailing-minus debit from the balance on a June-like row", () => {
@@ -1144,6 +1163,190 @@ describe("align writes x into the content stream", () => {
     expect(after.find((show) => show.text === "500.00")?.x).toBeCloseTo(400, 1);
     expect(after.find((show) => show.text === "1,200.00")?.x).toBeCloseTo(500, 1);
     expect(after.some((show) => show.text === "Paid To")).toBe(false);
+  });
+
+  it("description-only June-like row keeps 250.00- and 1,834.34 at their x", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const desc = "05-22 Paid To - Applecard Gsbank Payment Chk 12408508";
+    const nextDesc = desc.replace("Paid To", "Paid From");
+    page.drawText(desc, { x: 14, y: 700, size: 8, font });
+    page.drawText("250.00-", { x: 409, y: 700, size: 8, font: bold });
+    page.drawText("1,834.34", { x: 517, y: 700, size: 8, font: bold });
+    // Decoy row: same balance x so a naive find(x≈517) false-passes.
+    page.drawText("05-23 Paid To - Other Merchant Chk 9999", { x: 14, y: 680, size: 8, font });
+    page.drawText("10.00-", { x: 409, y: 680, size: 8, font: bold });
+    page.drawText("2,084.34", { x: 517, y: 680, size: 8, font: bold });
+    const bytes = (await doc.save()).slice().buffer as ArrayBuffer;
+    const descW = font.widthOfTextAtSize(desc, 8);
+    const amtW = bold.widthOfTextAtSize("250.00-", 8);
+    const balW = bold.widthOfTextAtSize("1,834.34", 8);
+    const line: TextLine = {
+      id: "applecard",
+      page: 1,
+      text: `${desc} 250.00- 1,834.34`,
+      rawText: `${desc}250.00-1,834.34`,
+      x: 14,
+      y: 700,
+      originX: 14,
+      originY: 700,
+      width: 547,
+      height: 10,
+      fontSize: 8,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      kind: "line",
+      source: "pdfjs",
+      hasTextOperator: true,
+      members: [
+        {
+          id: "desc",
+          page: 1,
+          text: desc,
+          x: 14,
+          y: 700,
+          originX: 14,
+          originY: 700,
+          width: Math.max(descW, 500),
+          height: 10,
+          fontSize: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          kind: "run",
+          source: "pdfjs",
+          hasTextOperator: true,
+        },
+        {
+          id: "amt",
+          page: 1,
+          text: "250.00-",
+          x: 409,
+          y: 700,
+          originX: 409,
+          originY: 700,
+          width: amtW,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          kind: "run",
+          source: "pdfjs",
+          hasTextOperator: true,
+        },
+        {
+          id: "bal",
+          page: 1,
+          text: "1,834.34",
+          x: 517,
+          y: 700,
+          originX: 517,
+          originY: 700,
+          width: balW,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          kind: "run",
+          source: "pdfjs",
+          hasTextOperator: true,
+        },
+      ],
+    };
+    const patches = patchesFromEdit({
+      line,
+      text: `${nextDesc} 250.00- 1,834.34`,
+      memberTexts: { desc: nextDesc },
+    });
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.originalText).toBe(desc);
+    expect(patches[0]?.rawText).toBeUndefined();
+    expect(patches.some((patch) => patch.originalText === "250.00-")).toBe(false);
+    expect(patches.some((patch) => patch.originalText === "1,834.34")).toBe(false);
+
+    const { bytes: out } = await applyTextPatchesWithReport(bytes, patches);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    const onApple = after.filter((show) => Math.abs(show.y - 700) < 2);
+    expect(onApple.some((show) => /Paid From/.test(show.text) && /Applecard/.test(show.text))).toBe(
+      true,
+    );
+    expect(onApple.some((show) => /Paid To/.test(show.text))).toBe(false);
+    expect(onApple.find((show) => show.text === "250.00-")?.x).toBeCloseTo(409, 1);
+    expect(onApple.find((show) => show.text === "1,834.34")?.x).toBeCloseTo(517, 1);
+    expect(onApple).toHaveLength(3);
+    expect(after.filter((show) => Math.abs(show.x - 517) < 2)).toHaveLength(2);
+  });
+
+  it("column-locked parent patch with joined rawText still leaves amount operators", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const desc = "05-22 Paid To - Applecard Gsbank Payment Chk 12408508";
+    const nextDesc = desc.replace("Paid To", "Paid From");
+    page.drawText(desc, { x: 14, y: 700, size: 8, font });
+    page.drawText("250.00-", { x: 409, y: 700, size: 8, font: bold });
+    page.drawText("1,834.34", { x: 517, y: 700, size: 8, font: bold });
+    const bytes = (await doc.save()).slice().buffer as ArrayBuffer;
+    const { bytes: out } = await applyTextPatchesWithReport(bytes, [
+      {
+        page: 1,
+        x: 14,
+        y: 700,
+        width: 547,
+        height: 10,
+        fontSize: 8,
+        text: `${nextDesc} 250.00- 1,834.34`,
+        originalText: `${desc} 250.00- 1,834.34`,
+        rawText: `${desc}250.00-1,834.34`,
+        fontFamily: "Helvetica",
+        memberBoxes: [
+          { x: 14, y: 700, width: 500, height: 10, text: desc },
+          { x: 409, y: 700, width: 40, height: 10, text: "250.00-" },
+          { x: 517, y: 700, width: 44, height: 10, text: "1,834.34" },
+        ],
+        coverBoxes: [
+          { x: 14, y: 700, width: 500, height: 10 },
+          { x: 409, y: 700, width: 40, height: 10 },
+          { x: 517, y: 700, width: 44, height: 10 },
+        ],
+        members: [
+          {
+            x: 14,
+            y: 700,
+            width: 500,
+            height: 10,
+            text: nextDesc,
+            originalText: desc,
+            fontSize: 8,
+          },
+          {
+            x: 409,
+            y: 700,
+            width: 40,
+            height: 10,
+            text: "250.00-",
+            originalText: "250.00-",
+            fontSize: 8,
+          },
+          {
+            x: 517,
+            y: 700,
+            width: 44,
+            height: 10,
+            text: "1,834.34",
+            originalText: "1,834.34",
+            fontSize: 8,
+          },
+        ],
+      },
+    ]);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.find((show) => show.text === "250.00-")?.x).toBeCloseTo(409, 1);
+    expect(after.find((show) => show.text === "1,834.34")?.x).toBeCloseTo(517, 1);
+    expect(after.some((show) => /Paid From/.test(show.text))).toBe(true);
+    expect(after).toHaveLength(3);
   });
 
   it("member targetX relocates one column without rewriting siblings", async () => {

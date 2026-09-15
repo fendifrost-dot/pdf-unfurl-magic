@@ -597,22 +597,38 @@ function memberNeedsWrite(member: TextPatchMember): boolean {
   return (member.text ?? "") !== (member.originalText ?? "") || memberHasTarget(member);
 }
 
+function memberPatchWidth(patch: TextPatch, member: TextPatchMember): number {
+  if (member.width > 0) return member.width;
+  const size = member.fontSize ?? patch.fontSize ?? 10;
+  const text = member.originalText || member.text || "";
+  return Math.max(size * 0.6, text.length * size * 0.5);
+}
+
+/** Joined-row rawText (desc+amount+balance) must not ride onto one column patch. */
+function memberPatchRawText(patch: TextPatch, member: TextPatchMember): string | undefined {
+  if (member.rawText) return member.rawText;
+  const parent = patch.rawText?.trim();
+  if (!parent) return undefined;
+  const needle = (member.originalText ?? member.text ?? "").trim();
+  if (!needle) return undefined;
+  if (textMatchKey(parent) === textMatchKey(needle)) return parent;
+  if (softMatchKey(parent) === softMatchKey(needle)) return parent;
+  return undefined;
+}
+
 function memberToPatch(patch: TextPatch, member: TextPatchMember): TextPatch {
   const original = member.originalText ?? "";
+  const rawText = memberPatchRawText(patch, member);
   return {
     page: patch.page,
     x: member.x,
     y: member.y,
-    width: member.width || patch.width,
+    width: memberPatchWidth(patch, member),
     height: member.height || patch.height,
     fontSize: member.fontSize ?? patch.fontSize,
     text: member.text ?? "",
     originalText: original || patch.originalText,
-    ...(member.rawText
-      ? { rawText: member.rawText }
-      : patch.rawText
-        ? { rawText: patch.rawText }
-        : {}),
+    ...(rawText ? { rawText } : {}),
     fontName: member.fontName ?? patch.fontName,
     fontFamily: member.fontFamily ?? patch.fontFamily,
     ...(patch.fontChoice ? { fontChoice: patch.fontChoice } : {}),
@@ -748,6 +764,28 @@ function expandLocatedShows(
   return { ...located, shows, score: located.score + extra.length };
 }
 
+/**
+ * Description-only edits must not rewrite or delete sibling Amount/Balance
+ * operators. Keep extra shows only when they sit in this column or their
+ * text is actually in the patch original (full-row rewrite / dropRest).
+ */
+function clipShowsToPatchColumns(shows: TextShow[], original: string): TextShow[] {
+  if (shows.length < 2) return shows;
+  const head = shows[0];
+  if (!head) return shows;
+  const kept: TextShow[] = [];
+  for (const show of shows) {
+    if (show === head) {
+      kept.push(show);
+      continue;
+    }
+    const prev = kept[kept.length - 1] ?? head;
+    const newColumn = shouldStartNewColumn({ ...prev, width: showWidth(prev) }, show);
+    if (!newColumn || showTextInOriginal(show, original)) kept.push(show);
+  }
+  return kept.length ? kept : shows;
+}
+
 function dropCoveredShowsOnOtherStreams(
   streams: PageStream[],
   located: LocatedShows,
@@ -768,7 +806,9 @@ function dropCoveredShowsOnOtherStreams(
     const extras = collectTextShows(stream.tokens).filter((show) => {
       if (!sameBaseline(head, show)) return false;
       if (!showCoveredByPatch(show, patch)) return false;
-      return hasMembers || showTextInOriginal(show, original);
+      if (showTextInOriginal(show, original)) return true;
+      if (shouldStartNewColumn({ ...head, width: showWidth(head) }, show)) return false;
+      return hasMembers;
     });
     if (extras.length === 0) continue;
     dropTrailingShows(stream, extras);
@@ -836,13 +876,13 @@ function findShows(
 
   if (best) {
     const expanded = expandLocatedShows(best, streams, patch, original);
-    return { stream: expanded.stream, shows: expanded.shows };
+    return { stream: expanded.stream, shows: clipShowsToPatchColumns(expanded.shows, original) };
   }
 
   const boxed = findShowsByBox(streams, patch);
   if (boxed) {
     const expanded = expandLocatedShows(boxed, streams, patch, original);
-    return { stream: expanded.stream, shows: expanded.shows };
+    return { stream: expanded.stream, shows: clipShowsToPatchColumns(expanded.shows, original) };
   }
 
   // Position fallback: same baseline, nearby x, similar digits/letters.
@@ -860,7 +900,7 @@ function findShows(
   }
   if (!positional) return null;
   const expanded = expandLocatedShows(positional, streams, patch, original);
-  return { stream: expanded.stream, shows: expanded.shows };
+  return { stream: expanded.stream, shows: clipShowsToPatchColumns(expanded.shows, original) };
 }
 
 function resolveWrite(

@@ -160,6 +160,34 @@ describe("group align against the selection box", () => {
     expect(amtPatch).toBeUndefined();
   });
 
+  it("patchesFromEdit does not copy joined-row rawText onto a description-only patch", () => {
+    const desc = "05-22 Paid To - Applecard Gsbank Payment Chk 12408508";
+    const line = run({
+      id: "row",
+      text: `${desc} 250.00- 1,834.34`,
+      rawText: `${desc}250.00-1,834.34`,
+      x: 14,
+      width: 547,
+      originX: 14,
+      members: [
+        run({ id: "desc", text: desc, x: 14, width: 500, originX: 14 }),
+        run({ id: "amt", text: "250.00-", x: 409, width: 40, originX: 409 }),
+        run({ id: "bal", text: "1,834.34", x: 517, width: 44, originX: 517 }),
+      ],
+    });
+    const patches = patchesFromEdit({
+      line,
+      text: `${desc.replace("Paid To", "Paid From")} 250.00- 1,834.34`,
+      memberTexts: { desc: desc.replace("Paid To", "Paid From") },
+    });
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.originalText).toBe(desc);
+    expect(patches[0]?.text).toMatch(/Paid From/);
+    expect(patches[0]?.rawText).toBeUndefined();
+    expect(patches[0]?.width).toBe(500);
+    expect(patches.some((patch) => /250\.00/.test(patch.originalText ?? ""))).toBe(false);
+  });
+
   it("shows align controls for a multi-run selection or after a marquee", () => {
     expect(ALIGN_SELECTION_LABEL).toMatch(/Align selection/);
     expect(SNAP_ORIGINAL_LABEL).toMatch(/Snap to original layout/);

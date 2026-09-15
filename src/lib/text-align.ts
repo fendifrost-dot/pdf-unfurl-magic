@@ -312,26 +312,37 @@ export function patchesFromEdit(
       return textChanged || moved;
     });
     if (changed.length === 0) return [];
-    return changed.map((member) => ({
-      page: line.page,
-      x: member.x,
-      y: member.y,
-      width: member.width || line.width,
-      height: member.height || line.height,
-      fontSize: member.fontSize ?? line.fontSize,
-      text: member.text,
-      originalText: member.originalText ?? member.text,
-      ...(member.rawText
-        ? { rawText: member.rawText }
-        : line.rawText
-          ? { rawText: line.rawText }
-          : {}),
-      fontName: member.fontName ?? line.fontName,
-      fontFamily: member.fontFamily ?? line.fontFamily,
-      ...(typeof member.targetX === "number" ? { targetX: member.targetX } : {}),
-      ...(typeof member.targetY === "number" ? { targetY: member.targetY } : {}),
-      ...extras,
-    }));
+    return changed.map((member) => {
+      const size = member.fontSize ?? line.fontSize;
+      const width =
+        member.width > 0
+          ? member.width
+          : Math.max(size * 0.6, (member.originalText || member.text || "").length * size * 0.5);
+      const memberRaw = member.rawText?.trim();
+      const lineRaw = line.rawText?.trim();
+      const needle = (member.originalText ?? member.text ?? "").trim();
+      const rawText =
+        memberRaw ||
+        (lineRaw && needle && lineRaw.replace(/\s+/g, "") === needle.replace(/\s+/g, "")
+          ? lineRaw
+          : undefined);
+      return {
+        page: line.page,
+        x: member.x,
+        y: member.y,
+        width,
+        height: member.height || line.height,
+        fontSize: size,
+        text: member.text,
+        originalText: member.originalText ?? member.text,
+        ...(rawText ? { rawText } : {}),
+        fontName: member.fontName ?? line.fontName,
+        fontFamily: member.fontFamily ?? line.fontFamily,
+        ...(typeof member.targetX === "number" ? { targetX: member.targetX } : {}),
+        ...(typeof member.targetY === "number" ? { targetY: member.targetY } : {}),
+        ...extras,
+      };
+    });
   }
   const textChanged = edit.text.trim() !== line.text;
   const movedMembers = members.filter((member) => positionMoved(member));

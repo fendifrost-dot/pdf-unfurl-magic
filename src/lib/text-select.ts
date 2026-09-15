@@ -5,7 +5,7 @@
  * (PDF user space, origin bottom-left) and takes every intersecting *run*,
  * including amount columns that stay split from their labels.
  */
-import { joinRunsToLine, type TextLine } from "./pdf-runtime";
+import { joinRunsToLine, onSameVisualRow, type TextLine } from "./pdf-runtime";
 
 export type PdfRect = {
   x: number;
@@ -97,8 +97,7 @@ function baselineBand(runs: TextLine[]): TextLine[][] {
   for (const run of sorted) {
     const band = bands[bands.length - 1];
     const anchor = band?.[0];
-    const yTol = Math.max(3, Math.max(run.fontSize, anchor?.fontSize ?? run.fontSize) * 0.5);
-    if (band && anchor && Math.abs(anchor.y - run.y) <= yTol) band.push(run);
+    if (band && anchor && onSameVisualRow(anchor, run)) band.push(run);
     else bands.push([run]);
   }
   return bands;

@@ -532,6 +532,67 @@ describe("Apply / Enhance exit contracts", () => {
     expect(fields.some((field) => /^Column \d+$/.test(field.label))).toBe(false);
   });
 
+  it("description-only memberTexts leave trailing-minus amount and balance untouched", () => {
+    const line = {
+      id: "applecard",
+      x: 14,
+      y: 700,
+      width: 547,
+      height: 10,
+      fontSize: 8,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "05-22 Paid To - Applecard Gsbank Payment Chk 12408508 250.00- 1,834.34",
+      members: [
+        {
+          id: "desc",
+          x: 14,
+          y: 700,
+          width: 380,
+          height: 10,
+          fontSize: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "05-22 Paid To - Applecard Gsbank Payment Chk 12408508",
+        },
+        {
+          id: "amt",
+          x: 409,
+          y: 700,
+          width: 40,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          text: "250.00-",
+        },
+        {
+          id: "bal",
+          x: 517,
+          y: 700,
+          width: 44,
+          height: 10,
+          fontSize: 8,
+          fontName: "F2",
+          fontFamily: "Helvetica",
+          text: "1,834.34",
+        },
+      ],
+    };
+    expect(columnFieldsForLine(line).map((field) => field.label)).toEqual([
+      "Description",
+      "Amount",
+      "Balance",
+    ]);
+    const members = membersForLinePatch(line, {
+      desc: "05-22 Paid From - Applecard Gsbank Payment Chk 12408508",
+    });
+    expect(members?.find((member) => member.originalText === "250.00-")?.text).toBe("250.00-");
+    expect(members?.find((member) => member.originalText === "250.00-")?.x).toBe(409);
+    expect(members?.find((member) => member.originalText === "1,834.34")?.text).toBe("1,834.34");
+    expect(members?.find((member) => member.originalText === "1,834.34")?.x).toBe(517);
+  });
+
   it("locates patch members at originX and sets targetX after overlay align", () => {
     const line = {
       id: "row",
