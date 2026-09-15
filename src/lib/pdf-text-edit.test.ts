@@ -404,6 +404,114 @@ describe("safe text replace", () => {
     ).rejects.toThrow(/safely replace/);
   });
 
+  it("splices a statement fragment without dropping neighbors or the comma amount", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    page.drawText("06-06 POS Debit- Debit Card 6205 06-26 Amazon Mktp Us", {
+      x: 56,
+      y: 648,
+      size: 10,
+      font,
+    });
+    page.drawText("2,500.00", { x: 420, y: 648, size: 10, font: bold });
+    const before = (await doc.save()).slice().buffer as ArrayBuffer;
+
+    const fragment = await inspectTextPatch(before, {
+      page: 1,
+      x: 56,
+      y: 648,
+      width: 180,
+      height: 12,
+      fontSize: 10,
+      text: "06 POS Debit Card 6205",
+      originalText: "06 POS Debit- Debit Card 6205",
+      fontFamily: "Helvetica",
+    });
+    expect(fragment.found).toBe(true);
+    expect(fragment.method).toBe("in-place");
+    expect(fragment.deferToScan).toBeFalsy();
+
+    const hyphen = await inspectTextPatch(before, {
+      page: 1,
+      x: 56,
+      y: 648,
+      width: 180,
+      height: 12,
+      fontSize: 10,
+      text: "POS Debit Card 6205",
+      originalText: "POS Debit - Debit Card 6205",
+      fontFamily: "Helvetica",
+    });
+    expect(hyphen.found).toBe(true);
+
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 56,
+        y: 648,
+        width: 180,
+        height: 12,
+        fontSize: 10,
+        text: "06 POS Debit Card 6205",
+        originalText: "06 POS Debit- Debit Card 6205",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    const after = await listPageShownText(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.some((t) => t.includes("06 POS Debit Card 6205"))).toBe(true);
+    expect(after.some((t) => t.includes("Amazon Mktp Us"))).toBe(true);
+    expect(after).toContain("2,500.00");
+    expect(after.some((t) => t.includes("Debit- Debit"))).toBe(false);
+  });
+
+  it("edits the committed comma-amounts fixture in place", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const buf = await readFile(join(process.cwd(), "fixtures/comma-amounts.pdf"));
+    const before = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    const shown = await listPageShownText(before, 1);
+    expect(shown).toContain("2,500.00");
+    expect(shown).toContain("1,987.00");
+    expect(shown).toContain("POS Debit");
+    expect(shown).toContain("Card 6205");
+
+    const inspection = await inspectTextPatch(before, {
+      page: 1,
+      x: 420,
+      y: 710,
+      width: 50,
+      height: 14,
+      fontSize: 11,
+      text: "2,750.00",
+      originalText: "2,500.00",
+      fontFamily: "Helvetica",
+    });
+    expect(inspection.found).toBe(true);
+    expect(inspection.method).toBe("in-place");
+    expect(inspection.fontLabel).toMatch(/Helvetica-Bold/);
+
+    const { bytes: out } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 420,
+        y: 710,
+        width: 50,
+        height: 14,
+        fontSize: 11,
+        text: "2,750.00",
+        originalText: "2,500.00",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    const after = await listPageShownText(out.slice().buffer as ArrayBuffer, 1);
+    expect(after).toContain("2,750.00");
+    expect(after).not.toContain("2,500.00");
+    expect(after).toContain("1,987.00");
+    expect(after).toContain("POS Debit");
+  });
+
   it("lists embedded fonts before any stand-in in the picker catalog", async () => {
     const sample = await buildSamplePdf();
     const fonts = await listPageEmbeddedFonts(sample.slice().buffer as ArrayBuffer, 1);

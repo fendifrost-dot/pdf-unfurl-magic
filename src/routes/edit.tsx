@@ -243,8 +243,14 @@ function Editor() {
     setFindings(null);
     setStatus("Opening the file in this tab");
     try {
-      const proxy = await openDocument(bytes);
-      setDoc({ name, base: name.replace(/\.pdf$/i, ""), bytes, proxy, pageCount: proxy.numPages });
+      const proxy = await openDocument(bytes.slice(0));
+      setDoc({
+        name,
+        base: name.replace(/\.pdf$/i, ""),
+        bytes: bytes.slice(0),
+        proxy,
+        pageCount: proxy.numPages,
+      });
       setEdits({});
       setImageEdits({});
       setMarks([]);
@@ -736,9 +742,7 @@ function Editor() {
       const all: string[] = [];
       for (let p = 1; p <= doc.pageCount; p++) {
         const ocrLines = scanByPage[p]?.ocrLines;
-        const pageLines = ocrLines?.length
-          ? ocrLines
-          : await extractLines(doc.proxy, p, doc.bytes);
+        const pageLines = ocrLines?.length ? ocrLines : await extractLines(doc.proxy, p, doc.bytes);
         for (const l of pageLines) all.push(edits[l.id]?.text ?? l.text);
       }
       setFindings(checkNumbers(all));
@@ -852,6 +856,7 @@ function Editor() {
             type="button"
             onClick={() => select(line)}
             title={line.text}
+            data-text={line.text}
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
               "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors [@media(pointer:fine)]:min-h-0",
@@ -1353,6 +1358,7 @@ function Editor() {
                         rows={4}
                         className="mt-3"
                         placeholder="Replacement text"
+                        data-testid="edit-draft"
                       />
                       <p
                         className={
@@ -1405,7 +1411,7 @@ function Editor() {
                         </Button>
                       </div>
                       <p className="mt-3 text-xs text-muted-foreground">
-                        Original: “{selected.text}”
+                        Original: <code className="font-mono">{selected.text}</code>
                       </p>
                     </>
                   )}
