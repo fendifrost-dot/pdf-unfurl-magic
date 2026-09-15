@@ -15,19 +15,20 @@ import { visualRowBands } from "./text-select";
 
 export const APPLY_EDIT_LABEL = "Apply to page";
 
-export const APPLY_SUCCESS_MESSAGE = "Applied. Export when you are done.";
+export const APPLY_SUCCESS_MESSAGE =
+  "Applied on this page (session only). Save As… when you want a new PDF.";
 
 export const ORIGINAL_UNCHANGED_HINT =
-  "The original file is never changed until you Export a new PDF.";
+  "Apply never writes a file. Save As… always creates a new PDF and never overwrites the one you opened.";
 
 export function pendingExportBanner(count: number): string {
   const noun = count === 1 ? "1 edit" : `${count} edits`;
-  return `${noun} ready — Export to save a new PDF`;
+  return `${noun} ready — Save As… to write a new PDF`;
 }
 
 export function ocrReadyNextStep(count: number): string {
   const noun = count === 1 ? "1 OCR line" : `${count} OCR lines`;
-  return `${noun} ready. Verify uncertain glyphs first, then click a line, edit it, Apply to page, then Export.`;
+  return `${noun} ready. Verify uncertain glyphs first, then click a line, edit it, Apply to page, then Save As….`;
 }
 
 export function textPageFooter(input: {
@@ -38,7 +39,7 @@ export function textPageFooter(input: {
   pendingTextEdits: number;
 }): string {
   if (input.pendingTextEdits > 0) {
-    return `${pendingExportBanner(input.pendingTextEdits)}. The original file is unchanged until you export.`;
+    return `${pendingExportBanner(input.pendingTextEdits)}. The original file is unchanged until you Save As….`;
   }
   if (input.showingOcr) {
     return ocrReadyNextStep(input.ocrLineCount);

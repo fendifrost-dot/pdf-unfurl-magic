@@ -40,6 +40,7 @@
       "desktop/main.cjs",
       "desktop/preload.cjs",
       "desktop/static-ui.cjs",
+      "desktop/save-path.cjs",
       "desktop/icon.png",
       "desktop/icon.svg",
       {

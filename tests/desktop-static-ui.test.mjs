@@ -110,3 +110,35 @@ test("path traversal does not escape the UI root", () => {
   assert.equal(fileForRequest(dist, "/../secret.txt"), null);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test("File menu offers Save As, Export alias, Close document, and Open PDF", () => {
+  const source = fs.readFileSync(path.join(desktopDir, "main.cjs"), "utf8");
+  assert.match(source, /label:\s*"Open PDF…"/);
+  assert.match(source, /label:\s*"Save As…"/);
+  assert.match(source, /label:\s*"Export"/);
+  assert.match(source, /label:\s*"Close document"/);
+  assert.match(source, /sendEditorCommand\("save-as"\)/);
+  assert.match(source, /sendEditorCommand\("close-document"\)/);
+  assert.match(source, /avoidOverwritePath/);
+  const packed = JSON.stringify(
+    JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).build.files,
+  );
+  assert.match(packed, /desktop\/save-path\.cjs/);
+});
+
+test("Save As never resolves to the uploaded source path", () => {
+  const { avoidOverwritePath, sameFsPath } = require(path.join(desktopDir, "save-path.cjs"));
+  const source = path.join(os.tmpdir(), "statement.pdf");
+  assert.equal(avoidOverwritePath(source, source), path.join(os.tmpdir(), "statement-edited.pdf"));
+  assert.equal(
+    avoidOverwritePath(path.join(os.tmpdir(), "statement-edited.pdf"), source),
+    path.resolve(path.join(os.tmpdir(), "statement-edited.pdf")),
+  );
+  const alreadyEdited = path.join(os.tmpdir(), "notes-edited.pdf");
+  assert.equal(
+    avoidOverwritePath(alreadyEdited, alreadyEdited),
+    path.join(os.tmpdir(), "notes-edited-copy.pdf"),
+  );
+  assert.equal(sameFsPath(source, source), true);
+  assert.equal(sameFsPath(source, path.join(os.tmpdir(), "statement-edited.pdf")), false);
+});

@@ -366,7 +366,8 @@ describe("Apply / Enhance exit contracts", () => {
   it("uses Apply language in banners and the primary label", () => {
     expect(APPLY_EDIT_LABEL).toBe("Apply to page");
     expect(APPLY_SUCCESS_MESSAGE).toMatch(/applied/i);
-    expect(pendingExportBanner(1)).toBe("1 edit ready — Export to save a new PDF");
+    expect(APPLY_SUCCESS_MESSAGE).toMatch(/session only/i);
+    expect(pendingExportBanner(1)).toBe("1 edit ready — Save As… to write a new PDF");
     expect(ocrReadyNextStep(125)).toMatch(/Apply to page/);
     expect(
       textPageFooter({

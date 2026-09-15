@@ -3,6 +3,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveUiRoot, startStaticUiServer } = require("./static-ui.cjs");
+const { avoidOverwritePath, sameFsPath } = require("./save-path.cjs");
 
 const DEV_PORT = Number(process.env.PDF_RELIEF_PORT || 47321);
 const DEV_URL = `http://127.0.0.1:${DEV_PORT}`;
@@ -15,6 +16,8 @@ let staticServer = null;
 let staticOrigin = null;
 /** @type {{ name: string, data: Buffer } | null} */
 let pendingPdf = null;
+/** Absolute path of the PDF this window opened from disk, if any. */
+let openedSourcePath = null;
 
 function isDevMode() {
   if (app.isPackaged) return false;
@@ -30,7 +33,9 @@ function isPdfPath(filePath) {
   return typeof filePath === "string" && filePath.toLowerCase().endsWith(".pdf") && fs.existsSync(filePath);
 }
 
-function readPdfFile(filePath) {
+function readPdfFile(filePath, trackSource = true) {
+  const resolved = path.resolve(filePath);
+  if (trackSource) openedSourcePath = resolved;
   return { name: path.basename(filePath), data: fs.readFileSync(filePath) };
 }
 
@@ -150,8 +155,20 @@ async function pickPdfDialog(multi = false) {
     properties: multi ? ["openFile", "multiSelections"] : ["openFile"],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
-  if (multi) return result.filePaths.filter(isPdfPath).map(readPdfFile);
-  return readPdfFile(result.filePaths[0]);
+  if (multi) {
+    return result.filePaths.filter(isPdfPath).map((filePath) => readPdfFile(filePath, false));
+  }
+  return readPdfFile(result.filePaths[0], true);
+}
+
+function sendEditorCommand(command) {
+  if (!mainWindow) return;
+  const fire = () => mainWindow?.webContents.send("desktop:editor-command", command);
+  if (!onEditorPage() && command === "save-as") {
+    void showEditor().then(fire);
+    return;
+  }
+  fire();
 }
 
 async function pickImageDialog() {
@@ -203,6 +220,20 @@ function buildMenu() {
             void openPdfFromMenu();
           },
         },
+        {
+          label: "Close document",
+          click: () => sendEditorCommand("close-document"),
+        },
+        {
+          label: "Save As…",
+          accelerator: "CmdOrCtrl+S",
+          click: () => sendEditorCommand("save-as"),
+        },
+        {
+          label: "Export",
+          click: () => sendEditorCommand("save-as"),
+        },
+        { type: "separator" },
         {
           label: "Editor",
           click: () => {
@@ -317,7 +348,7 @@ ipcMain.handle("desktop:save-file", async (_event, payload) => {
   const name = typeof payload?.name === "string" ? payload.name : "document.pdf";
   const ext = path.extname(name).replace(".", "") || "pdf";
   const result = await dialog.showSaveDialog(mainWindow ?? undefined, {
-    title: "Save file",
+    title: "Save As",
     defaultPath: path.join(app.getPath("documents"), name),
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   });
@@ -326,9 +357,21 @@ ipcMain.handle("desktop:save-file", async (_event, payload) => {
   if (!buffer) {
     throw new Error("Nothing to save.");
   }
-  fs.writeFileSync(result.filePath, buffer);
-  savedFilePaths.add(result.filePath);
-  return result.filePath;
+  const dest = avoidOverwritePath(result.filePath, openedSourcePath);
+  fs.writeFileSync(dest, buffer);
+  savedFilePaths.add(dest);
+  if (openedSourcePath && !sameFsPath(dest, result.filePath)) {
+    dialog.showMessageBox(mainWindow ?? undefined, {
+      type: "info",
+      message: "The original file was not overwritten.",
+      detail: `Saved as ${path.basename(dest)} instead.`,
+    });
+  }
+  return dest;
+});
+
+ipcMain.handle("desktop:document-closed", async () => {
+  openedSourcePath = null;
 });
 
 /**
