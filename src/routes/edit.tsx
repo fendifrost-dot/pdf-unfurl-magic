@@ -17,8 +17,7 @@ import {
   Type,
   Undo2,
 } from "lucide-react";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+import { AppShell } from "@/components/app-shell";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { ImageStudioPanel } from "@/components/image-studio-panel";
 import { Button } from "@/components/ui/button";
@@ -632,12 +631,12 @@ function Editor() {
             title={line.text}
             style={boxStyle(line.x, line.y, line.width, line.height, scale, viewSize)}
             className={[
-              "absolute cursor-text rounded-[2px] border transition-colors",
+              "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors [@media(pointer:fine)]:min-h-0",
               selectedId === line.id
                 ? "border-primary bg-primary/25"
                 : isEdited
                   ? "border-success/70 bg-success/20"
-                  : "border-transparent bg-transparent hover:border-primary/60 hover:bg-primary/15",
+                  : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
             ].join(" ")}
           >
             <span className="sr-only">Edit: {line.text}</span>
@@ -681,10 +680,8 @@ function Editor() {
   >;
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-
-      <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-10 sm:px-8">
+    <AppShell hideFooter>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-8 sm:py-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="eyebrow">Local editor · No Adobe license</p>
@@ -703,10 +700,19 @@ function Editor() {
               <Badge variant="secondary" className="text-gauge">
                 {pendingCount} pending change(s)
               </Badge>
-              <Button size="sm" variant="secondary" onClick={runCheck} disabled={!!status}>
+              <Button
+                className="min-h-11 touch-manipulation"
+                variant="secondary"
+                onClick={runCheck}
+                disabled={!!status}
+              >
                 <Calculator className="mr-1.5 size-3.5" /> Check numbers
               </Button>
-              <Button size="sm" onClick={exportPdf} disabled={!!status || pendingCount === 0}>
+              <Button
+                className="min-h-11 touch-manipulation"
+                onClick={exportPdf}
+                disabled={!!status || pendingCount === 0}
+              >
                 <Download className="mr-1.5 size-3.5" /> Export
               </Button>
             </div>
@@ -1124,8 +1130,6 @@ function Editor() {
           </div>
         )}
       </main>
-
-      <SiteFooter />
-    </div>
+    </AppShell>
   );
 }

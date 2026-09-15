@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+import { AppShell } from "@/components/app-shell";
 import { ScanStudio } from "@/components/scan/scan-studio";
 
 export const Route = createFileRoute("/scan")({
@@ -27,9 +26,8 @@ export const Route = createFileRoute("/scan")({
 
 function ScanPage() {
   return (
-    <div className="flex min-h-screen flex-col">
-      <SiteHeader />
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-8">
+    <AppShell>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-8 sm:py-10">
         <p className="eyebrow">Local scanner · No upload</p>
         <h1 className="mt-3 max-w-3xl font-display text-4xl font-semibold leading-tight sm:text-5xl">
           Scan a few pages. Export one clean PDF.
@@ -44,7 +42,6 @@ function ScanPage() {
           <ScanStudio />
         </div>
       </main>
-      <SiteFooter />
-    </div>
+    </AppShell>
   );
 }

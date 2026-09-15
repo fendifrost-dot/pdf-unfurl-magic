@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditRouteImport } from './routes/edit'
+import { Route as MergeRouteImport } from './routes/merge'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as SignRouteImport } from './routes/sign'
+import { Route as SplitRouteImport } from './routes/split'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const EditRoute = EditRouteImport.update({
   id: '/edit',
   path: '/edit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MergeRoute = MergeRouteImport.update({
+  id: '/merge',
+  path: '/merge',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ScanRoute = ScanRouteImport.update({
@@ -34,39 +41,52 @@ const SignRoute = SignRouteImport.update({
   path: '/sign',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SplitRoute = SplitRouteImport.update({
+  id: '/split',
+  path: '/split',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
+  '/merge': typeof MergeRoute
   '/scan': typeof ScanRoute
   '/sign': typeof SignRoute
+  '/split': typeof SplitRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
+  '/merge': typeof MergeRoute
   '/scan': typeof ScanRoute
   '/sign': typeof SignRoute
+  '/split': typeof SplitRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/edit': typeof EditRoute
+  '/merge': typeof MergeRoute
   '/scan': typeof ScanRoute
   '/sign': typeof SignRoute
+  '/split': typeof SplitRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/edit' | '/scan' | '/sign'
+  fullPaths: '/' | '/edit' | '/merge' | '/scan' | '/sign' | '/split'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/edit' | '/scan' | '/sign'
-  id: '__root__' | '/' | '/edit' | '/scan' | '/sign'
+  to: '/' | '/edit' | '/merge' | '/scan' | '/sign' | '/split'
+  id: '__root__' | '/' | '/edit' | '/merge' | '/scan' | '/sign' | '/split'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   EditRoute: typeof EditRoute
+  MergeRoute: typeof MergeRoute
   ScanRoute: typeof ScanRoute
   SignRoute: typeof SignRoute
+  SplitRoute: typeof SplitRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +105,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/merge': {
+      id: '/merge'
+      path: '/merge'
+      fullPath: '/merge'
+      preLoaderRoute: typeof MergeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/scan': {
       id: '/scan'
       path: '/scan'
@@ -99,14 +126,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/split': {
+      id: '/split'
+      path: '/split'
+      fullPath: '/split'
+      preLoaderRoute: typeof SplitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditRoute: EditRoute,
+  MergeRoute: MergeRoute,
   ScanRoute: ScanRoute,
   SignRoute: SignRoute,
+  SplitRoute: SplitRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
