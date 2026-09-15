@@ -135,15 +135,20 @@ export function ScanAwarePanel({
                 id="scan-replace-cleaned"
                 checked={session.replaceWithCleaned}
                 onCheckedChange={(value) => onReplaceToggle(value === true)}
-                disabled={!session.enhancedJpeg || !!busy}
+                disabled={
+                  !session.enhancedJpeg ||
+                  !!busy ||
+                  (!report.looksScanned && report.pdfJsLineCount > 0)
+                }
               />
               <div>
                 <Label htmlFor="scan-replace-cleaned" className="text-sm font-semibold">
                   Replace with cleaned image
                 </Label>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Off keeps the original page picture underneath. On writes the enhanced bitmap as
-                  the page image, still with an OCR text layer rather than a white-out.
+                  {report.looksScanned || report.pdfJsLineCount === 0
+                    ? "Off keeps the original page picture underneath. On writes the enhanced bitmap as the page image, still with an OCR text layer rather than a white-out."
+                    : "Digital pages keep the native PDF canvas. A cleaned bitmap is never stacked over live glyphs."}
                 </p>
               </div>
             </div>

@@ -80,6 +80,7 @@ import {
   overlayApplyState,
   overlayFillMode,
   overlayShouldPaintLabel,
+  editPreviewLayers,
   pendingExportBanner,
   preferOcrOverlay,
   shouldFlattenPageAsScan,
@@ -462,6 +463,12 @@ function Editor() {
     editedIds.length + imageEditIds.length + marks.length + scanExportReady + formPending;
   const scanSession = scanByPage[page] ?? emptyScanSession();
   const looksScanned = !!scanReport?.looksScanned;
+  const previewLayers = editPreviewLayers({
+    looksScanned,
+    nativeLineCount: nativeLines.length,
+    replaceWithCleaned: scanSession.replaceWithCleaned,
+    hasEnhancedPreview: !!scanSession.enhancedPreviewUrl,
+  });
   const showingOcr = preferOcrOverlay({
     enhanceOpen,
     ocrLineCount: scanSession.ocrLines.length,
@@ -1681,7 +1688,8 @@ function Editor() {
         });
         const memberEdited = line.members?.some((run) => !!edits[run.id]);
         const isMoved = positionMoved(line) || !!line.members?.some((run) => positionMoved(run));
-        const isEdited = overlay.isEdited || !!memberEdited || isMoved;
+        const textChanged = overlay.isEdited || !!memberEdited;
+        const isEdited = textChanged || isMoved;
         const isSelected =
           selectedId === line.id || !!line.members?.some((run) => run.id === selectedId);
         const fill = overlayFillMode({
@@ -1689,14 +1697,16 @@ function Editor() {
           isLivePreview: overlay.isLivePreview,
           showHighlight: showEditHighlight,
         });
-        const canvasShowsApplied = pageHasPatchedPreview && isEdited && line.source !== "ocr";
+        const canvasShowsApplied = pageHasPatchedPreview && textChanged && line.source !== "ocr";
         const columnar = isColumnarLine(line);
         const showLabel =
           overlayShouldPaintLabel({
-            isEdited,
+            isEdited: textChanged,
             isLivePreview: overlay.isLivePreview,
             showHighlight: showEditHighlight,
             canvasShowsApplied,
+            nativeCanvasVisible: previewLayers.showNativeCanvas,
+            source: showingOcr ? "ocr" : line.source,
           }) && !(columnar && overlay.isLivePreview && !showEditHighlight);
         return (
           <button
@@ -1705,6 +1715,7 @@ function Editor() {
             data-testid="text-overlay"
             data-edited={isEdited ? "true" : "false"}
             data-overlay-fill={fill}
+            data-overlay-label={showLabel ? "visible" : "sr-only"}
             data-overlay-text={overlay.displayText}
             onClick={(event) => {
               if (event.shiftKey && line.members && line.members.length > 1) {
@@ -1760,6 +1771,7 @@ function Editor() {
       showingOcr,
       showEditHighlight,
       pageHasPatchedPreview,
+      previewLayers.showNativeCanvas,
       marqueeEnabled,
     ],
   );
@@ -2075,7 +2087,12 @@ function Editor() {
 
               <div className="mt-4 max-h-[70vh] overflow-auto rounded-md bg-paper p-2 sm:p-3">
                 <div className="relative mx-auto w-full">
-                  <div ref={holderRef} className="w-full" />
+                  <div
+                    ref={holderRef}
+                    data-testid="native-page-canvas"
+                    aria-hidden={!previewLayers.showNativeCanvas}
+                    className={previewLayers.showNativeCanvas ? "w-full" : "w-full invisible"}
+                  />
                   {status ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-paper/70 text-sm text-paper-foreground">
                       <Loader2 className="mr-2 size-4 animate-spin" /> {status}…
@@ -2119,10 +2136,11 @@ function Editor() {
                             : undefined
                       }
                     >
-                      {scanSession.replaceWithCleaned && scanSession.enhancedPreviewUrl && (
+                      {previewLayers.showEnhancedBitmap && scanSession.enhancedPreviewUrl && (
                         <img
                           src={scanSession.enhancedPreviewUrl}
                           alt=""
+                          data-testid="enhanced-page-preview"
                           className="pointer-events-none absolute inset-0 h-full w-full object-contain"
                         />
                       )}

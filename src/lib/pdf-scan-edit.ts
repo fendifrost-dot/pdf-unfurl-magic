@@ -223,6 +223,13 @@ export function classifyPageScan(input: {
   }
 
   if (imageCount > 0 && pdfJsLineCount >= 1 && matchRatio < 0.35 && garbledRatio < 0.45) {
+    // Bank statements: logo/watermark + many real operators. PDF.js groups a
+    // row into one line while the stream has fragment shows, so exact
+    // line===show matching fails without the page being an OCR ghost.
+    // Sparse unmatched text over a page image still counts as a ghost.
+    if (showCount >= 8 && pdfJsLineCount >= 8) {
+      return { looksScanned: false, reason: "ok", message: "" };
+    }
     return {
       looksScanned: true,
       reason: "ocr-ghost",

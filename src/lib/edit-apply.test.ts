@@ -17,6 +17,9 @@ import {
   overlayShouldPaintLabel,
   pendingExportBanner,
   preferOcrOverlay,
+  editPreviewLayers,
+  editPreviewWouldDoublePaint,
+  resolveEditPreview,
   shouldFlattenPageAsScan,
   textOverlayChromeClass,
   textPageFooter,
@@ -465,6 +468,107 @@ describe("Apply / Enhance exit contracts", () => {
         canvasShowsApplied: false,
       }),
     ).toBe(true);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: false,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: false,
+        nativeCanvasVisible: true,
+        source: "ocr",
+      }),
+    ).toBe(false);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: true,
+        showHighlight: false,
+        canvasShowsApplied: false,
+        nativeCanvasVisible: true,
+        source: "ocr",
+      }),
+    ).toBe(false);
+  });
+
+  it("never stacks overlay labels or an enhanced bitmap on a digital native canvas", () => {
+    const idleDigital = resolveEditPreview({
+      looksScanned: false,
+      nativeLineCount: 42,
+      replaceWithCleaned: true,
+      hasEnhancedPreview: true,
+      enhanceOpen: true,
+      ocrLineCount: 80,
+      line: {
+        source: "pdfjs",
+        textChanged: false,
+        isLivePreview: false,
+        isMoved: true,
+        showHighlight: false,
+        canvasShowsApplied: false,
+      },
+    });
+    expect(idleDigital.showNativeCanvas).toBe(true);
+    expect(idleDigital.showEnhancedBitmap).toBe(false);
+    expect(idleDigital.paintVisibleOverlayLabel).toBe(false);
+    expect(editPreviewWouldDoublePaint(idleDigital)).toBe(false);
+
+    const ocrOverDigital = resolveEditPreview({
+      looksScanned: false,
+      nativeLineCount: 42,
+      replaceWithCleaned: false,
+      hasEnhancedPreview: true,
+      enhanceOpen: true,
+      ocrLineCount: 80,
+      line: {
+        source: "ocr",
+        textChanged: false,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: false,
+      },
+    });
+    expect(ocrOverDigital.showNativeCanvas).toBe(true);
+    expect(ocrOverDigital.showEnhancedBitmap).toBe(false);
+    expect(ocrOverDigital.paintVisibleOverlayLabel).toBe(false);
+    expect(editPreviewWouldDoublePaint(ocrOverDigital)).toBe(false);
+
+    const falseScanDetect = resolveEditPreview({
+      looksScanned: true,
+      nativeLineCount: 40,
+      replaceWithCleaned: true,
+      hasEnhancedPreview: true,
+      enhanceOpen: true,
+      ocrLineCount: 90,
+      line: {
+        source: "ocr",
+        textChanged: false,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: false,
+      },
+    });
+    expect(falseScanDetect.showNativeCanvas).not.toBe(falseScanDetect.showEnhancedBitmap);
+    expect(falseScanDetect.paintVisibleOverlayLabel).toBe(false);
+    expect(editPreviewWouldDoublePaint(falseScanDetect)).toBe(false);
+
+    const layers = editPreviewLayers({
+      looksScanned: false,
+      nativeLineCount: 40,
+      replaceWithCleaned: true,
+      hasEnhancedPreview: true,
+    });
+    expect(layers).toEqual({ showNativeCanvas: true, showEnhancedBitmap: false });
+
+    const scanReplace = editPreviewLayers({
+      looksScanned: true,
+      nativeLineCount: 0,
+      replaceWithCleaned: true,
+      hasEnhancedPreview: true,
+    });
+    expect(scanReplace).toEqual({ showNativeCanvas: false, showEnhancedBitmap: true });
+    expect(editPreviewWouldDoublePaint({ ...scanReplace, paintVisibleOverlayLabel: true })).toBe(
+      false,
+    );
   });
 
   it("labels description / amount / balance columns and maps drafts 1:1", () => {
@@ -542,12 +646,12 @@ describe("Apply / Enhance exit contracts", () => {
     expect(memberColumnLabel(texts[0]!, 0, texts)).toBe("Description");
     expect(memberColumnLabel(texts[1]!, 1, texts)).toBe("Amount");
     expect(memberColumnLabel(texts[2]!, 2, texts)).toBe("Balance");
-    expect(memberColumnLabel("(250.00)", 1, ["05-22 Paid To - Applecard", "(250.00)", "1,834.34"])).toBe(
-      "Amount",
-    );
-    expect(memberColumnLabel("250.00 -", 1, ["05-22 Paid To - Applecard", "250.00 -", "1,834.34"])).toBe(
-      "Amount",
-    );
+    expect(
+      memberColumnLabel("(250.00)", 1, ["05-22 Paid To - Applecard", "(250.00)", "1,834.34"]),
+    ).toBe("Amount");
+    expect(
+      memberColumnLabel("250.00 -", 1, ["05-22 Paid To - Applecard", "250.00 -", "1,834.34"]),
+    ).toBe("Amount");
 
     const line = {
       id: "row",
