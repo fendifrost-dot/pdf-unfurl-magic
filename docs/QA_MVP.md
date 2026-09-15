@@ -36,14 +36,14 @@ Use the committed files in `fixtures/` — not a real client PDF.
 
 ## Editor (`/edit`)
 
-- [ ] Drop `simple-text.pdf`. Badge **1 / 1**. Toolbar shows **Text / Image studio / Marks / Enhance**. Side panel has collapsed **Enhance & OCR this page** (optional copy; OCR does not start by itself). Click `REPLACE_ME`, change the words, **Keep this change**, **Export**. Re-open the export: new text is there; file is still a few KB.
+- [ ] Drop `simple-text.pdf`. Badge **1 / 1**. Toolbar shows **Text / Image studio / Marks / Enhance**. Side panel has collapsed **Enhance & OCR this page** (optional copy; OCR does not start by itself). Click `REPLACE_ME`, change the words, **Apply to page** (the on-page box shows the new text), **Export**. Re-open the export: new text is there; file is still a few KB. The original file on disk is unchanged until Export.
 - [ ] Drop `multi-font.pdf`. Click the Times amount and the Courier SKU. Neighbouring fonts must still look like themselves after export (no whole-page Helvetica flatten).
 - [ ] Drop `lines-and-text.pdf`. Edit one amount. Table rules and the signature line stay put.
 - [ ] Drop `image-and-text.pdf`. Edit the caption. The blue image is still an image, not a smeared bitmap of the whole page.
 - [ ] Drop `multi-page.pdf`. Step **1 / 3 → 3 / 3**. Edit page 1 only, export, re-open: pages 2 and 3 still show `PAGE_MARKER_2` and `PAGE_MARKER_3`.
 - [ ] Drop `comma-amounts.pdf`. Click `2,500.00`, change it, export. The comma and neighbouring text stay intact. Font picker lists the embedded font as Safe.
 
-- [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned** (not Helvetica Unsafe). Enhance panel is expanded. **Enhance page & OCR**. Click an OCR line in the side list (the synthetic 5×7 bitmap may OCR as fragments; a real statement scan yields amounts/labels), edit it, **Keep this change**, **Export**. Re-open: the new text is in the file as a text layer; the page picture remains unless **Replace with cleaned image** is on. Leave that toggle off once, then on once. Confirm `simple-text.pdf` still has **Safe in-place rewrite**, native text picking, and a collapsed Enhance entry (no scan banner).
+- [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned** (not Helvetica Unsafe). Enhance panel is expanded. **Enhance page & OCR**. Click an OCR line in the side list (the synthetic 5×7 bitmap may OCR as fragments; a real statement scan yields amounts/labels), edit it, **Apply to page**, **Export**. Re-open: the new text is in the file as a text layer; the page picture remains unless **Replace with cleaned image** is on. Leave that toggle off once, then on once. **Text** or **Done / Back to text editing** must close Enhance even after OCR. Confirm `simple-text.pdf` still has **Safe in-place rewrite**, native text picking, and a collapsed Enhance entry (no scan banner).
 
 ## Scan (`/scan`) — skip if that PR is not merged
 
