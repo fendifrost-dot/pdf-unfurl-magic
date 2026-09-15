@@ -18,6 +18,8 @@ Ordered by impact on headaches we still have, not by GitHub stars.
 
 **Do not do in the next two weeks:** OpenCV.js / jscanify as a dependency (~30 MB unpacked), scribe.js (AGPL), MuPDF.js (AGPL), Stirling as a vendored app, OCRmyPDF inside the browser, or any DocuSign-clone (OpenSign / Documenso / DocuSeal — all AGPL).
 
+**Shipped:** #1 is in tree (`src/lib/pdf-unicode-fonts.ts`, `public/fonts/`, `@pdf-lib/fontkit`). Text export embeds a subsetted Liberation/Noto face when Standard 14 cannot encode the run.
+
 ---
 
 ## How to use this map

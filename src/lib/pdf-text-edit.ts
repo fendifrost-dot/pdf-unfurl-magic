@@ -10,7 +10,9 @@
  *  1. Finds the matching Tj / TJ on the edited page's content stream.
  *  2. Rewrites that string (and Tf size if the copy no longer fits).
  *  3. Only if the original font cannot encode the new characters, removes
- *     the old show and appends a Standard 14 stand-in — never a cover rect.
+ *     the old show and appends a stand-in — Standard 14 when WinAnsi covers
+ *     the text, otherwise a bundled SIL OFL TTF via fontkit (PRIOR_ART #1).
+ *     Never a cover rect.
  *  4. Leaves every other page's content stream untouched.
  */
 
@@ -29,6 +31,7 @@ import {
 } from "pdf-lib";
 import {
   collectTextShows,
+  encodePdfHex,
   encodePdfLiteral,
   extractShownStrings,
   hasTextOperators,
@@ -53,6 +56,11 @@ import {
   type FontMatch,
 } from "./pdf-font-match";
 import type { EmbeddedFontInfo, FontChoice } from "./pdf-font-catalog";
+import {
+  embedUnicodeFallbackFont,
+  registerPdfFontkit,
+  resolveUnicodeFallback,
+} from "./pdf-unicode-fonts";
 import { fitFontSize } from "./text-helpers";
 
 export type TextPatch = {
@@ -69,7 +77,8 @@ export type TextPatch = {
   fontChoice?: FontChoice;
 };
 
-export type TextEditMethod = "in-place" | "redraw-standard" | "redraw-system" | "blocked";
+export type TextEditMethod =
+  "in-place" | "redraw-standard" | "redraw-system" | "redraw-unicode" | "blocked";
 
 export type TextEditBlockReason =
   "not-found" | "scan-page" | "missing-glyphs" | "unsafe-font" | null;
@@ -434,10 +443,11 @@ function appendRedraw(
   show: TextShow,
   fontKey: string,
   size: number,
+  encoded?: Token,
 ) {
   const color = show.fill;
   const text = patch.text.replace(/\s*\n\s*/g, " ");
-  const encoded = encodePdfLiteral(text);
+  const textToken = encoded ?? encodePdfLiteral(text);
   const x = show.x;
   const y = show.y;
   const snippet = [
@@ -472,7 +482,7 @@ function appendRedraw(
     { kind: "ws" as const, raw: " " },
     { kind: "op" as const, raw: "Tm", value: "Tm" },
     { kind: "ws" as const, raw: "\n" },
-    encoded,
+    textToken,
     { kind: "ws" as const, raw: " " },
     { kind: "op" as const, raw: "Tj", value: "Tj" },
     { kind: "ws" as const, raw: "\n" },
@@ -498,6 +508,8 @@ function buildInspection(
     embeddedFonts?: EmbeddedFontInfo[];
     resourceKey?: string;
     systemRedraw?: boolean;
+    unicodeRedraw?: boolean;
+    unicodeLabel?: string;
   } = {},
 ): TextEditInspection {
   let method: TextEditMethod = "blocked";
@@ -513,22 +525,25 @@ function buildInspection(
     blockReason = "unsafe-font";
   } else if (found && reuse) method = "in-place";
   else if (found && extras.systemRedraw) method = "redraw-system";
+  else if (found && extras.unicodeRedraw) method = "redraw-unicode";
   else if (found) method = "redraw-standard";
   else {
     method = "blocked";
     blockReason = blockReason ?? "not-found";
   }
 
-  const fontLabel = extras.deferToScan
-    ? extras.baseFont || match.label
-    : !found
-      ? "No text operator"
-      : extras.baseFont || match.label;
+  const fontLabel = extras.unicodeLabel
+    ? extras.unicodeLabel
+    : extras.deferToScan
+      ? extras.baseFont || match.label
+      : !found
+        ? "No text operator"
+        : extras.baseFont || match.label;
   const message = extras.deferToScan
     ? "This page has no text operators (likely a scan). Safe rewrite would invent an overlay. Use Enhance page or Scan to OCR it instead."
     : method === "blocked" && !found
       ? "This run was not found as a text operator on the page. If the page is a scan or OCR ghost, use Enhance page instead of rewriting Helvetica over the image. Export will refuse rather than paint over it."
-      : describeFontMatch(match, missingGlyphs);
+      : describeFontMatch(match, missingGlyphs, extras.unicodeLabel);
 
   const inspection: TextEditInspection = {
     found,
@@ -554,8 +569,11 @@ export function canCommitSafely(
   if (!draft.trim() || draft.trim() === original) return true;
   if (!inspection) return true;
   if (inspection.deferToScan) return false;
-  if (inspection.missingGlyphs.length > 0) return false;
   if (inspection.method === "blocked") return false;
+  if (charsMissingFromWinAnsi(draft).length > 0) {
+    return inspection.method === "redraw-unicode" || inspection.method === "redraw-system";
+  }
+  if (inspection.missingGlyphs.length > 0) return false;
   return true;
 }
 
@@ -594,7 +612,7 @@ export async function inspectTextPatch(
   patch: TextPatch,
 ): Promise<TextEditInspection> {
   const original = patch.originalText ?? "";
-  const missingGlyphs = charsMissingFromWinAnsi(patch.text);
+  const winAnsiMissingEarly = charsMissingFromWinAnsi(patch.text);
   const heuristic = matchFont({
     fontName: patch.fontName,
     fontFamily: patch.fontFamily,
@@ -602,14 +620,14 @@ export async function inspectTextPatch(
 
   const doc = await loadDoc(bytes);
   const page = doc.getPages()[patch.page - 1];
-  if (!page) return buildInspection(false, heuristic, missingGlyphs, false);
+  if (!page) return buildInspection(false, heuristic, winAnsiMissingEarly, false);
 
   const streams = allPageStreams(doc, page);
   const fonts = readPageFonts(page);
   const embeddedFonts = [...fonts.values()];
   const layerEmpty = !streams.some((stream) => hasTextOperators(stream.tokens));
   if (layerEmpty) {
-    return buildInspection(false, heuristic, missingGlyphs, false, {
+    return buildInspection(false, heuristic, winAnsiMissingEarly, false, {
       deferToScan: true,
       blockReason: "scan-page",
       embeddedFonts,
@@ -617,7 +635,7 @@ export async function inspectTextPatch(
   }
 
   if (!original.trim()) {
-    return buildInspection(false, heuristic, missingGlyphs, false, { embeddedFonts });
+    return buildInspection(false, heuristic, winAnsiMissingEarly, false, { embeddedFonts });
   }
 
   const located = findShows(streams, patch, original);
@@ -629,12 +647,28 @@ export async function inspectTextPatch(
     baseFont: fontInfo?.baseFont,
   });
   const reuse = located ? canReuseEmbeddedFont(fontInfo, original, patch.text, head) : false;
+  const winAnsiMissing = charsMissingFromWinAnsi(patch.text);
+  let missingGlyphs = reuse ? [] : winAnsiMissing;
+  let unicodeRedraw = false;
+  let unicodeLabel: string | undefined;
+  if (!reuse && winAnsiMissing.length > 0 && match.kind !== "unsafe") {
+    const fallback = await resolveUnicodeFallback(patch.text, match);
+    if (fallback.ok) {
+      missingGlyphs = [];
+      unicodeRedraw = true;
+      unicodeLabel = fallback.face.label;
+    } else {
+      missingGlyphs = fallback.missing;
+    }
+  }
   const systemRedraw = patch.fontChoice?.source === "system" && !!patch.fontChoice.embedBytes;
   return buildInspection(!!located, match, missingGlyphs, reuse, {
     ...(fontInfo?.baseFont ? { baseFont: fontInfo.baseFont } : {}),
     embeddedFonts,
     ...(head?.fontName ? { resourceKey: head.fontName } : {}),
     systemRedraw,
+    unicodeRedraw,
+    ...(unicodeLabel ? { unicodeLabel } : {}),
   });
 }
 
@@ -678,7 +712,6 @@ export async function applyTextPatchesWithReport(
     for (const patch of pagePatches) {
       const original = patch.originalText ?? "";
       const nextText = patch.text.replace(/\s*\n\s*/g, " ");
-      const missingGlyphs = charsMissingFromWinAnsi(nextText);
       const located = original ? findShows(streams, patch, original) : null;
       const head = located?.shows[0];
       const fontInfo = head ? fonts.get(head.fontName) : undefined;
@@ -705,17 +738,19 @@ export async function applyTextPatchesWithReport(
         );
         continue;
       }
-      if (missingGlyphs.length > 0 || match.kind === "unsafe") {
-        reports.push(blockedReport(patch, match, describeFontMatch(match, missingGlyphs)));
+      if (match.kind === "unsafe") {
+        reports.push(blockedReport(patch, match, describeFontMatch(match, [])));
         continue;
       }
 
       const reuse = canReuseEmbeddedFont(fontInfo, original, nextText, head);
+      const winAnsiMissing = charsMissingFromWinAnsi(nextText);
       const systemBytes =
         patch.fontChoice?.source === "system" ? patch.fontChoice.embedBytes : undefined;
       const preferSystem = !!systemBytes && patch.fontChoice?.source === "system";
+      const preferBundled = patch.fontChoice?.source === "bundled";
 
-      if (reuse && !preferSystem) {
+      if (reuse && !preferSystem && !preferBundled) {
         const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width);
         dropTrailingShows(located.stream, located.shows.slice(1));
         const reusedBytes =
@@ -753,7 +788,7 @@ export async function applyTextPatchesWithReport(
           method: "in-place",
           fontMatch: match,
           fontLabel: fontInfo?.baseFont || match.label,
-          missingGlyphs,
+          missingGlyphs: [],
           found: true,
         });
         continue;
@@ -761,13 +796,15 @@ export async function applyTextPatchesWithReport(
 
       if (systemBytes) {
         try {
-          const sysFont = await doc.embedFont(systemBytes);
+          await registerPdfFontkit(doc);
+          const sysFont = await doc.embedFont(systemBytes, { subset: true });
           const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, sysFont);
           const fontKey = ensurePageFont(page, sysFont);
           for (const show of [...located.shows].reverse()) {
             located.stream.tokens = removeShow(located.stream.tokens, show);
           }
-          appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size);
+          const encoded = encodePdfHex(sysFont.encodeText(nextText).asBytes(), nextText);
+          appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size, encoded);
           located.stream.dirty = true;
           reports.push({
             page: patch.page,
@@ -777,14 +814,45 @@ export async function applyTextPatchesWithReport(
             fontMatch: match,
             fontLabel:
               patch.fontChoice?.family || patch.fontChoice?.postscriptName || "system font",
-            missingGlyphs,
+            missingGlyphs: [],
             found: true,
             warning: `Wrote the local system font at the same baseline. The original resource was not reused.`,
           });
           continue;
         } catch {
-          // Fall through to Standard 14 — never write a corrupt overlay.
+          // Fall through to bundled Unicode or Standard 14 — never write a corrupt overlay.
         }
+      }
+
+      if (winAnsiMissing.length > 0 || preferBundled) {
+        const fallback = await resolveUnicodeFallback(nextText, match);
+        if (!fallback.ok) {
+          reports.push(
+            blockedReport(patch, match, describeFontMatch(match, fallback.missing), false),
+          );
+          continue;
+        }
+        const uniFont = await embedUnicodeFallbackFont(doc, fallback.face);
+        const size = shrinkSize(nextText, head.fontSize || patch.fontSize, patch.width, uniFont);
+        const fontKey = ensurePageFont(page, uniFont);
+        for (const show of [...located.shows].reverse()) {
+          located.stream.tokens = removeShow(located.stream.tokens, show);
+        }
+        const encoded = encodePdfHex(uniFont.encodeText(nextText).asBytes(), nextText);
+        appendRedraw(located.stream, { ...patch, text: nextText }, head, fontKey, size, encoded);
+        located.stream.dirty = true;
+        reports.push({
+          page: patch.page,
+          originalText: original,
+          text: nextText,
+          method: "redraw-unicode",
+          fontMatch: match,
+          fontLabel: fallback.face.label,
+          missingGlyphs: [],
+          found: true,
+          warning: `Original font ${fontInfo?.baseFont || "embedded subset"} cannot encode the new characters in WinAnsi; embedded ${fallback.face.label} (SIL OFL, PRIOR_ART #1) at the same baseline.`,
+        });
+        continue;
       }
 
       const stdFont = await embed(match.standard);
@@ -802,7 +870,7 @@ export async function applyTextPatchesWithReport(
         method: "redraw-standard",
         fontMatch: match,
         fontLabel: match.label,
-        missingGlyphs,
+        missingGlyphs: [],
         found: true,
         warning: `Original font ${fontInfo?.baseFont || "embedded subset"} cannot safely encode the new characters; wrote ${match.label} at the same baseline.`,
       });

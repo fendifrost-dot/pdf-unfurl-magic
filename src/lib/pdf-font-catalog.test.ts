@@ -61,5 +61,6 @@ describe("font catalog", () => {
       match: matchFont({ fontFamily: "SomeCustomDisplay" }),
     });
     expect(catalog.some((item) => item.standard === StandardFonts.Helvetica)).toBe(true);
+    expect(catalog.some((item) => item.source === "bundled")).toBe(true);
   });
 });

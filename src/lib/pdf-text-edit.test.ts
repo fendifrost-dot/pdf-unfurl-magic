@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import {
+  PDFDocument,
+  PDFDict,
+  PDFName,
+  PDFRawStream,
+  StandardFonts,
+  decodePDFRawStream,
+  rgb,
+} from "pdf-lib";
 import { buildSamplePdf } from "./pdf-tools";
 import {
   applyTextPatches,
@@ -13,6 +21,29 @@ import {
 } from "./pdf-text-edit";
 import { mergeFontCatalog } from "./pdf-font-catalog";
 import { groupTextItems } from "./pdf-runtime";
+
+async function decodePageToUnicode(bytes: Uint8Array): Promise<string> {
+  const doc = await PDFDocument.load(bytes.slice());
+  const page = doc.getPages()[0];
+  const fonts = page?.node.Resources()?.lookupMaybe(PDFName.of("Font"), PDFDict);
+  if (!fonts) return "";
+  const chunks: string[] = [];
+  for (const [, value] of fonts.entries()) {
+    const dict = doc.context.lookup(value);
+    if (!(dict instanceof PDFDict)) continue;
+    const toUnicode = dict.lookup(PDFName.of("ToUnicode"));
+    const stream =
+      toUnicode instanceof PDFRawStream
+        ? toUnicode
+        : toUnicode
+          ? doc.context.lookup(toUnicode)
+          : null;
+    if (stream instanceof PDFRawStream) {
+      chunks.push(Buffer.from(decodePDFRawStream(stream).decode()).toString("latin1"));
+    }
+  }
+  return chunks.join("\n");
+}
 
 describe("groupTextItems", () => {
   it("keeps table amounts as their own run so a total can be edited alone", () => {
@@ -66,9 +97,9 @@ describe("safe text replace", () => {
   it("rewrites a Helvetica-Bold amount in place and leaves page 2 intact", async () => {
     const sample = await buildSamplePdf();
     const before = sample.slice().buffer as ArrayBuffer;
-    const page3Before = await decodePageContent(before, 3);
-    expect(page3Before).toContain("REF-4421");
-    expect(page3Before).toContain("UNTOUCHED PAGE");
+    const page2Before = await decodePageContent(before, 2);
+    expect(page2Before).toContain("REF-4421");
+    expect(page2Before).toContain("UNTOUCHED PAGE");
 
     const shown = await listPageShownText(before, 1);
     expect(shown).toContain("1,987.00");
@@ -114,11 +145,11 @@ describe("safe text replace", () => {
     expect(after).toContain("SKU  NG-BENCH-40-OAK");
     expect(await pageHasWhiteCover(out, 1, { x: 480, y: 0, width: 80, height: 40 })).toBe(false);
 
-    const page3After = await decodePageContent(out, 3);
-    expect(page3After).toBe(page3Before);
+    const page2After = await decodePageContent(out, 2);
+    expect(page2After).toBe(page2Before);
   });
 
-  it("refuses characters that would bake in question-mark glyphs", async () => {
+  it("refuses CJK that bundled Liberation/Noto cannot encode", async () => {
     const sample = await buildSamplePdf();
     await expect(
       applyTextPatches(sample.slice().buffer as ArrayBuffer, [
@@ -134,6 +165,90 @@ describe("safe text replace", () => {
         },
       ]),
     ).rejects.toThrow(/safely replace/);
+  });
+
+  it("embeds Liberation Sans for Łódź and keeps commas instead of writing “?”", async () => {
+    const sample = await buildSamplePdf();
+    const before = sample.slice().buffer as ArrayBuffer;
+    const inspection = await inspectTextPatch(before, {
+      page: 1,
+      x: 56,
+      y: 0,
+      width: 200,
+      height: 20,
+      fontSize: 20,
+      text: "Łódź, 2,257.00",
+      originalText: "Northgate Joinery",
+      fontFamily: "Helvetica",
+    });
+    expect(inspection.found).toBe(true);
+    expect(inspection.method).toBe("redraw-unicode");
+    expect(inspection.missingGlyphs).toEqual([]);
+    expect(inspection.fontLabel).toMatch(/Liberation Sans|Noto Sans/);
+    expect(inspection.message).toMatch(/PRIOR_ART #1/);
+
+    const { bytes, reports } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 56,
+        y: 0,
+        width: 200,
+        height: 20,
+        fontSize: 20,
+        text: "Łódź, 2,257.00",
+        originalText: "Northgate Joinery",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    expect(reports[0]?.method).toBe("redraw-unicode");
+    expect(reports[0]?.missingGlyphs).toEqual([]);
+    const raw = Buffer.from(bytes).toString("latin1");
+    expect(raw).toMatch(/LiberationSans|NotoSans/);
+    const cmap = await decodePageToUnicode(bytes);
+    expect(cmap).toMatch(/beginbfchar/i);
+    expect(cmap.toUpperCase()).toContain("0141");
+    expect(cmap.toUpperCase()).toContain("002C");
+    const after = await listPageShownText(bytes.slice().buffer as ArrayBuffer, 1);
+    expect(after).not.toContain("Northgate Joinery");
+    expect(after.join(" ")).not.toMatch(/\?{2,}/);
+    expect(
+      await pageHasWhiteCover(bytes.slice().buffer as ArrayBuffer, 1, {
+        x: 50,
+        y: 0,
+        width: 220,
+        height: 30,
+      }),
+    ).toBe(false);
+  });
+
+  it("edits the comma-amounts fixture in place without dropping the thousands comma", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const file = await readFile("fixtures/comma-amounts.pdf");
+    const before = file.buffer.slice(
+      file.byteOffset,
+      file.byteOffset + file.byteLength,
+    ) as ArrayBuffer;
+    const shown = await listPageShownText(before, 1);
+    expect(shown).toContain("2,500.00");
+
+    const { bytes, reports } = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: 420,
+        y: 710,
+        width: 50,
+        height: 14,
+        fontSize: 11,
+        text: "2,750.00",
+        originalText: "2,500.00",
+        fontFamily: "Helvetica",
+      },
+    ]);
+    expect(reports[0]?.method).toBe("in-place");
+    const after = await listPageShownText(bytes.slice().buffer as ArrayBuffer, 1);
+    expect(after).toContain("2,750.00");
+    expect(after).not.toContain("2,500.00");
+    expect(after.join(" ")).not.toContain("?");
   });
 
   it("does not emit a TouchUp-style white cover when redrawing a stand-in font", async () => {
@@ -308,6 +423,7 @@ describe("safe text replace", () => {
     });
     expect(catalog[0]?.source).toBe("embedded");
     expect(catalog[0]?.safety).toBe("safe");
+    expect(catalog.some((item) => item.source === "bundled")).toBe(true);
     expect(catalog.some((item) => item.source === "standard")).toBe(true);
   });
 });

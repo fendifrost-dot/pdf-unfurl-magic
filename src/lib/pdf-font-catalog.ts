@@ -17,7 +17,7 @@ import {
   type FontMatch,
 } from "./pdf-font-match";
 
-export type FontSource = "embedded" | "system" | "standard";
+export type FontSource = "embedded" | "system" | "standard" | "bundled";
 export type FontSafety = "safe" | "unsafe";
 
 export type EmbeddedFontInfo = {
@@ -127,6 +127,43 @@ export function catalogEmbeddedFonts(
   });
 }
 
+export function catalogBundledUnicodeFonts(match: FontMatch): CatalogFont[] {
+  const bold = match.bold;
+  const italic = match.italic;
+  const label =
+    bold && italic
+      ? "Liberation Sans Bold Italic"
+      : bold
+        ? "Liberation Sans Bold"
+        : italic
+          ? "Liberation Sans Italic"
+          : "Liberation Sans";
+  return [
+    {
+      id: "bundled:liberation-sans",
+      source: "bundled",
+      label: `${label} (SIL OFL)`,
+      family: "helvetica",
+      bold,
+      italic,
+      safety: "safe",
+      reason:
+        "Bundled metric-compatible Helvetica stand-in (PRIOR_ART #1). Embedded as a subset when Standard 14 cannot encode the text — never a Creative Cloud download.",
+    },
+    {
+      id: "bundled:noto-sans",
+      source: "bundled",
+      label: "Noto Sans (SIL OFL)",
+      family: "helvetica",
+      bold: false,
+      italic: false,
+      safety: "safe",
+      reason:
+        "Bundled Unicode fallback for Latin/Greek/Cyrillic beyond WinAnsi. Used automatically when Liberation lacks a glyph.",
+    },
+  ];
+}
+
 export function catalogStandardFallbacks(match: FontMatch): CatalogFont[] {
   return [
     {
@@ -224,10 +261,11 @@ export function mergeFontCatalog(input: {
   const system = input.system?.length
     ? catalogSystemFonts(input.system)
     : catalogChromiumStandins();
+  const bundled = catalogBundledUnicodeFonts(input.match);
   const standard = catalogStandardFallbacks(input.match);
   const ids = new Set<string>();
   const out: CatalogFont[] = [];
-  for (const item of [...embedded, ...system, ...standard]) {
+  for (const item of [...embedded, ...system, ...bundled, ...standard]) {
     if (ids.has(item.id)) continue;
     ids.add(item.id);
     out.push(item);
