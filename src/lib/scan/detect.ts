@@ -224,7 +224,7 @@ function scoreQuad(quad: Quad, mag: Float32Array, width: number, height: number)
   const rect = rectangularity(quad);
   if (rect < 0.45) return 0;
   const edge = meanEdgeAlongQuad(quad, mag, width, height);
-  return area * rect * (0.25 + Math.min(edge, 180) / 180);
+  return area * (0.55 + 0.45 * rect) * (0.25 + Math.min(edge, 180) / 180);
 }
 
 function downscaleForDetect(source: ImageData): {
@@ -269,10 +269,12 @@ export function detectDocumentQuad(source: ImageData): DetectedDocument {
   const gray = boxBlurGray(toGray(data), width, height, 1);
   const mag = sobelMagnitude(gray, width, height);
   const threshold = otsuThreshold(gray);
+  // Include mid-tone ink/headers (sienna bars, marker) — not only near-white paper.
+  const paperCut = Math.min(threshold - 4, 78);
   const paper = new Uint8Array(gray.length);
   let bright = 0;
   for (let i = 0; i < gray.length; i++) {
-    if (gray[i]! >= threshold - 4) {
+    if (gray[i]! >= paperCut) {
       paper[i] = 1;
       bright += 1;
     }
@@ -281,7 +283,8 @@ export function detectDocumentQuad(source: ImageData): DetectedDocument {
   const candidates: Quad[] = [];
 
   if (paperRatio > 0.08 && paperRatio < 0.93) {
-    const mask = largestBlob(paper, width, height, 1);
+    const grown = dilateBinary(dilateBinary(paper, width, height), width, height);
+    const mask = largestBlob(grown, width, height, 1);
     if (mask) {
       const quad = quadFromMask(mask, width, height);
       if (quad) candidates.push(quad);

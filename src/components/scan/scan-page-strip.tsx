@@ -36,7 +36,7 @@ export function ScanPageStrip({ pages, selectedId, onSelect, onMove, onRemove }:
                 <img
                   src={page.thumbUrl}
                   alt={`Page ${index + 1}`}
-                  className="h-36 w-full object-cover"
+                  className="h-36 w-full bg-paper object-contain"
                 />
               </button>
               <div className="mt-1.5 flex items-center justify-between gap-1">

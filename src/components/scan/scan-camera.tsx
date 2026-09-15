@@ -88,31 +88,33 @@ export function ScanCamera({ onCapture, onCancel }: Props) {
 
   return (
     <div className="bench-panel overflow-hidden p-3 sm:p-4">
-      <div className="relative overflow-hidden rounded-md bg-black">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          className="block max-h-[70vh] w-full object-contain"
-        />
-        <svg
-          ref={overlayRef}
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          className="pointer-events-none absolute inset-0 h-full w-full"
-        >
-          <polygon
-            points="8,8 92,8 92,92 8,92"
-            fill="rgba(140,59,30,0.12)"
-            stroke="#c26a3a"
-            strokeWidth="0.8"
+      <div className="flex justify-center overflow-hidden rounded-md bg-black">
+        <div className="relative inline-block max-w-full">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            className="block h-auto max-h-[70vh] w-auto max-w-full"
           />
-        </svg>
-        {!ready && !error && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/80">
-            Asking for the camera…
-          </div>
-        )}
+          <svg
+            ref={overlayRef}
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            className="pointer-events-none absolute inset-0 h-full w-full"
+          >
+            <polygon
+              points="8,8 92,8 92,92 8,92"
+              fill="rgba(140,59,30,0.12)"
+              stroke="#c26a3a"
+              strokeWidth="0.8"
+            />
+          </svg>
+          {!ready && !error && (
+            <div className="absolute inset-0 flex items-center justify-center text-sm text-white/80">
+              Asking for the camera…
+            </div>
+          )}
+        </div>
       </div>
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">

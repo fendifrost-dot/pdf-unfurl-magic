@@ -131,13 +131,19 @@ function drawReceipt(ctx: CanvasRenderingContext2D, w: number, h: number) {
 }
 
 function renderClean(spec: SampleSpec): HTMLCanvasElement {
-  const width = spec.kind === "receipt" ? 520 : 900;
-  const height = spec.kind === "receipt" ? 720 : 1200;
-  const canvas = makeCanvas(width, height);
+  const innerW = spec.kind === "receipt" ? 520 : 900;
+  const innerH = spec.kind === "receipt" ? 720 : 1200;
+  const pad = 28;
+  const canvas = makeCanvas(innerW + pad * 2, innerH + pad * 2);
   const ctx = canvasContext(canvas);
-  if (spec.kind === "color") drawColorDocket(ctx, width, height);
-  else if (spec.kind === "whiteboard") drawWhiteboard(ctx, width, height);
-  else drawReceipt(ctx, width, height);
+  ctx.fillStyle = spec.kind === "whiteboard" ? "#eef2f3" : "#f7f2e8";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const inner = makeCanvas(innerW, innerH);
+  const ictx = canvasContext(inner);
+  if (spec.kind === "color") drawColorDocket(ictx, innerW, innerH);
+  else if (spec.kind === "whiteboard") drawWhiteboard(ictx, innerW, innerH);
+  else drawReceipt(ictx, innerW, innerH);
+  ctx.drawImage(inner, pad, pad);
   return canvas;
 }
 

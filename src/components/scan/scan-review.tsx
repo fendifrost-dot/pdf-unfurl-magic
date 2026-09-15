@@ -165,46 +165,48 @@ function QuadEditor({
   };
 
   return (
-    <div ref={boxRef} className="relative mx-auto max-w-full touch-none">
-      <img
-        src={src}
-        alt="Original capture with document corners"
-        className="block max-h-[68vh] w-auto max-w-full"
-      />
-      <svg viewBox={`0 0 ${width} ${height}`} className="absolute inset-0 h-full w-full">
-        <polygon
-          points={quad.map((p) => `${p.x},${p.y}`).join(" ")}
-          fill="rgba(140,59,30,0.14)"
-          stroke="#c26a3a"
-          strokeWidth={Math.max(width, height) * 0.004}
+    <div className="flex justify-center">
+      <div ref={boxRef} className="relative inline-block max-w-full touch-none">
+        <img
+          src={src}
+          alt="Original capture with document corners"
+          className="block h-auto max-h-[68vh] w-auto max-w-full"
         />
-        {quad.map((point, index) => (
-          <circle
-            key={index}
-            cx={point.x}
-            cy={point.y}
-            r={Math.max(width, height) * 0.018}
-            fill="#fff8ee"
-            stroke="#8c3b1e"
+        <svg viewBox={`0 0 ${width} ${height}`} className="absolute inset-0 h-full w-full">
+          <polygon
+            points={quad.map((p) => `${p.x},${p.y}`).join(" ")}
+            fill="rgba(140,59,30,0.14)"
+            stroke="#c26a3a"
             strokeWidth={Math.max(width, height) * 0.004}
-            className="cursor-grab"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              drag.current = index;
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }}
-            onPointerMove={(event) => {
-              if (drag.current === null) return;
-              const next: Quad = [quad[0], quad[1], quad[2], quad[3]];
-              next[drag.current] = toImage(event);
-              onChange(next);
-            }}
-            onPointerUp={() => {
-              drag.current = null;
-            }}
           />
-        ))}
-      </svg>
+          {quad.map((point, index) => (
+            <circle
+              key={index}
+              cx={point.x}
+              cy={point.y}
+              r={Math.max(width, height) * 0.018}
+              fill="#fff8ee"
+              stroke="#8c3b1e"
+              strokeWidth={Math.max(width, height) * 0.004}
+              className="cursor-grab"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                drag.current = index;
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (drag.current === null) return;
+                const next: Quad = [quad[0], quad[1], quad[2], quad[3]];
+                next[drag.current] = toImage(event);
+                onChange(next);
+              }}
+              onPointerUp={() => {
+                drag.current = null;
+              }}
+            />
+          ))}
+        </svg>
+      </div>
     </div>
   );
 }
