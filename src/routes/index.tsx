@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Check,
   FilePenLine,
+  Highlighter,
   Monitor,
   PenLine,
   ScanLine,
@@ -95,6 +96,11 @@ function Home() {
                 <Button asChild size="lg" className="min-h-12 touch-manipulation">
                   <Link to="/edit">
                     Open the editor <ArrowRight />
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">
+                  <Link to="/edit" hash="marks">
+                    Mark or redact <Highlighter />
                   </Link>
                 </Button>
                 <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">
