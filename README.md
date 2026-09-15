@@ -32,9 +32,13 @@ on Windows, **Open PDF Relief.bat**.
 | `npm run desktop:dev` | Desktop app against the dev server (127.0.0.1:47321) |
 | `npm run pack`        | Package installers with electron-builder (current platform) |
 | `npm run pack:mac`    | Build unsigned Apple Silicon `.dmg` and `.zip` into `release/` |
+| `npm run test:smoke`  | Load the synthetic PDFs in `fixtures/`, check page counts and export size |
+| `npm run fixtures:generate` | Rebuild the committed files in `fixtures/` |
 
 After a feature merge, rebuild the Dock app with `npm run pack:mac`. See
 [docs/DESKTOP_RELEASE.md](docs/DESKTOP_RELEASE.md) for install, Gatekeeper, and Dock pin.
+
+Shared QA: `docs/QA_MVP.md` (10-minute human pass after edit / scan / e-sign). Optional Playwright and Vitest paths are in `tests/e2e/README.md`.
 
 The desktop app serves the UI on 127.0.0.1:47321, so it never competes with the web dev
 server's port.

@@ -19,6 +19,8 @@
     "test": "vitest run && tsx --test src/lib/esign.test.ts",
     "test:scan": "node --experimental-strip-types --test src/lib/scan/geometry.node-test.ts",
     "test:image-studio": "node scripts/verify-image-studio.mjs",
+    "test:smoke": "node --test tests/smoke-pdf.test.mjs",
+    "fixtures:generate": "node fixtures/generate.mjs",
     "format": "prettier --write .",
     "postinstall": "node desktop/copy-worker.cjs",
     "desktop": "npm run build && electron .",

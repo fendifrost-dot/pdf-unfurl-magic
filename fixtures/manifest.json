@@ -1,0 +1,45 @@
+{
+  "generatedBy": "fixtures/generate.mjs",
+  "files": [
+    {
+      "file": "simple-text.pdf",
+      "pages": 1,
+      "kind": "simple-text",
+      "summary": "One Helvetica page with a REPLACE_ME line.",
+      "bytes": 1101,
+      "maxBytes": 8000
+    },
+    {
+      "file": "multi-font.pdf",
+      "pages": 1,
+      "kind": "multi-font",
+      "summary": "Helvetica, Helvetica-Bold, Times-Roman, Courier on one page.",
+      "bytes": 1251,
+      "maxBytes": 12000
+    },
+    {
+      "file": "lines-and-text.pdf",
+      "pages": 1,
+      "kind": "lines-text",
+      "summary": "Table rules plus a signature line. Neighbouring vectors must survive edits.",
+      "bytes": 1436,
+      "maxBytes": 12000
+    },
+    {
+      "file": "image-and-text.pdf",
+      "pages": 1,
+      "kind": "image-text",
+      "summary": "Embedded PNG plus a caption. Image must remain a PDF image object.",
+      "bytes": 1366,
+      "maxBytes": 20000
+    },
+    {
+      "file": "multi-page.pdf",
+      "pages": 3,
+      "kind": "multi-page",
+      "summary": "Three labeled pages for split / extract / merge and untouched-page checks.",
+      "bytes": 1858,
+      "maxBytes": 16000
+    }
+  ]
+}

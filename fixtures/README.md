@@ -1,0 +1,25 @@
+# Synthetic PDF fixtures
+
+Tiny, committed PDFs for PDF Relief QA. They are not real contracts, scans, or invoices.
+
+Regenerate (overwrites the `.pdf` files and `manifest.json`):
+
+```bash
+npm run fixtures:generate
+```
+
+| File | Pages | What it is for |
+| --- | --- | --- |
+| `simple-text.pdf` | 1 | Load / click-to-edit / e-sign drop. Helvetica only. Contains `REPLACE_ME`. |
+| `multi-font.pdf` | 1 | Font-matching after the edit-fidelity PR. Helvetica, Bold, Times, Courier. |
+| `lines-and-text.pdf` | 1 | Table rules + a signature line. Neighbouring vectors must survive a one-box edit. |
+| `image-and-text.pdf` | 1 | Embedded PNG + caption. The image object must not flatten when text is edited. |
+| `multi-page.pdf` | 3 | Split / extract / merge, page-count badge, untouched-page regression. Markers `PAGE_MARKER_1`…`3`. |
+
+Sizes are capped in `manifest.json` (`maxBytes`). The smoke harness fails if a fixture grows past that cap.
+
+Feature tests can import the loader without touching product code:
+
+```js
+import { loadFixture, readManifest } from "../tests/helpers/load-fixture.mjs";
+```
