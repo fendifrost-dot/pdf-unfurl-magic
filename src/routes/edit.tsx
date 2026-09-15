@@ -63,14 +63,17 @@ import {
   APPLY_EDIT_LABEL,
   APPLY_SUCCESS_MESSAGE,
   EDIT_HIGHLIGHT_STORAGE_KEY,
+  LEAVE_ENHANCE_LABEL,
   MARK_CHANGES_FOR_REVIEWER_HINT,
   ORIGINAL_UNCHANGED_HINT,
   SHOW_EDIT_HIGHLIGHT_LABEL,
   canApplyTextEdit,
   columnFieldsForLine,
+  emptySelectionCopy,
   enhanceOpenAfterTextChip,
   isColumnarLine,
   joinColumnDrafts,
+  linesForTextEdit,
   membersForLinePatch,
   remapColumnMemberTexts,
   nextEnhanceOpen,
@@ -83,6 +86,7 @@ import {
   textOverlayChromeClass,
   textOverlayLabelClass,
   textPageFooter,
+  textPickVisible,
 } from "@/lib/edit-apply";
 import { ScanAwarePanel } from "@/components/scan-aware-panel";
 import {
@@ -461,8 +465,18 @@ function Editor() {
   const showingOcr = preferOcrOverlay({
     enhanceOpen,
     ocrLineCount: scanSession.ocrLines.length,
+    nativeLineCount: nativeLines.length,
+    looksScanned,
   });
   const ocrVerify = scanSession.ocrVerify ?? [];
+  const emptyCopy = emptySelectionCopy({
+    showingOcr,
+    ocrLineCount: scanSession.ocrLines.length,
+    pendingVerify: pendingOcrSnippets(ocrVerify).length,
+    hasDoc: !!doc,
+    lineCount: lines.length,
+    textSelectMode,
+  });
   const marqueeEnabled = mode === "text" && textSelectMode === "marquee" && !showingOcr;
   const selectedIsOcr = selected?.source === "ocr";
   const selectedParent = selected ? parentLineFor(lines, selected) : undefined;
@@ -540,6 +554,7 @@ function Editor() {
         patchedPreviewRef.current = null;
       }
       enhanceDismissedRef.current = false;
+      setEnhanceOpen(false);
       setScanByPage((prev) => {
         Object.values(prev).forEach(releaseScanSession);
         return {};
@@ -572,7 +587,7 @@ function Editor() {
       if (window.location.hash === "#form") setMode("form");
       if (window.location.hash === "#enhance") {
         setMode("text");
-        setEnhanceOpen(true);
+        if (!enhanceDismissedRef.current) setEnhanceOpen(true);
       }
     };
     sync();
@@ -669,12 +684,12 @@ function Editor() {
         const ocrLines = scanByPage[page]?.ocrLines ?? [];
         setNativeLines(pageLines);
         setLines(
-          preferOcrOverlay({
+          linesForTextEdit({
             enhanceOpen: enhanceOpenRef.current,
-            ocrLineCount: ocrLines.length,
-          })
-            ? ocrLines
-            : pageLines,
+            ocrLines,
+            nativeLines: pageLines,
+            looksScanned: false,
+          }),
         );
         setImages(pageImages);
         const report = await inspectPageScan(
@@ -988,7 +1003,14 @@ function Editor() {
     if (open) {
       enhanceDismissedRef.current = false;
       setEnhanceOpen(true);
-      if (scanSession.ocrLines.length) setLines(scanSession.ocrLines);
+      setLines(
+        linesForTextEdit({
+          enhanceOpen: true,
+          ocrLines: scanSession.ocrLines,
+          nativeLines,
+          looksScanned,
+        }),
+      );
       return;
     }
     enhanceDismissedRef.current = true;
@@ -1000,7 +1022,14 @@ function Editor() {
       setSelectedId(null);
       setDraft("");
     }
-    if (nativeLines.length) setLines(nativeLines);
+    setLines(
+      linesForTextEdit({
+        enhanceOpen: false,
+        ocrLines: scanSession.ocrLines,
+        nativeLines,
+        looksScanned,
+      }),
+    );
   };
 
   const exitEnhanceToText = () => {
@@ -1034,14 +1063,22 @@ function Editor() {
     setMode("text");
   };
 
+  const applyTextPickMode = (next: TextSelectMode) => {
+    if (enhanceOpen) exitEnhanceToText();
+    setTextSelectMode(next);
+  };
+
   useEffect(() => {
     const ocr = scanByPage[page]?.ocrLines ?? [];
-    if (preferOcrOverlay({ enhanceOpen, ocrLineCount: ocr.length })) {
-      setLines(ocr);
-    } else if (nativeLines.length) {
-      setLines(nativeLines);
-    }
-  }, [enhanceOpen, nativeLines, page, scanByPage]);
+    setLines(
+      linesForTextEdit({
+        enhanceOpen,
+        ocrLines: ocr,
+        nativeLines,
+        looksScanned: !!scanReport?.looksScanned,
+      }),
+    );
+  }, [enhanceOpen, nativeLines, page, scanByPage, scanReport?.looksScanned]);
 
   const expandSelectedLine = () => {
     if (!selected) return;
@@ -1276,11 +1313,18 @@ function Editor() {
           },
         };
       });
-      setLines(ocrLines);
-      setSelectedId(null);
-      setDraft("");
       enhanceDismissedRef.current = false;
       setEnhanceOpen(true);
+      setLines(
+        linesForTextEdit({
+          enhanceOpen: true,
+          ocrLines,
+          nativeLines,
+          looksScanned,
+        }),
+      );
+      setSelectedId(null);
+      setDraft("");
       if (ocrLines.length === 0) {
         setError(
           "OCR did not find readable lines on this page. Try another enhance preset, then run it again.",
@@ -1451,7 +1495,14 @@ function Editor() {
       decision,
     );
     patchScanSession({ ocrLines: result.lines, ocrVerify: result.snippets });
-    if (preferOcrOverlay({ enhanceOpen, ocrLineCount: result.lines.length }) || showingOcr) {
+    if (
+      preferOcrOverlay({
+        enhanceOpen,
+        ocrLineCount: result.lines.length,
+        nativeLineCount: nativeLines.length,
+        looksScanned,
+      })
+    ) {
       setLines(result.lines);
     }
     const stillSelected = selectedId ? findLineOrMember(result.lines, selectedId) : undefined;
@@ -1917,31 +1968,33 @@ function Editor() {
                 </Button>
               </div>
 
-              {mode === "text" && !showingOcr && (
+              {textPickVisible(mode) && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <p className="text-xs font-medium text-muted-foreground">Text pick</p>
                   <div className="flex gap-1 rounded-md bg-muted p-1">
                     <Button
                       size="sm"
-                      variant={textSelectMode === "line" ? "default" : "ghost"}
+                      variant={textSelectMode === "line" && !enhanceOpen ? "default" : "ghost"}
                       data-testid="text-select-line"
-                      onClick={() => setTextSelectMode("line")}
+                      onClick={() => applyTextPickMode("line")}
                     >
                       <MousePointer2 className="size-3.5" /> Line
                     </Button>
                     <Button
                       size="sm"
-                      variant={textSelectMode === "marquee" ? "default" : "ghost"}
+                      variant={textSelectMode === "marquee" && !enhanceOpen ? "default" : "ghost"}
                       data-testid="text-select-marquee"
-                      onClick={() => setTextSelectMode("marquee")}
+                      onClick={() => applyTextPickMode("marquee")}
                     >
                       <BoxSelect className="size-3.5" /> Select any
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {textSelectMode === "marquee"
-                      ? "Drag a rectangle over any runs — including a label and its amount."
-                      : "Click a row to edit the whole line. Shift-click a fragment for one run."}
+                    {enhanceOpen
+                      ? "Line / Select any leave Enhance and restore click-to-edit on this page."
+                      : textSelectMode === "marquee"
+                        ? "Drag a rectangle over any runs — including a label and its amount."
+                        : "Click a row to edit the whole line. Shift-click a fragment for one run."}
                   </p>
                 </div>
               )}
@@ -1960,16 +2013,26 @@ function Editor() {
               )}
 
               {showingOcr && mode === "text" && (
-                <div className="mt-4 flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2.5">
-                  <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
-                  <div>
-                    <p className="text-sm font-semibold">OCR boxes on this page</p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      {pendingOcrSnippets(ocrVerify).length > 0
-                        ? "Verify uncertain OCR in the side panel (Accept, Correct, or Skip) before Apply. Enhance → Verify → Edit."
-                        : "Click a line, edit it, Apply to page, then Export. Or press Text / Done to return to native PDF lines."}
-                    </p>
+                <div className="mt-4 flex flex-wrap items-start justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2.5">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
+                    <div>
+                      <p className="text-sm font-semibold">OCR boxes on this page</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {pendingOcrSnippets(ocrVerify).length > 0
+                          ? "Verify uncertain OCR in the side panel (Accept, Correct, or Skip) before Apply. Enhance → Verify → Edit."
+                          : "Click a line, edit it, Apply to page, then Export. Or leave Enhance to return to native PDF lines."}
+                      </p>
+                    </div>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    data-testid="leave-enhance"
+                    onClick={exitEnhanceToText}
+                  >
+                    <Type className="size-3.5" /> {LEAVE_ENHANCE_LABEL}
+                  </Button>
                 </div>
               )}
 
@@ -2359,22 +2422,8 @@ function Editor() {
                   <Separator className="my-5" />
                   {!selected ? (
                     <div className="py-8 text-center">
-                      <p className="font-display text-base font-semibold">
-                        {lines.length === 0 && doc
-                          ? "No text operators on this page"
-                          : "Nothing selected"}
-                      </p>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {scanSession.ocrLines.length > 0
-                          ? pendingOcrSnippets(ocrVerify).length > 0
-                            ? "Verify uncertain OCR above, then click a confirmed line."
-                            : "Click an OCR line above or a box on the page."
-                          : lines.length === 0 && doc
-                            ? "Use Enhance & OCR this page when this is a scan or the picture is hard to read. A Safe edit here would paint over the image."
-                            : textSelectMode === "marquee"
-                              ? "Drag a rectangle across any text runs, then edit the merged draft."
-                              : "Click any line on the page to open it here, or switch to Image studio. Enhance is optional if picking feels wrong."}
-                      </p>
+                      <p className="font-display text-base font-semibold">{emptyCopy.title}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{emptyCopy.body}</p>
                       {lines.length === 0 && doc && (
                         <Button asChild className="mt-4" variant="secondary" size="sm">
                           <a href="/scan">Open Scan</a>

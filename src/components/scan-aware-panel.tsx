@@ -52,7 +52,8 @@ export function ScanAwarePanel({
   const ocrCount = session.ocrLines.length;
   const emphasized = shouldAutoExpandEnhance({
     looksScanned: report.looksScanned,
-    ocrLineCount: ocrCount,
+    // OCR leftover must not keep Enhance visually "on" after Leave / Text / Line.
+    ocrLineCount: open ? ocrCount : 0,
   });
   const copy = enhanceEntryCopy(emphasized);
 
