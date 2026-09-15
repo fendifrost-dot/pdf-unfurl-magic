@@ -123,9 +123,9 @@ export function looksLikeAmountText(text: string): boolean {
   return /^-?\$?-?[\d,]+(?:\.\d+)?%?$/.test(t);
 }
 
-export function clusterBoxesByColumn<T extends { x: number; width: number; fontSize?: number }>(
-  boxes: T[],
-): T[][] {
+export function clusterBoxesByColumn<
+  T extends { x: number; width: number; fontSize?: number; text?: string },
+>(boxes: T[]): T[][] {
   const sorted = [...boxes].sort((a, b) => a.x - b.x);
   const groups: T[][] = [];
   let current: T[] = [];
@@ -138,7 +138,14 @@ export function clusterBoxesByColumn<T extends { x: number; width: number; fontS
     const gap = box.x - (prev.x + prev.width);
     const em = Math.max(box.fontSize ?? 8, prev.fontSize ?? 8, 8);
     const columnGap = Math.max(COLUMN_EM * em, COLUMN_MIN_GAP);
-    if (gap > columnGap) {
+    const xDelta = box.x - prev.x;
+    const amountColumn =
+      looksLikeAmountText(prev.text ?? "") &&
+      looksLikeAmountText(box.text ?? "") &&
+      xDelta > Math.max(24, em * 2.5);
+    // PDF.js often over-reports run width so a far amount looks like it abuts
+    // the description. Still split when the next box starts far to the right.
+    if (gap > columnGap || xDelta > Math.max(columnGap * 3, 120) || amountColumn) {
       groups.push(current);
       current = [box];
     } else {
@@ -471,7 +478,12 @@ function clusterShowsByColumn(shows: TextShow[]): TextShow[][] {
     const gap = show.x - (prev.x + showWidth(prev));
     const em = Math.max(show.fontSize, prev.fontSize, 8);
     const columnGap = Math.max(COLUMN_EM * em, COLUMN_MIN_GAP);
-    if (gap > columnGap) {
+    const xDelta = show.x - prev.x;
+    const amountColumn =
+      looksLikeAmountText(prev.text) &&
+      looksLikeAmountText(show.text) &&
+      xDelta > Math.max(24, em * 2.5);
+    if (gap > columnGap || xDelta > Math.max(columnGap * 3, 120) || amountColumn) {
       groups.push(current);
       current = [show];
     } else {
@@ -490,6 +502,7 @@ export function showsAreColumnar(
     x: show.x,
     width: Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5),
     fontSize: show.fontSize,
+    text: show.text,
   }));
   return clusterBoxesByColumn(boxes).length > 1;
 }

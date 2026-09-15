@@ -9,6 +9,7 @@ import {
   rgb,
 } from "pdf-lib";
 import { buildSamplePdf } from "./pdf-tools";
+import { groupTextItems, joinRunsToLine, mergeLinesByBaseline } from "./pdf-runtime";
 import {
   applyTextPatches,
   applyTextPatchesWithReport,
@@ -22,7 +23,6 @@ import {
   splitDraftAcrossColumns,
 } from "./pdf-text-edit";
 import { mergeFontCatalog } from "./pdf-font-catalog";
-import { groupTextItems } from "./pdf-runtime";
 
 async function decodePageToUnicode(bytes: Uint8Array): Promise<string> {
   const doc = await PDFDocument.load(bytes.slice());
@@ -57,6 +57,35 @@ describe("groupTextItems", () => {
       1,
     );
     expect(lines.map((l) => l.text)).toEqual(["Total due", "1,987.00"]);
+  });
+
+  it("does not glue a far amount onto a description when PDF.js over-reports width", () => {
+    const lines = groupTextItems(
+      [
+        {
+          str: "06-06 Paid To Chk 4220268",
+          x: 50,
+          y: 700,
+          w: 350,
+          h: 8,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+        },
+        { str: "500.00", x: 400, y: 700, w: 40, h: 8, fontName: "F1", fontFamily: "Helvetica" },
+        { str: "4,972.29", x: 500, y: 700, w: 44, h: 8, fontName: "F1", fontFamily: "Helvetica" },
+      ],
+      1,
+    );
+    expect(lines.map((l) => l.text)).toEqual(["06-06 Paid To Chk 4220268", "500.00", "4,972.29"]);
+    const merged = mergeLinesByBaseline(lines);
+    expect(merged.map((l) => l.text)).toEqual(["06-06 Paid To Chk 4220268", "500.00", "4,972.29"]);
+    const row = joinRunsToLine(lines);
+    expect(row.text).not.toMatch(/4220268,500/);
+    expect(row.members?.map((m) => m.text)).toEqual([
+      "06-06 Paid To Chk 4220268",
+      "500.00",
+      "4,972.29",
+    ]);
   });
 
   it("joins a wrapped sentence on the same baseline", () => {

@@ -275,9 +275,15 @@ type LineLike = {
 };
 
 export function memberColumnLabel(groupText: string, index: number, groupTexts: string[]): string {
-  if (looksLikeAmountText(groupText)) {
+  const tokens = groupText.trim().split(/\s+/).filter(Boolean);
+  const amountLike = tokens.length > 0 && tokens.every((token) => looksLikeAmountText(token));
+  if (amountLike) {
+    if (tokens.length > 1) return "Amount / Balance";
     const amountIndexes = groupTexts
-      .map((text, i) => (looksLikeAmountText(text) ? i : -1))
+      .map((text, i) => {
+        const parts = text.trim().split(/\s+/).filter(Boolean);
+        return parts.length > 0 && parts.every((token) => looksLikeAmountText(token)) ? i : -1;
+      })
       .filter((i) => i >= 0);
     if (amountIndexes.length > 1 && index === amountIndexes[amountIndexes.length - 1]) {
       return "Balance";
@@ -289,7 +295,7 @@ export function memberColumnLabel(groupText: string, index: number, groupTexts: 
 }
 
 export function columnFieldsForLine(line: LineLike): ColumnField[] {
-  const members = line.members?.length ? line.members : [];
+  const members = (line.members?.length ? line.members : []).filter((run) => run.text.trim());
   if (members.length < 2) return [];
   const groups = clusterBoxesByColumn(members);
   if (groups.length < 2) return [];

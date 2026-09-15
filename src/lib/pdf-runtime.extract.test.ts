@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { buildSamplePdf } from "./pdf-tools";
 import {
   extractLines,
@@ -11,7 +12,13 @@ import {
   joinRunsToLine,
   type RawTextItem,
 } from "./pdf-runtime";
-import { applyTextPatchesWithReport, inspectTextPatch, listPageShownText } from "./pdf-text-edit";
+import {
+  applyTextPatchesWithReport,
+  inspectTextPatch,
+  listPageShownText,
+  listPageTextShows,
+} from "./pdf-text-edit";
+import { columnFieldsForLine, membersForLinePatch } from "./edit-apply";
 
 GlobalWorkerOptions.workerSrc = new URL(
   "../../node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
@@ -272,5 +279,60 @@ describe("extractLines vs content stream", () => {
     const afterVisual = afterContent.items.map((item) => ("str" in item ? item.str : "")).join(" ");
     expect(afterVisual).toMatch(/Relief/);
     expect(afterVisual).not.toMatch(/ABCDEFGHIJKLMNOPQRSTUVWX/);
+  });
+
+  it("keeps statement amount columns at their x after a description-only apply", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    page.drawText("06-06 Paid To - Synchrony card Syf Paymnt Chk 4220268", {
+      x: 50,
+      y: 700,
+      size: 8,
+      font,
+    });
+    page.drawText("500.00", { x: 400, y: 700, size: 8, font: bold });
+    page.drawText("4,972.29", { x: 500, y: 700, size: 8, font: bold });
+    const bytes = (await doc.save()).slice().buffer as ArrayBuffer;
+    const proxy = await getDocument({ data: new Uint8Array(bytes.slice(0)) }).promise;
+    const lines = await extractLines(proxy, 1, bytes);
+    const desc = lines.find((line) => /Paid To/.test(line.text));
+    expect(desc).toBeTruthy();
+    expect(desc?.text).not.toMatch(/500\.00/);
+    const expanded = expandToFullLine(lines, desc!);
+    const row = expanded ?? desc!;
+    const fields = columnFieldsForLine(row);
+    expect(fields.length).toBeGreaterThanOrEqual(2);
+    expect(fields[0]?.label).toBe("Description");
+    expect(fields.some((field) => /Amount|Balance/.test(field.label))).toBe(true);
+    const members = membersForLinePatch(
+      row,
+      Object.fromEntries(
+        fields.map((field) => [
+          field.id,
+          field.label === "Description" ? field.text.replace("Paid To", "Paid From") : field.text,
+        ]),
+      ),
+    );
+    const { bytes: out } = await applyTextPatchesWithReport(bytes, [
+      {
+        page: 1,
+        x: row.x,
+        y: row.y,
+        width: row.width,
+        height: row.height,
+        fontSize: row.fontSize,
+        text: "06-06 Paid From - Synchrony card Syf Paymnt Chk 4220268 500.00 4,972.29",
+        originalText: row.text,
+        fontFamily: "Helvetica",
+        ...(members ? { members } : {}),
+      },
+    ]);
+    const after = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
+    expect(after.find((show) => /Paid From/.test(show.text))?.x).toBeCloseTo(50, 1);
+    expect(after.find((show) => show.text === "500.00")?.x).toBeCloseTo(400, 1);
+    expect(after.find((show) => show.text === "4,972.29")?.x).toBeCloseTo(500, 1);
+    expect(after.some((show) => /Paid To/.test(show.text))).toBe(false);
   });
 });
