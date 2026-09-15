@@ -43,6 +43,7 @@ import {
   type TextLine,
 } from "@/lib/pdf-runtime";
 import {
+  applyTextPatches,
   applyWorkshopPatches,
   buildSamplePdf,
   inspectTextPatch,
@@ -65,6 +66,7 @@ import {
   nextEnhanceOpen,
   overlayApplyState,
   overlayFillMode,
+  overlayShouldPaintLabel,
   pendingExportBanner,
   preferOcrOverlay,
   shouldFlattenPageAsScan,
@@ -283,6 +285,7 @@ function Editor() {
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [showOriginalHint, setShowOriginalHint] = useState(false);
   const [showEditHighlight, setShowEditHighlight] = useState(false);
+  const [pageHasPatchedPreview, setPageHasPatchedPreview] = useState(false);
   const [formReport, setFormReport] = useState<AcroFormReport>(emptyAcroFormReport);
   const [formValues, setFormValues] = useState<Record<string, AcroFormValue>>({});
   const [formOriginal, setFormOriginal] = useState<Record<string, AcroFormValue>>({});
@@ -301,6 +304,8 @@ function Editor() {
   const enhanceDismissedRef = useRef(false);
   const enhanceOpenRef = useRef(false);
   enhanceOpenRef.current = enhanceOpen;
+  const patchedPreviewRef = useRef<PDFDocumentProxy | null>(null);
+  const canvasGenRef = useRef(0);
 
   const selected = selectedId ? findLineOrMember(lines, selectedId) : undefined;
   const selectedImage = selectedImageId
@@ -371,6 +376,11 @@ function Editor() {
       setNativeLines([]);
       setApplyNotice(null);
       setShowOriginalHint(false);
+      setPageHasPatchedPreview(false);
+      if (patchedPreviewRef.current) {
+        void patchedPreviewRef.current.destroy();
+        patchedPreviewRef.current = null;
+      }
       enhanceDismissedRef.current = false;
       setScanByPage((prev) => {
         Object.values(prev).forEach(releaseScanSession);
@@ -482,6 +492,7 @@ function Editor() {
     setSourceCanvas(null);
     setScanReport(null);
     clearPreview();
+    const gen = ++canvasGenRef.current;
     (async () => {
       try {
         const [{ canvas, viewport }, pageLines, pageImages] = await Promise.all([
@@ -491,12 +502,12 @@ function Editor() {
         ]);
         if (cancelled) return;
         const holder = holderRef.current;
-        if (holder) {
+        if (holder && gen === canvasGenRef.current) {
           holder.replaceChildren(canvas);
           canvas.className = "block w-full h-auto rounded-sm";
+          setScale(viewport.scale);
+          setViewSize({ width: viewport.width, height: viewport.height });
         }
-        setScale(viewport.scale);
-        setViewSize({ width: viewport.width, height: viewport.height });
         const ocrLines = scanByPage[page]?.ocrLines ?? [];
         setNativeLines(pageLines);
         setLines(
@@ -531,6 +542,98 @@ function Editor() {
     // OCR lines are applied in enhanceAndOcr; do not re-rasterize on session edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, page]);
+
+  // After Apply, rewrite a copy and paint that page so replacement glyphs match
+  // the rest of the file — no overlay whiteout over watermarks.
+  useEffect(() => {
+    if (!doc) return;
+    const nativeEdits = Object.values(edits).filter(
+      (edit) => edit.line.page === page && edit.line.source !== "ocr",
+    );
+    let cancelled = false;
+    let gen = canvasGenRef.current;
+
+    const paint = async (proxy: PDFDocumentProxy) => {
+      const { canvas, viewport } = await renderPage(proxy, page, CANVAS_WIDTH);
+      if (cancelled || gen !== canvasGenRef.current) return;
+      const holder = holderRef.current;
+      if (holder) {
+        holder.replaceChildren(canvas);
+        canvas.className = "block w-full h-auto rounded-sm";
+      }
+      setScale(viewport.scale);
+      setViewSize({ width: viewport.width, height: viewport.height });
+    };
+
+    if (nativeEdits.length === 0) {
+      setPageHasPatchedPreview(false);
+      if (patchedPreviewRef.current) {
+        gen = ++canvasGenRef.current;
+        void patchedPreviewRef.current.destroy();
+        patchedPreviewRef.current = null;
+        void paint(doc.proxy);
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    gen = ++canvasGenRef.current;
+
+    void (async () => {
+      try {
+        const patches: TextPatch[] = nativeEdits.map(({ line, text, fontChoiceId: editFontId }) => {
+          const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
+          return {
+            page: line.page,
+            x: line.x,
+            y: line.y,
+            width: line.width,
+            height: line.height,
+            fontSize: line.fontSize,
+            text,
+            originalText: line.text,
+            ...(line.rawText ? { rawText: line.rawText } : {}),
+            fontName: line.fontName,
+            fontFamily: line.fontFamily,
+            ...(option
+              ? {
+                  fontChoice: {
+                    source: option.source,
+                    family: option.family,
+                    ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
+                    ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
+                  },
+                }
+              : {}),
+          };
+        });
+        const bytes = await applyTextPatches(doc.bytes, patches);
+        if (cancelled) return;
+        const proxy = await openDocument(bytes.slice().buffer as ArrayBuffer);
+        if (cancelled) {
+          void proxy.destroy();
+          return;
+        }
+        await paint(proxy);
+        if (cancelled) {
+          void proxy.destroy();
+          return;
+        }
+        if (patchedPreviewRef.current && patchedPreviewRef.current !== proxy) {
+          void patchedPreviewRef.current.destroy();
+        }
+        patchedPreviewRef.current = proxy;
+        setPageHasPatchedPreview(true);
+      } catch {
+        if (!cancelled) setPageHasPatchedPreview(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, page, edits, fontCatalog, fontChoiceId]);
 
   useEffect(() => {
     if (!doc || !selectedImage) {
@@ -1176,7 +1279,13 @@ function Editor() {
           isLivePreview: overlay.isLivePreview,
           showHighlight: showEditHighlight,
         });
-        const showLabel = overlay.isLivePreview || isEdited;
+        const canvasShowsApplied = pageHasPatchedPreview && isEdited && line.source !== "ocr";
+        const showLabel = overlayShouldPaintLabel({
+          isEdited,
+          isLivePreview: overlay.isLivePreview,
+          showHighlight: showEditHighlight,
+          canvasShowsApplied,
+        });
         return (
           <button
             key={line.id}
@@ -1225,7 +1334,18 @@ function Editor() {
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, scale, viewSize, selectedId, edits, draft, looksScanned, showingOcr, showEditHighlight],
+    [
+      lines,
+      scale,
+      viewSize,
+      selectedId,
+      edits,
+      draft,
+      looksScanned,
+      showingOcr,
+      showEditHighlight,
+      pageHasPatchedPreview,
+    ],
   );
 
   const imageOverlay = useMemo(

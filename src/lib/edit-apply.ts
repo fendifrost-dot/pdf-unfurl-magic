@@ -195,6 +195,23 @@ export function textOverlayLabelClass(fill: OverlayFillMode): string {
     : "block h-full w-full truncate px-0.5 font-normal leading-[1.15]";
 }
 
+/**
+ * After Apply, the canvas is re-rendered from the rewritten PDF so the new
+ * glyphs match neighbouring lines. Overlay text is then only needed for a live
+ * draft, a reviewer highlight box, or when the canvas could not be patched.
+ */
+export function overlayShouldPaintLabel(input: {
+  isEdited: boolean;
+  isLivePreview: boolean;
+  showHighlight: boolean;
+  canvasShowsApplied: boolean;
+}): boolean {
+  if (input.isLivePreview) return true;
+  if (!input.isEdited) return false;
+  if (input.showHighlight) return true;
+  return !input.canvasShowsApplied;
+}
+
 export function shouldFlattenPageAsScan(input: {
   hasOriginalJpeg: boolean;
   hasOcrEdits: boolean;

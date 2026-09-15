@@ -11,6 +11,7 @@ import {
   overlayApplyState,
   overlayFillMode,
   overlayHasOpaqueFill,
+  overlayShouldPaintLabel,
   pendingExportBanner,
   preferOcrOverlay,
   shouldFlattenPageAsScan,
@@ -281,5 +282,40 @@ describe("Apply / Enhance exit contracts", () => {
     expect(off).toBe(on);
     expect(off).toMatch(/bg-primary\/25/);
     expect(overlayHasOpaqueFill(off)).toBe(false);
+  });
+
+  it("hides overlay label once the canvas already shows the applied rewrite", () => {
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: true,
+      }),
+    ).toBe(false);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: true,
+        showHighlight: false,
+        canvasShowsApplied: true,
+      }),
+    ).toBe(true);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: false,
+        showHighlight: true,
+        canvasShowsApplied: true,
+      }),
+    ).toBe(true);
+    expect(
+      overlayShouldPaintLabel({
+        isEdited: true,
+        isLivePreview: false,
+        showHighlight: false,
+        canvasShowsApplied: false,
+      }),
+    ).toBe(true);
   });
 });
