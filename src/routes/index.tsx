@@ -100,7 +100,7 @@ function Home() {
                 </Button>
                 <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">
                   <Link to="/edit" hash="marks">
-                    Mark or redact <Highlighter />
+                    Mark or cover <Highlighter />
                   </Link>
                 </Button>
                 <Button asChild size="lg" variant="outline" className="min-h-12 touch-manipulation">

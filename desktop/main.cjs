@@ -280,6 +280,26 @@ ipcMain.handle("desktop:take-pending-pdf", async () => {
   if (!next) return null;
   return { name: next.name, data: next.data };
 });
+
+function toSaveBuffer(raw) {
+  if (Buffer.isBuffer(raw)) return raw;
+  if (raw instanceof Uint8Array) return Buffer.from(raw);
+  if (Array.isArray(raw)) return Buffer.from(raw);
+  if (raw && Array.isArray(raw.data)) return Buffer.from(raw.data);
+  if (raw?.data) return Buffer.from(raw.data);
+  return null;
+}
+
+/**
+ * Paths this window actually wrote through the Save dialog. A sidecar may only
+ * land beside one of these, so the renderer can never name an arbitrary target.
+ * @type {Set<string>}
+ */
+const savedFilePaths = new Set();
+
+/** Sidecar extensions the renderer may write without its own Save dialog. */
+const SIDECAR_EXTENSIONS = new Set([".esign.json"]);
+
 ipcMain.handle("desktop:save-file", async (_event, payload) => {
   const name = typeof payload?.name === "string" ? payload.name : "document.pdf";
   const ext = path.extname(name).replace(".", "") || "pdf";
@@ -289,21 +309,39 @@ ipcMain.handle("desktop:save-file", async (_event, payload) => {
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   });
   if (result.canceled || !result.filePath) return null;
-  const raw = payload?.data;
-  const buffer = Buffer.isBuffer(raw)
-    ? raw
-    : raw instanceof Uint8Array
-      ? Buffer.from(raw)
-      : Array.isArray(raw)
-        ? Buffer.from(raw)
-        : raw?.data
-          ? Buffer.from(raw.data)
-          : null;
+  const buffer = toSaveBuffer(payload?.data);
   if (!buffer) {
     throw new Error("Nothing to save.");
   }
   fs.writeFileSync(result.filePath, buffer);
+  savedFilePaths.add(result.filePath);
   return result.filePath;
+});
+
+/**
+ * Write a small sidecar beside a file the user just saved, with no second
+ * dialog. Only exact paths returned by desktop:save-file are accepted, and only
+ * the allow-listed sidecar extensions.
+ */
+ipcMain.handle("desktop:save-sidecar", async (_event, payload) => {
+  const forPath = typeof payload?.forPath === "string" ? payload.forPath : "";
+  const extension = typeof payload?.extension === "string" ? payload.extension : "";
+  if (!savedFilePaths.has(forPath)) {
+    throw new Error("That file was not saved by this window.");
+  }
+  if (!SIDECAR_EXTENSIONS.has(extension)) {
+    throw new Error(`Unsupported sidecar type: ${extension}`);
+  }
+  const buffer = toSaveBuffer(payload?.data);
+  if (!buffer) {
+    throw new Error("Nothing to save.");
+  }
+  const target = path.join(
+    path.dirname(forPath),
+    `${path.basename(forPath, path.extname(forPath))}${extension}`,
+  );
+  fs.writeFileSync(target, buffer);
+  return target;
 });
 
 app.setName("PDF Relief");

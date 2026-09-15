@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("pdfReliefDesktop", {
   pickImages: () => ipcRenderer.invoke("desktop:pick-images"),
   takePendingPdf: () => ipcRenderer.invoke("desktop:take-pending-pdf"),
   saveFile: (payload) => ipcRenderer.invoke("desktop:save-file", payload),
+  saveSidecar: (payload) => ipcRenderer.invoke("desktop:save-sidecar", payload),
   onPdfReady: (callback) => {
     const listener = () => {
       callback();

@@ -81,12 +81,12 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
           <h3 className="mt-1 font-display text-2xl font-semibold">Drop a PDF here</h3>
           <p className="mt-1 max-w-lg text-sm text-muted-foreground">
             Everything runs on a copy held in this tab. Your original file is never modified and
-            never leaves the machine. Highlight, notes, and redaction boxes live in the page editor.
+            never leaves the machine. Highlight, notes, and cover boxes live in the page editor.
           </p>
           <div className="mt-3">
             <Button asChild size="sm" variant="outline" className="min-h-11 touch-manipulation">
               <Link to="/edit" hash="marks">
-                <Highlighter className="size-3.5" /> Mark or redact
+                <Highlighter className="size-3.5" /> Mark or cover
               </Link>
             </Button>
           </div>

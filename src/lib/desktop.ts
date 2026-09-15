@@ -10,6 +10,12 @@ export type PdfReliefDesktop = {
   pickImages?: () => Promise<DesktopPdfFile[] | null>;
   takePendingPdf: () => Promise<DesktopPdfFile | null>;
   saveFile: (payload: { name: string; data: Uint8Array }) => Promise<string | null>;
+  /** Writes a sidecar beside a path saveFile just returned. No second dialog. */
+  saveSidecar?: (payload: {
+    forPath: string;
+    extension: string;
+    data: Uint8Array;
+  }) => Promise<string | null>;
   onPdfReady: (callback: () => void) => () => void;
 };
 
