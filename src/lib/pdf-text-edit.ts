@@ -418,8 +418,7 @@ function expandLocatedShows(
   const headKey = textMatchKey(head.text);
   const originalLooksJoined = origKey.length > headKey.length + 2;
   const patchLooksWide = patch.width > showWidth(head) * 1.35;
-  const hasMembers =
-    (patch.memberBoxes?.length ?? 0) > 1 || (patch.coverBoxes?.length ?? 0) > 1;
+  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1 || (patch.coverBoxes?.length ?? 0) > 1;
   if (!originalLooksJoined && !patchLooksWide && !hasMembers) return located;
 
   const seen = new Set(
@@ -455,8 +454,7 @@ function dropCoveredShowsOnOtherStreams(
   const headKey = textMatchKey(head.text);
   const originalLooksJoined = origKey.length > headKey.length + 2;
   const patchLooksWide = patch.width > showWidth(head) * 1.35;
-  const hasMembers =
-    (patch.memberBoxes?.length ?? 0) > 1 || (patch.coverBoxes?.length ?? 0) > 1;
+  const hasMembers = (patch.memberBoxes?.length ?? 0) > 1 || (patch.coverBoxes?.length ?? 0) > 1;
   if (!originalLooksJoined && !patchLooksWide && !hasMembers) return;
 
   for (const stream of streams) {
