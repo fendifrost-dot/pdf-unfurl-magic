@@ -9,6 +9,7 @@
 
 import { StandardFonts } from "pdf-lib";
 import {
+  charsMissingFromWinAnsi,
   isExactStandardBaseFont,
   isSymbolFontName,
   matchFont,
@@ -42,6 +43,28 @@ export type CatalogFont = {
   resourceKey?: string;
   baseFont?: string;
   standard?: StandardFonts;
+  cid?: boolean;
+  subset?: boolean;
+  encoding?: string;
+};
+
+export type ClosestFontRank = "document" | "system" | "bundled" | "standard";
+
+export type ClosestFontHint = {
+  selectedKey?: string;
+  fontName?: string;
+  fontFamily?: string;
+  baseFont?: string;
+  draft?: string;
+  originalText?: string;
+};
+
+export type ClosestFontSuggestion = {
+  id: string;
+  font: CatalogFont;
+  rank: ClosestFontRank;
+  reason: string;
+  canEncode: boolean;
 };
 
 export type FontChoice = {
@@ -123,6 +146,9 @@ export function catalogEmbeddedFonts(
       reason,
       resourceKey: info.key,
       baseFont: info.baseFont,
+      cid: info.cid,
+      subset: info.subset,
+      encoding: info.encoding,
     };
   });
 }
@@ -273,23 +299,256 @@ export function mergeFontCatalog(input: {
   return out;
 }
 
+/** Acrobat-style face key: ignore subset tags, weight numbers, and Roman/R suffixes. */
+export function compactFaceKey(name: string): string {
+  return stripSubsetPrefix(name)
+    .replace(/[,_+]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/mt$/i, "")
+    .replace(/ps$/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+export function fontFaceStem(name: string): string {
+  const compact = compactFaceKey(name);
+  const withoutNeueWeight = compact.replace(
+    /\d{2}(roman|italic|oblique|medium|regular|bold|black|heavy|light|thin|it|md|bd|lt|r)?$/g,
+    "",
+  );
+  return withoutNeueWeight.replace(
+    /(bolditalic|boldoblique|italic|oblique|regular|bold|black|heavy|light|thin|medium)$/g,
+    "",
+  );
+}
+
+function hintNames(hint: ClosestFontHint): string[] {
+  return [hint.baseFont, hint.fontName, hint.fontFamily, hint.selectedKey].filter(
+    (value): value is string => !!value && value.trim().length > 0,
+  );
+}
+
+function genericCssFamily(name: string): boolean {
+  return /^(sans-serif|serif|monospace|cursive|fantasy|system-ui|ui-sans-serif|ui-serif|ui-monospace)$/i.test(
+    name.trim(),
+  );
+}
+
+export function catalogFontCanEncode(font: CatalogFont, draft: string, originalText = ""): boolean {
+  if (font.safety !== "safe") return false;
+  if (font.source === "bundled") return true;
+  if (font.source === "system") return true;
+  if (font.source === "standard") return charsMissingFromWinAnsi(draft).length === 0;
+  if (font.cid || font.subset) {
+    if (!draft) return true;
+    const original = originalText || "";
+    return [...draft].every((ch) => ch === " " || original.includes(ch));
+  }
+  return charsMissingFromWinAnsi(draft).length === 0;
+}
+
+function hintStems(hint: ClosestFontHint): string[] {
+  const stems: string[] = [];
+  const seen = new Set<string>();
+  for (const name of hintNames(hint)) {
+    if (genericCssFamily(name)) continue;
+    const stem = fontFaceStem(name);
+    if (stem.length < 4 || seen.has(stem)) continue;
+    seen.add(stem);
+    stems.push(stem);
+  }
+  return stems;
+}
+
+function documentNameScore(font: CatalogFont, hint: ClosestFontHint): number {
+  if (hint.selectedKey && font.resourceKey === hint.selectedKey) return 10_000;
+  const names = hintNames(hint).filter((name) => !genericCssFamily(name));
+  const compactHints = names.map(compactFaceKey).filter((key) => key.length >= 4);
+  const stems = hintStems(hint);
+  const fontNames = [font.baseFont, font.label, font.postscriptName, font.resourceKey].filter(
+    (value): value is string => !!value,
+  );
+  let best = 0;
+  for (const name of fontNames) {
+    const compact = compactFaceKey(name);
+    const stem = fontFaceStem(name);
+    if (compactHints.includes(compact) && compact.length >= 6) best = Math.max(best, 9_000);
+    if (stems.includes(stem) && stem.length >= 6) best = Math.max(best, 8_000);
+  }
+  return best;
+}
+
+function systemTwinScore(font: CatalogFont, hint: ClosestFontHint): number {
+  if (font.source !== "system" || font.safety !== "safe") return 0;
+  const match = matchFont({
+    fontName: hint.fontName,
+    fontFamily: hint.fontFamily,
+    baseFont: hint.baseFont,
+  });
+  const blob = hintNames(hint).join(" ").toLowerCase();
+  const label = font.label.toLowerCase();
+  const fontStem = fontFaceStem(font.postscriptName || font.label);
+  const stems = hintStems(hint);
+  if (
+    stems.some(
+      (stem) =>
+        stem.length >= 6 &&
+        (fontStem === stem || fontStem.includes(stem) || stem.includes(fontStem)),
+    )
+  ) {
+    return 700;
+  }
+  const first = label.split(/[\s-]/)[0] ?? "";
+  if (first.length >= 4 && blob.includes(first)) return 500;
+  if (font.family === match.family && font.bold === match.bold) return 300;
+  if (metricFamilyFor(font.label) === match.family && font.bold === match.bold) return 200;
+  return 0;
+}
+
+function bundledScore(font: CatalogFont, hint: ClosestFontHint): number {
+  if (font.source !== "bundled" || font.safety !== "safe") return 0;
+  const match = matchFont({
+    fontName: hint.fontName,
+    fontFamily: hint.fontFamily,
+    baseFont: hint.baseFont,
+  });
+  if (/liberation/i.test(font.id) && match.family === "helvetica") return 80;
+  if (/liberation/i.test(font.id) && match.family === "times") return 40;
+  if (/noto/i.test(font.id)) return 20;
+  return 10;
+}
+
+function rankFor(font: CatalogFont): ClosestFontRank {
+  if (font.source === "embedded") return "document";
+  if (font.source === "system") return "system";
+  if (font.source === "bundled") return "bundled";
+  return "standard";
+}
+
+export function describeClosestFontMatch(
+  suggestion: Pick<ClosestFontSuggestion, "font" | "rank" | "canEncode">,
+  hint: ClosestFontHint = {},
+): string {
+  const label = suggestion.font.label;
+  const origin = stripSubsetPrefix(hint.baseFont || hint.fontName || "") || "the original face";
+  if (suggestion.rank === "document") {
+    const cid = suggestion.font.cid ? " (CID)" : "";
+    return `Closest match: ${label}${cid} — this page’s own face.`;
+  }
+  if (suggestion.rank === "system") {
+    return `Closest match: ${label} — local metric twin of ${origin}.`;
+  }
+  if (suggestion.rank === "bundled") {
+    return `Closest match: ${label} — bundled stand-in because the original face cannot encode this draft.`;
+  }
+  return `Closest match: ${label} — Standard 14 metric stand-in.`;
+}
+
+function finishSuggestion(
+  font: CatalogFont,
+  hint: ClosestFontHint,
+  canEncode: boolean,
+): ClosestFontSuggestion {
+  const rank = rankFor(font);
+  return {
+    id: font.id,
+    font,
+    rank,
+    canEncode,
+    reason: describeClosestFontMatch({ font, rank, canEncode }, hint),
+  };
+}
+
+/**
+ * Acrobat-style picker default: document face → system metric twin →
+ * bundled Liberation/Noto only when those cannot encode the draft.
+ */
+export function suggestClosestFont(
+  catalog: CatalogFont[],
+  hint: ClosestFontHint = {},
+): ClosestFontSuggestion | undefined {
+  const draft = hint.draft ?? hint.originalText ?? "";
+  const originalText = hint.originalText ?? "";
+  const safe = catalog.filter((item) => item.safety === "safe");
+  if (safe.length === 0) {
+    const first = catalog[0];
+    if (!first) return undefined;
+    return finishSuggestion(first, hint, false);
+  }
+
+  const scored = safe.map((font) => {
+    const canEncode = catalogFontCanEncode(font, draft, originalText);
+    const documentScore = font.source === "embedded" ? documentNameScore(font, hint) : 0;
+    const systemScore = systemTwinScore(font, hint);
+    const bundleScore = bundledScore(font, hint);
+    const standardScore =
+      font.source === "standard" && canEncode ? 15 : font.source === "standard" ? 5 : 0;
+    const sourceBias =
+      font.source === "embedded"
+        ? 4
+        : font.source === "system"
+          ? 3
+          : font.source === "bundled"
+            ? 2
+            : 1;
+    const total =
+      documentScore * 10 +
+      systemScore * 10 +
+      bundleScore * 10 +
+      standardScore +
+      sourceBias +
+      (canEncode ? 1 : 0);
+    return { font, canEncode, documentScore, systemScore, bundleScore, total };
+  });
+
+  scored.sort((a, b) => b.total - a.total || a.font.label.localeCompare(b.font.label));
+
+  const documentHit = scored.find((item) => item.documentScore >= 8_000 && item.canEncode);
+  if (documentHit) return finishSuggestion(documentHit.font, hint, documentHit.canEncode);
+
+  const safeDocumentFace = scored.find(
+    (item) => item.font.source === "embedded" && item.documentScore >= 8_000,
+  );
+  if (
+    safeDocumentFace &&
+    (safeDocumentFace.canEncode || safeDocumentFace.font.cid || safeDocumentFace.font.subset)
+  ) {
+    return finishSuggestion(safeDocumentFace.font, hint, safeDocumentFace.canEncode);
+  }
+
+  const systemHit = scored.find((item) => item.systemScore > 0 && item.canEncode);
+  if (systemHit) return finishSuggestion(systemHit.font, hint, systemHit.canEncode);
+
+  const bundledHit =
+    scored.find((item) => item.font.source === "bundled" && /liberation/i.test(item.font.id)) ??
+    scored.find((item) => item.font.source === "bundled");
+  if (bundledHit) return finishSuggestion(bundledHit.font, hint, bundledHit.canEncode);
+
+  const bestEncodable = scored.find((item) => item.canEncode);
+  const pick = bestEncodable ?? scored[0];
+  if (!pick) return undefined;
+  return finishSuggestion(pick.font, hint, pick.canEncode);
+}
+
 export function defaultFontChoiceId(
   catalog: CatalogFont[],
   selectedKey?: string,
   preferBundled = false,
+  hint: ClosestFontHint = {},
 ): string {
-  if (preferBundled) {
-    const bundled = catalog.find(
-      (item) => item.source === "bundled" && item.safety === "safe" && /liberation/i.test(item.id),
-    );
-    if (bundled) return bundled.id;
-    const anyBundled = catalog.find((item) => item.source === "bundled" && item.safety === "safe");
-    if (anyBundled) return anyBundled.id;
+  const merged: ClosestFontHint = { ...hint, selectedKey: hint.selectedKey ?? selectedKey };
+  const suggestion = suggestClosestFont(catalog, merged);
+  if (suggestion) {
+    if (preferBundled && suggestion.rank !== "document" && suggestion.rank !== "system") {
+      const bundled = catalog.find(
+        (item) =>
+          item.source === "bundled" && item.safety === "safe" && /liberation/i.test(item.id),
+      );
+      if (bundled) return bundled.id;
+    }
+    return suggestion.id;
   }
-  const embedded = selectedKey
-    ? catalog.find((item) => item.resourceKey === selectedKey && item.safety === "safe")
-    : catalog.find((item) => item.source === "embedded" && item.safety === "safe");
-  return embedded?.id ?? catalog.find((item) => item.safety === "safe")?.id ?? catalog[0]?.id ?? "";
+  return catalog.find((item) => item.safety === "safe")?.id ?? catalog[0]?.id ?? "";
 }
 
 export function matchSystemFontToMetrics(

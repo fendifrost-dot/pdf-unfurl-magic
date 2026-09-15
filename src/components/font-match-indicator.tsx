@@ -5,9 +5,11 @@ import type { TextEditInspection } from "@/lib/pdf-text-edit";
 export function FontMatchIndicator({
   inspection,
   loading,
+  closestMatchReason,
 }: {
   inspection: TextEditInspection | null;
   loading: boolean;
+  closestMatchReason?: string;
 }) {
   if (loading && !inspection) {
     return (
@@ -60,11 +62,16 @@ export function FontMatchIndicator({
           {label}
         </span>
       </div>
-      <p
-        className={`mt-1.5 text-xs leading-relaxed ${blocked && !scan ? "text-destructive" : "text-muted-foreground"}`}
-      >
-        {inspection.message}
-      </p>
+      {closestMatchReason ? (
+        <p className="mt-1.5 text-xs leading-relaxed text-foreground">{closestMatchReason}</p>
+      ) : null}
+      {inspection.message && inspection.message !== closestMatchReason ? (
+        <p
+          className={`mt-1.5 text-xs leading-relaxed ${blocked && !scan ? "text-destructive" : "text-muted-foreground"}`}
+        >
+          {inspection.message}
+        </p>
+      ) : null}
     </div>
   );
 }

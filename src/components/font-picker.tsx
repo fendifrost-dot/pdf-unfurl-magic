@@ -15,11 +15,13 @@ export function FontPicker({
   value,
   onChange,
   disabled,
+  closestMatchReason,
 }: {
   options: CatalogFont[];
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  closestMatchReason?: string;
 }) {
   const selected = options.find((item) => item.id === value);
   const embedded = options.filter((item) => item.source === "embedded");
@@ -96,7 +98,12 @@ export function FontPicker({
           )}
         </SelectContent>
       </Select>
-      {selected && (
+      {closestMatchReason && (
+        <p className="text-xs leading-relaxed text-foreground" data-testid="closest-font-match">
+          {closestMatchReason}
+        </p>
+      )}
+      {selected && selected.reason !== closestMatchReason && (
         <p className="text-xs leading-relaxed text-muted-foreground">{selected.reason}</p>
       )}
     </div>
