@@ -2783,7 +2783,7 @@ function Editor() {
                             : columnarEdit
                               ? "Amounts stay in their columns. Description edits do not move them."
                               : "Fits the original box at full size."
-                          : `Too wide — export will shrink type to about ${exportSize.toFixed(1)}pt to stay inside the box.`}
+                          : `Too wide — Save As will shrink type to about ${exportSize.toFixed(1)}pt to stay inside the box.`}
                       </p>
 
                       <div className="mt-4 grid grid-cols-2 gap-2">
