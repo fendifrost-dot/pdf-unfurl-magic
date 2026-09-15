@@ -6,6 +6,7 @@
 import {
   clusterBoxesByColumn,
   looksLikeAmountText,
+  looksLikeMoneyColumn,
   splitDraftAcrossColumns,
   splitDraftAcrossRuns,
   type TextPatchMember,
@@ -339,18 +340,29 @@ function patchMemberFromRun(run: ColumnField["runs"][number], text: string): Tex
   };
 }
 
+/** True when a clustered run is currency — including `250.00-` and `(250.00)`. */
+function groupLooksLikeAmount(groupText: string): boolean {
+  if (looksLikeMoneyColumn(groupText) || looksLikeAmountText(groupText)) return true;
+  const tokens = groupText.trim().split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => looksLikeAmountText(token));
+}
+
 export function memberColumnLabel(groupText: string, index: number, groupTexts: string[]): string {
   const tokens = groupText.trim().split(/\s+/).filter(Boolean);
-  const amountLike = tokens.length > 0 && tokens.every((token) => looksLikeAmountText(token));
+  const amountLike = groupLooksLikeAmount(groupText);
   if (amountLike) {
-    if (tokens.length > 1) return "Amount / Balance";
+    if (tokens.length > 1 && tokens.every((token) => looksLikeAmountText(token))) {
+      return "Amount / Balance";
+    }
     const amountIndexes = groupTexts
-      .map((text, i) => {
-        const parts = text.trim().split(/\s+/).filter(Boolean);
-        return parts.length > 0 && parts.every((token) => looksLikeAmountText(token)) ? i : -1;
-      })
+      .map((text, i) => (groupLooksLikeAmount(text) ? i : -1))
       .filter((i) => i >= 0);
-    if (amountIndexes.length > 1 && index === amountIndexes[amountIndexes.length - 1]) {
+    const lastAmount = amountIndexes[amountIndexes.length - 1];
+    // Two money columns, or a 3-column statement row: rightmost money is Balance.
+    if (
+      index === lastAmount &&
+      (amountIndexes.length > 1 || (groupTexts.length >= 3 && lastAmount !== 0))
+    ) {
       return "Balance";
     }
     return "Amount";
