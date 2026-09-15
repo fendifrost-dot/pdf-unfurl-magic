@@ -301,6 +301,38 @@ async function scanImageOnly() {
   return doc.save();
 }
 
+async function redactSecret() {
+  const doc = await PDFDocument.create();
+  await stamp(doc, "redact-secret");
+  const page = doc.addPage([400, 500]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText("KEEP", { x: 40, y: 420, size: 18, font, color: ink });
+  page.drawText("SECRET", { x: 40, y: 360, size: 18, font, color: ink });
+  page.drawText("VISIBLE", { x: 40, y: 300, size: 18, font, color: ink });
+  const width = 16;
+  const height = 8;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (x < width / 2) {
+        rgba[i] = 255;
+        rgba[i + 1] = 0;
+        rgba[i + 2] = 255;
+      } else {
+        rgba[i] = 0;
+        rgba[i + 1] = 255;
+        rgba[i + 2] = 255;
+      }
+      rgba[i + 3] = 255;
+    }
+  }
+  const image = await doc.embedPng(encodePng(width, height, rgba));
+  page.drawImage(image, { x: 40, y: 80, width: 160, height: 80 });
+  page.drawText("PHOTO_CAPTION", { x: 40, y: 60, size: 10, font, color: soft });
+  return doc.save();
+}
+
 const BUILDERS = [
   {
     file: "simple-text.pdf",
@@ -357,6 +389,14 @@ const BUILDERS = [
     summary: "Full-page bitmap, no text operators. Scan-aware edit / OCR target.",
     build: scanImageOnly,
     maxBytes: 90_000,
+  },
+  {
+    file: "redact-secret.pdf",
+    pages: 1,
+    kind: "redact-secret",
+    summary: "KEEP / SECRET / VISIBLE plus a magenta-cyan PNG for permanent redact QA.",
+    build: redactSecret,
+    maxBytes: 20_000,
   },
 ];
 

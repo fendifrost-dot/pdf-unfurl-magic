@@ -31,6 +31,7 @@ test("manifest lists the committed fixtures", () => {
     "lines-and-text.pdf",
     "multi-font.pdf",
     "multi-page.pdf",
+    "redact-secret.pdf",
     "scan-image-only.pdf",
     "simple-text.pdf",
   ]);

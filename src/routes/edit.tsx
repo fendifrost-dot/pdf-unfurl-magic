@@ -127,6 +127,13 @@ type Edit = { line: TextLine; text: string; fontChoiceId?: string };
 type Mode = "text" | "image" | "mark";
 type MarkTool = AnnotationBurn["kind"];
 
+function markKindLabel(kind: AnnotationBurn["kind"]): string {
+  if (kind === "redact") return "cover box";
+  if (kind === "erase") return "permanent redact";
+  if (kind === "rect") return "rectangle";
+  return kind;
+}
+
 const CANVAS_WIDTH = 720;
 
 function findLineOrMember(lines: TextLine[], id: string): TextLine | undefined {
@@ -1239,15 +1246,17 @@ function Editor() {
                           key={mark.id ?? `draft-${index}`}
                           style={boxStyle(mark.x, mark.y, mark.width, mark.height, scale, viewSize)}
                           className={
-                            mark.kind === "redact"
-                              ? "pointer-events-none absolute bg-black"
-                              : mark.kind === "highlight"
-                                ? "pointer-events-none absolute border border-amber-500/70 bg-amber-300/45"
-                                : mark.kind === "underline"
-                                  ? "pointer-events-none absolute bg-transparent shadow-[inset_0_-3px_0_0_rgb(185,50,35)]"
-                                  : mark.kind === "note"
-                                    ? "pointer-events-none absolute overflow-hidden border border-amber-700/40 bg-amber-200/95 text-[10px] leading-tight text-foreground/80"
-                                    : "pointer-events-none absolute border-2 border-primary bg-primary/10"
+                            mark.kind === "erase"
+                              ? "pointer-events-none absolute bg-black ring-2 ring-red-700"
+                              : mark.kind === "redact"
+                                ? "pointer-events-none absolute bg-black"
+                                : mark.kind === "highlight"
+                                  ? "pointer-events-none absolute border border-amber-500/70 bg-amber-300/45"
+                                  : mark.kind === "underline"
+                                    ? "pointer-events-none absolute bg-transparent shadow-[inset_0_-3px_0_0_rgb(185,50,35)]"
+                                    : mark.kind === "note"
+                                      ? "pointer-events-none absolute overflow-hidden border border-amber-700/40 bg-amber-200/95 text-[10px] leading-tight text-foreground/80"
+                                      : "pointer-events-none absolute border-2 border-primary bg-primary/10"
                           }
                         >
                           {mark.kind === "note" ? (
@@ -1271,7 +1280,7 @@ function Editor() {
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
-                  "Drag a highlight, underline, note, or cover box, then keep it. Highlights and notes save as real PDF annotations. A cover box draws an opaque box over the area in the exported copy — the text or image underneath is still in the file and can be recovered."}
+                  "Drag a highlight, underline, note, cover box, or permanent redaction rectangle. Highlights and notes save as real PDF annotations. A cover box draws an opaque box — the text or image underneath is still in the file. Redact (permanent) removes intersecting text operators and punches image pixels in the exported copy; that cannot be undone."}
               </p>
             </div>
 
@@ -1301,7 +1310,9 @@ function Editor() {
                     Highlights, notes, underlines, and rectangles save as PDF annotations other
                     viewers can see. Cover box: draws an opaque box over the area in the exported
                     copy. The text or image underneath is still in the file and can be recovered —
-                    this hides content, it does not remove it. The original file is never changed.
+                    this hides content, it does not remove it. Redact (permanent) actually removes
+                    intersecting text and punches image pixels; it cannot be undone after export.
+                    The original file is never changed.
                   </p>
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <Button
@@ -1339,7 +1350,24 @@ function Editor() {
                     >
                       <Square className="size-3.5" /> Rectangle
                     </Button>
+                    <Button
+                      size="sm"
+                      variant={markTool === "erase" ? "default" : "secondary"}
+                      onClick={() => setMarkTool("erase")}
+                    >
+                      <Eraser className="size-3.5" /> Redact (permanent)
+                    </Button>
                   </div>
+                  {markTool === "erase" ? (
+                    <Alert className="mt-4">
+                      <AlertTriangle className="size-4" />
+                      <AlertTitle>Cannot be undone</AlertTitle>
+                      <AlertDescription>
+                        Export removes text operators and image pixels under this box from the copy.
+                        Cover box only hides them. The original file on disk is never changed.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                   <div className="mt-4 flex gap-2">
                     <Button
                       size="sm"
@@ -1367,7 +1395,7 @@ function Editor() {
                         <li key={mark.id} className="space-y-1">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-muted-foreground">
-                              p{mark.page} · {mark.kind}
+                              p{mark.page} · {markKindLabel(mark.kind)}
                             </span>
                             <Button
                               size="sm"
