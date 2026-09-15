@@ -41,6 +41,7 @@ import {
   downloadBytes,
   expandToFullLine,
   extractLines,
+  onSameVisualRow,
   openDocument,
   renderPage,
   type TextLine,
@@ -1071,11 +1072,8 @@ function Editor() {
     const hadLiveChange =
       (draft && draft !== selected.text) ||
       fromFields.some((field) => (memberDrafts[field.id] ?? field.text) !== field.text);
-    const band = Math.max(3, selected.fontSize * 0.5);
     const merge = (prev: TextLine[]) => {
-      const kept = prev.filter(
-        (line) => !(line.page === selected.page && Math.abs(line.y - selected.y) <= band),
-      );
+      const kept = prev.filter((line) => !onSameVisualRow(selected, line));
       return [...kept, joined].sort((a, b) => b.y - a.y || a.x - b.x);
     };
     setNativeLines(merge);
@@ -1202,13 +1200,9 @@ function Editor() {
     }
     const expanded = expandToFullLine(source, current);
     if (expanded && selectionMembers(expanded).length >= 2) {
-      const band = Math.max(3, current.fontSize * 0.5);
-      const working = [
-        ...source.filter(
-          (line) => !(line.page === current.page && Math.abs(line.y - current.y) <= band),
-        ),
-        expanded,
-      ].sort((a, b) => b.y - a.y || a.x - b.x);
+      const working = [...source.filter((line) => !onSameVisualRow(current, line)), expanded].sort(
+        (a, b) => b.y - a.y || a.x - b.x,
+      );
       return { source: working, anchor: expanded, members: selectionMembers(expanded) };
     }
     return { source, anchor: current, members: selectionMembers(current) };

@@ -8,6 +8,7 @@ import {
   groupTextItems,
   looksGarbled,
   mergeLinesByBaseline,
+  onSameVisualRow,
   preferReadableText,
   joinRunsToLine,
   splitLineByColumnShows,
@@ -198,6 +199,72 @@ describe("mergeLinesByBaseline", () => {
     expect(fields[0]?.text).toMatch(/Paymnt Chk 4220268/);
     expect(fields[1]?.x).toBe(400);
     expect(fields[2]?.x).toBe(500);
+  });
+
+  it("expandToFullLine still joins amount columns when PDF.js y drifted after a rewrite", () => {
+    const run = (
+      partial: Pick<TextLine, "id" | "text" | "x" | "y"> & Partial<TextLine>,
+    ): TextLine => ({
+      page: 1,
+      width: 40,
+      height: 10,
+      fontSize: 8,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      kind: "run",
+      source: "pdfjs",
+      hasTextOperator: true,
+      originX: partial.x,
+      originY: 700,
+      ...partial,
+    });
+    const desc = run({
+      id: "desc",
+      text: "05-22 Paid From - Applecard Gsbank Payment Chk 12408508",
+      x: 14,
+      y: 695.2,
+      width: 220,
+      originY: 700,
+    });
+    const amount = run({
+      id: "amt",
+      text: "250.00-",
+      x: 409,
+      y: 700,
+      width: 40,
+      originY: 700,
+    });
+    const balance = run({
+      id: "bal",
+      text: "1,834.34",
+      x: 517,
+      y: 700.1,
+      width: 44,
+      originY: 700,
+    });
+    const other = run({
+      id: "next",
+      text: "05-23 Paid To - Other Merchant",
+      x: 14,
+      y: 688,
+      width: 180,
+      originY: 688,
+    });
+    expect(onSameVisualRow(desc, amount)).toBe(true);
+    expect(onSameVisualRow(desc, other)).toBe(false);
+    const expanded = expandToFullLine([desc, amount, balance, other], desc);
+    const members = (expanded?.members ?? []).filter((member) => member.text.trim());
+    expect(members.map((member) => member.text)).toEqual([
+      "05-22 Paid From - Applecard Gsbank Payment Chk 12408508",
+      "250.00-",
+      "1,834.34",
+    ]);
+    expect(members.find((member) => member.text === "250.00-")?.x).toBe(409);
+    expect(members.find((member) => member.text === "1,834.34")?.x).toBe(517);
+    const merged = mergeLinesByBaseline([desc, amount, balance, other]);
+    const apple = merged.find((line) => /Applecard/.test(line.text));
+    const full = expandToFullLine(merged, apple!) ?? apple;
+    expect((full?.members ?? []).filter((member) => member.text.trim())).toHaveLength(3);
   });
 
   it("keeps a space when a far amount is merged despite an over-wide label box", () => {
@@ -479,25 +546,23 @@ describe("extractLines vs content stream", () => {
     const { bytes: out } = await applyTextPatchesWithReport(bytes, patches);
     const afterProxy = await getDocument({ data: new Uint8Array(out) }).promise;
     const afterLines = await extractLines(afterProxy, 1, out.slice().buffer as ArrayBuffer);
-    const afterApple =
-      afterLines.find((line) => /Applecard/.test(line.text)) ??
-      afterLines.find((line) => /Paid From/.test(line.text));
+    const afterApple = afterLines.find((line) => /Applecard/.test(line.text));
     expect(afterApple).toBeTruthy();
-    const afterRow = expandToFullLine(afterLines, afterApple!) ?? afterApple!;
-    const members = afterRow.members?.length ? afterRow.members : [afterRow];
-    const amount =
-      members.find((member) => member.text === "250.00-") ??
-      afterLines.find((line) => line.text === "250.00-" && Math.abs(line.y - afterApple!.y) < 3);
-    const balance =
-      members.find((member) => member.text === "1,834.34") ??
-      afterLines.find((line) => line.text === "1,834.34" && Math.abs(line.y - afterApple!.y) < 3);
-    expect(amount?.x).toBeCloseTo(409, 1);
-    expect(balance?.x).toBeCloseTo(517, 1);
-    expect(afterApple?.text).toMatch(/Paid From/);
-    expect(afterApple?.text).not.toMatch(/Paid To/);
+    const afterRow = expandToFullLine(afterLines, afterApple!);
+    expect(afterRow).toBeTruthy();
+    const members = (afterRow?.members ?? []).filter((member) => member.text.trim());
+    expect(members).toHaveLength(3);
+    expect(members.find((member) => /Paid From/.test(member.text))?.x).toBeCloseTo(14, 1);
+    expect(members.find((member) => member.text === "250.00-")?.x).toBeCloseTo(409, 1);
+    expect(members.find((member) => member.text === "1,834.34")?.x).toBeCloseTo(517, 1);
+    expect(afterRow?.text).toMatch(/Paid From/);
+    expect(afterRow?.text).toMatch(/250\.00-/);
+    expect(afterRow?.text).toMatch(/1,834\.34/);
+    expect(afterRow?.text).not.toMatch(/Paid To/);
+    const afterFields = columnFieldsForLine(afterRow!);
+    expect(afterFields.map((field) => field.label)).toEqual(["Description", "Amount", "Balance"]);
     const shows = await listPageTextShows(out.slice().buffer as ArrayBuffer, 1);
-    const onApple = shows.filter((show) => Math.abs(show.y - afterApple!.y) < 2);
-    expect(onApple.length).toBeGreaterThanOrEqual(3);
+    const onApple = shows.filter((show) => Math.abs(show.y - 700) < 2);
     expect(onApple.find((show) => show.text === "250.00-")?.x).toBeCloseTo(409, 1);
     expect(onApple.find((show) => show.text === "1,834.34")?.x).toBeCloseTo(517, 1);
   });
