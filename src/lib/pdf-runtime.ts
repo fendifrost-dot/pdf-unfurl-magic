@@ -51,6 +51,9 @@ export type TextLine = {
   fontSize: number;
   fontName: string;
   fontFamily: string;
+  /** `ocr` lines come from Enhance/OCR and export as a text layer on the page image. */
+  source?: "pdf" | "ocr";
+  confidence?: number;
 };
 
 export type RawTextItem = {
@@ -167,6 +170,40 @@ export async function renderPage(
   ctx.scale(dpr, dpr);
   await page.render({ canvasContext: ctx, viewport }).promise;
   return { canvas, viewport };
+}
+
+/**
+ * Rasterize one page for scan enhance / OCR. No extra device-pixel ratio so
+ * a letter page stays around one 1600px bitmap (~10 MB RGBA), then is released.
+ */
+export async function renderPageToImageData(
+  doc: PDFDocumentProxy,
+  pageNumber: number,
+  maxEdge: number,
+): Promise<{
+  data: ImageData;
+  canvas: HTMLCanvasElement;
+  pageWidth: number;
+  pageHeight: number;
+}> {
+  const page = await doc.getPage(pageNumber);
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(maxEdge / Math.max(base.width, 1), maxEdge / Math.max(base.height, 1));
+  const viewport = page.getViewport({ scale: Math.max(scale, 0.25) });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(viewport.width));
+  canvas.height = Math.max(1, Math.round(viewport.height));
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Canvas is unavailable in this browser.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return {
+    data: ctx.getImageData(0, 0, canvas.width, canvas.height),
+    canvas,
+    pageWidth: base.width,
+    pageHeight: base.height,
+  };
 }
 
 export function formatBytes(bytes: number): string {

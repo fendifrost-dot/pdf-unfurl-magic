@@ -13,6 +13,7 @@ import {
   ImageIcon,
   Loader2,
   Scissors,
+  ScanLine,
   Square,
   StickyNote,
   Type,
@@ -46,6 +47,18 @@ import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
 import { charsMissingFromWinAnsi } from "@/lib/pdf-font-match";
+import { ScanAwarePanel } from "@/components/scan-aware-panel";
+import {
+  emptyScanSession,
+  enhancePageForScan,
+  inspectPageScan,
+  ocrCanvasToLines,
+  releaseScanSession,
+  type PageScanReport,
+  type ScanPageExport,
+  type ScanPageSession,
+} from "@/lib/pdf-scan-edit";
+import { disposeOcr, type EnhancePreset } from "@/lib/scan";
 import {
   checkNumbers,
   cleanCopy,
@@ -183,11 +196,16 @@ function Editor() {
   const [findings, setFindings] = useState<NumberFinding[] | null>(null);
   const [inspection, setInspection] = useState<TextEditInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
+  const [scanReport, setScanReport] = useState<PageScanReport | null>(null);
+  const [scanByPage, setScanByPage] = useState<Record<number, ScanPageSession>>({});
+  const [scanBusy, setScanBusy] = useState<string | null>(null);
   const holderRef = useRef<HTMLDivElement>(null);
   const pageBoxRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const previewTimer = useRef<number | null>(null);
+  const scanByPageRef = useRef(scanByPage);
+  scanByPageRef.current = scanByPage;
 
   const selected = selectedId ? lines.find((l) => l.id === selectedId) : undefined;
   const selectedImage = selectedImageId
@@ -195,7 +213,15 @@ function Editor() {
     : undefined;
   const editedIds = Object.keys(edits);
   const imageEditIds = Object.keys(imageEdits);
-  const pendingCount = editedIds.length + imageEditIds.length + marks.length;
+  const scanExportReady = Object.values(scanByPage).filter(
+    (session) =>
+      session.originalJpeg &&
+      (session.ocrLines.length > 0 || (session.replaceWithCleaned && session.enhancedJpeg)),
+  ).length;
+  const pendingCount = editedIds.length + imageEditIds.length + marks.length + scanExportReady;
+  const scanSession = scanByPage[page] ?? emptyScanSession();
+  const scanMode = !!scanReport?.looksScanned || scanSession.ocrLines.length > 0;
+  const selectedIsOcr = selected?.source === "ocr";
 
   const clearPreview = () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -217,6 +243,11 @@ function Editor() {
       setSelectedImageId(null);
       setSourceCanvas(null);
       setInspection(null);
+      setScanReport(null);
+      setScanByPage((prev) => {
+        Object.values(prev).forEach(releaseScanSession);
+        return {};
+      });
       setPage(1);
     } catch {
       setDoc(null);
@@ -285,8 +316,19 @@ function Editor() {
         }
         setScale(viewport.scale);
         setViewSize({ width: viewport.width, height: viewport.height });
-        setLines(pageLines);
+        const ocrLines = scanByPage[page]?.ocrLines;
+        setLines(ocrLines?.length ? ocrLines : pageLines);
         setImages(pageImages);
+        const report = await inspectPageScan(
+          doc.bytes,
+          page,
+          pageLines.map((line) => line.text),
+        );
+        if (cancelled) return;
+        setScanReport(report);
+        if (report.looksScanned) {
+          setScanByPage((prev) => (prev[page] ? prev : { ...prev, [page]: emptyScanSession() }));
+        }
       } catch (e) {
         console.error("render failed", e);
         if (!cancelled) setError("That page could not be rendered.");
@@ -297,6 +339,8 @@ function Editor() {
     return () => {
       cancelled = true;
     };
+    // OCR lines are applied in enhanceAndOcr; do not re-rasterize on session edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, page]);
 
   useEffect(() => {
@@ -389,14 +433,22 @@ function Editor() {
 
   useEffect(() => () => clearPreview(), []);
 
+  useEffect(() => {
+    return () => {
+      Object.values(scanByPageRef.current).forEach(releaseScanSession);
+      void disposeOcr();
+    };
+  }, []);
+
   const boxWidth = selected ? selected.width : 0;
   const draftFits = selected ? estimateWidth(draft, selected.fontSize) <= boxWidth : true;
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
   const missingGlyphs = useMemo(() => charsMissingFromWinAnsi(draft), [draft]);
 
   useEffect(() => {
-    if (!doc || !selected) {
+    if (!doc || !selected || selected.source === "ocr" || scanReport?.looksScanned) {
       setInspection(null);
+      setInspecting(false);
       return;
     }
     let cancelled = false;
@@ -426,7 +478,7 @@ function Editor() {
     return () => {
       cancelled = true;
     };
-  }, [doc, selected]);
+  }, [doc, selected, scanReport?.looksScanned]);
 
   const openSample = async () => {
     setStatus("Building the sample quote");
@@ -451,13 +503,77 @@ function Editor() {
   const commit = () => {
     if (!selected) return;
     const text = draft.trim();
+    if (selected.source !== "ocr" && scanMode) return;
     if (text && text !== selected.text && !canCommitSafely(inspection, text, selected.text)) return;
+    if (missingGlyphs.length > 0 && text !== selected.text) return;
     setEdits((prev) => {
       const next = { ...prev };
       if (!text || text === selected.text) delete next[selected.id];
       else next[selected.id] = { line: selected, text };
       return next;
     });
+  };
+
+  const patchScanSession = (partial: Partial<ScanPageSession>) => {
+    setScanByPage((prev) => ({
+      ...prev,
+      [page]: { ...(prev[page] ?? emptyScanSession()), ...partial },
+    }));
+  };
+
+  const enhanceAndOcr = async () => {
+    if (!doc) return;
+    setError(null);
+    const preset: EnhancePreset = scanSession.preset;
+    setScanBusy("Rendering this page");
+    try {
+      setScanBusy("Enhancing page");
+      const result = await enhancePageForScan(doc.proxy, page, preset);
+      setScanBusy("Reading text");
+      const ocrLines = await ocrCanvasToLines(
+        result.enhancedCanvas,
+        page,
+        result.pageWidth,
+        result.pageHeight,
+      );
+      const preview = new Blob([result.enhancedJpeg.bytes.slice() as unknown as BlobPart], {
+        type: "image/jpeg",
+      });
+      const previewUrl = URL.createObjectURL(preview);
+      setScanByPage((prev) => {
+        releaseScanSession(prev[page]);
+        return {
+          ...prev,
+          [page]: {
+            ...(prev[page] ?? emptyScanSession()),
+            preset,
+            originalJpeg: result.originalJpeg,
+            enhancedJpeg: result.enhancedJpeg,
+            enhancedPreviewUrl: previewUrl,
+            ocrLines,
+            pageWidth: result.pageWidth,
+            pageHeight: result.pageHeight,
+          },
+        };
+      });
+      setLines(ocrLines);
+      setSelectedId(null);
+      setDraft("");
+      if (ocrLines.length === 0) {
+        setError(
+          "OCR did not find readable lines on this page. Try another enhance preset, then run it again.",
+        );
+      }
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Enhance / OCR failed. Nothing was written to the original file.",
+      );
+    } finally {
+      setScanBusy(null);
+      void disposeOcr();
+    }
   };
 
   const commitImage = async () => {
@@ -593,7 +709,8 @@ function Editor() {
     try {
       const all: string[] = [];
       for (let p = 1; p <= doc.pageCount; p++) {
-        const pageLines = await extractLines(doc.proxy, p);
+        const ocrLines = scanByPage[p]?.ocrLines;
+        const pageLines = ocrLines?.length ? ocrLines : await extractLines(doc.proxy, p);
         for (const l of pageLines) all.push(edits[l.id]?.text ?? l.text);
       }
       setFindings(checkNumbers(all));
@@ -606,18 +723,20 @@ function Editor() {
     if (!doc) return;
     setStatus("Writing the edited boxes");
     try {
-      const patches: TextPatch[] = Object.values(edits).map(({ line, text }) => ({
-        page: line.page,
-        x: line.x,
-        y: line.y,
-        width: line.width,
-        height: line.height,
-        fontSize: line.fontSize,
-        text,
-        originalText: line.text,
-        fontName: line.fontName,
-        fontFamily: line.fontFamily,
-      }));
+      const patches: TextPatch[] = Object.values(edits)
+        .filter(({ line }) => line.source !== "ocr" && !scanByPage[line.page]?.ocrLines.length)
+        .map(({ line, text }) => ({
+          page: line.page,
+          x: line.x,
+          y: line.y,
+          width: line.width,
+          height: line.height,
+          fontSize: line.fontSize,
+          text,
+          originalText: line.text,
+          fontName: line.fontName,
+          fontFamily: line.fontFamily,
+        }));
       const imagePatches = Object.values(imageEdits).map((edit) => ({
         page: edit.region.page,
         x: edit.region.x,
@@ -627,10 +746,44 @@ function Editor() {
         bytes: edit.output.bytes,
         mime: "image/jpeg" as const,
       }));
-      const bytes = await applyWorkshopPatches(doc.bytes, patches, imagePatches, marks);
+      const scanPatches: ScanPageExport[] = [];
+      for (const [pageKey, session] of Object.entries(scanByPage)) {
+        const jpeg =
+          session.replaceWithCleaned && session.enhancedJpeg
+            ? session.enhancedJpeg
+            : session.originalJpeg;
+        if (!jpeg) continue;
+        if (!session.ocrLines.length && !session.replaceWithCleaned) continue;
+        scanPatches.push({
+          page: Number(pageKey),
+          imageBytes: jpeg.bytes,
+          pixelWidth: jpeg.width,
+          pixelHeight: jpeg.height,
+          lines: session.ocrLines.map((line) => ({
+            x: line.x,
+            y: line.y,
+            width: line.width,
+            height: line.height,
+            fontSize: line.fontSize,
+            text: edits[line.id]?.text ?? line.text,
+            originalText: line.text,
+          })),
+        });
+      }
+      const bytes = await applyWorkshopPatches(
+        doc.bytes,
+        patches,
+        imagePatches,
+        marks,
+        scanPatches,
+      );
       downloadBytes(
         bytes,
-        exportFileName(doc.base, patches.length + imagePatches.length > 0, marks),
+        exportFileName(
+          doc.base,
+          patches.length + imagePatches.length + scanPatches.length > 0,
+          marks,
+        ),
       );
     } catch (e) {
       setError(
@@ -660,7 +813,9 @@ function Editor() {
                 ? "border-primary bg-primary/25"
                 : isEdited
                   ? "border-success/70 bg-success/20"
-                  : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
+                  : scanMode && line.source !== "ocr"
+                    ? "border-dashed border-warning/70 bg-warning/15"
+                    : "border-primary/40 bg-primary/10 [@media(pointer:fine)]:border-transparent [@media(pointer:fine)]:bg-transparent [@media(pointer:fine)]:hover:border-primary/60 [@media(pointer:fine)]:hover:bg-primary/15",
             ].join(" ")}
           >
             <span className="sr-only">Edit: {line.text}</span>
@@ -668,7 +823,7 @@ function Editor() {
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lines, scale, viewSize, selectedId, edits],
+    [lines, scale, viewSize, selectedId, edits, scanMode],
   );
 
   const imageOverlay = useMemo(
@@ -843,6 +998,19 @@ function Editor() {
                 ))}
               </div>
 
+              {scanMode && mode === "text" && (
+                <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5">
+                  <ScanLine className="mt-0.5 size-4 shrink-0 text-warning" />
+                  <div>
+                    <p className="text-sm font-semibold">This page looks scanned</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {scanReport?.message ||
+                        "Enhance page and OCR to edit amounts without painting Helvetica over the image."}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-4 max-h-[70vh] overflow-auto rounded-md bg-paper p-2 sm:p-3">
                 <div className="relative mx-auto w-full">
                   <div ref={holderRef} className="w-full" />
@@ -858,6 +1026,13 @@ function Editor() {
                       onPointerMove={mode === "mark" ? onMarkPointerMove : undefined}
                       onPointerUp={mode === "mark" ? onMarkPointerUp : undefined}
                     >
+                      {scanSession.replaceWithCleaned && scanSession.enhancedPreviewUrl && (
+                        <img
+                          src={scanSession.enhancedPreviewUrl}
+                          alt=""
+                          className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+                        />
+                      )}
                       {mode === "text" && textOverlay}
                       {mode === "image" && imageOverlay}
                       {mode === "image" &&
@@ -918,7 +1093,11 @@ function Editor() {
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
                 {mode === "text" &&
-                  `${lines.length} text runs on this page. Hover to see the boxes; click one to edit that run only.`}
+                  (scanMode
+                    ? scanSession.ocrLines.length
+                      ? `${scanSession.ocrLines.length} OCR lines on this page. Click one to edit; export writes a text layer on the page image.`
+                      : "This page looks scanned. Ghost boxes are not real text operators — use Enhance page & OCR in the side panel."
+                    : `${lines.length} text runs on this page. Hover to see the boxes; click one to edit that run only.`)}
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
@@ -1047,90 +1226,132 @@ function Editor() {
                     </ul>
                   )}
                 </>
-              ) : !selected ? (
-                <div className="py-8 text-center">
-                  <p className="font-display text-base font-semibold">Nothing selected</p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Click any line on the page to open it here, or switch to Image studio.
-                  </p>
-                </div>
               ) : (
                 <>
-                  <p className="eyebrow">Editing one run</p>
-                  <p className="text-gauge mt-2 text-xs text-muted-foreground">
-                    page {selected.page} · {selected.fontSize.toFixed(1)}pt ·{" "}
-                    {selected.width.toFixed(0)}pt wide
-                    {selected.fontFamily ? ` · ${selected.fontFamily.split(",")[0]}` : ""}
-                  </p>
-                  <FontMatchIndicator
-                    inspection={
-                      inspection && missingGlyphs.length > 0
-                        ? {
-                            ...inspection,
-                            method: "blocked",
-                            missingGlyphs,
-                            message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
-                          }
-                        : inspection
-                    }
-                    loading={inspecting}
-                  />
-                  <Textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    rows={4}
-                    className="mt-3"
-                    placeholder="Replacement text"
-                  />
-                  <p
-                    className={
-                      draftFits ? "mt-2 text-xs text-muted-foreground" : "mt-2 text-xs text-warning"
-                    }
-                  >
-                    {draftFits
-                      ? "Fits the original box at full size."
-                      : `Too wide — export will shrink type to about ${exportSize.toFixed(1)}pt to stay inside the box.`}
-                  </p>
-
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setDraft(cleanCopy(draft))}
-                    >
-                      <Eraser className="mr-1.5 size-3.5" /> Clean copy
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setDraft(shortenToFit(draft, selected.fontSize, boxWidth))}
-                    >
-                      <Scissors className="mr-1.5 size-3.5" /> Shorten to fit
-                    </Button>
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      onClick={commit}
-                      disabled={
-                        !canCommitSafely(inspection, draft, selected.text) ||
-                        missingGlyphs.length > 0
+                  {scanMode && (
+                    <ScanAwarePanel
+                      report={
+                        scanReport ?? {
+                          looksScanned: true,
+                          reason: "image-only",
+                          message:
+                            "This page looks scanned. Enhance page and OCR to edit amounts without a white-out.",
+                          showCount: 0,
+                          imageCount: 0,
+                          pdfJsLineCount: 0,
+                          matchedLineCount: 0,
+                          matchRatio: 0,
+                        }
                       }
-                    >
-                      Keep this change
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setDraft(selected.text)}
-                      aria-label="Reset to original text"
-                    >
-                      <Undo2 className="size-3.5" />
-                    </Button>
-                  </div>
-                  <p className="mt-3 text-xs text-muted-foreground">Original: “{selected.text}”</p>
+                      session={scanSession}
+                      busy={scanBusy}
+                      onPreset={(preset) => patchScanSession({ preset })}
+                      onReplaceToggle={(value) => patchScanSession({ replaceWithCleaned: value })}
+                      onEnhanceAndOcr={() => void enhanceAndOcr()}
+                    />
+                  )}
+                  {scanMode && selected && <Separator className="my-5" />}
+                  {!selected ? (
+                    scanMode ? null : (
+                      <div className="py-8 text-center">
+                        <p className="font-display text-base font-semibold">Nothing selected</p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Click any line on the page to open it here, or switch to Image studio.
+                        </p>
+                      </div>
+                    )
+                  ) : (
+                    <>
+                      <p className="eyebrow">
+                        {selectedIsOcr ? "Editing one OCR line" : "Editing one run"}
+                      </p>
+                      <p className="text-gauge mt-2 text-xs text-muted-foreground">
+                        page {selected.page} · {selected.fontSize.toFixed(1)}pt ·{" "}
+                        {selected.width.toFixed(0)}pt wide
+                        {selectedIsOcr
+                          ? " · OCR"
+                          : selected.fontFamily
+                            ? ` · ${selected.fontFamily.split(",")[0]}`
+                            : ""}
+                      </p>
+                      {!selectedIsOcr && (
+                        <FontMatchIndicator
+                          inspection={
+                            inspection && missingGlyphs.length > 0
+                              ? {
+                                  ...inspection,
+                                  method: "blocked",
+                                  missingGlyphs,
+                                  message: `Cannot encode ${missingGlyphs.map((c) => `“${c}”`).join(" ")} — export would write “?”.`,
+                                }
+                              : inspection
+                          }
+                          loading={inspecting}
+                        />
+                      )}
+                      <Textarea
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        rows={4}
+                        className="mt-3"
+                        placeholder="Replacement text"
+                      />
+                      <p
+                        className={
+                          draftFits
+                            ? "mt-2 text-xs text-muted-foreground"
+                            : "mt-2 text-xs text-warning"
+                        }
+                      >
+                        {draftFits
+                          ? "Fits the original box at full size."
+                          : `Too wide — export will shrink type to about ${exportSize.toFixed(1)}pt to stay inside the box.`}
+                      </p>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setDraft(cleanCopy(draft))}
+                        >
+                          <Eraser className="mr-1.5 size-3.5" /> Clean copy
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setDraft(shortenToFit(draft, selected.fontSize, boxWidth))}
+                        >
+                          <Scissors className="mr-1.5 size-3.5" /> Shorten to fit
+                        </Button>
+                      </div>
+
+                      <div className="mt-4 flex gap-2">
+                        <Button
+                          size="sm"
+                          className="flex-1"
+                          onClick={commit}
+                          disabled={
+                            (!selectedIsOcr &&
+                              (scanMode || !canCommitSafely(inspection, draft, selected.text))) ||
+                            missingGlyphs.length > 0
+                          }
+                        >
+                          Keep this change
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setDraft(selected.text)}
+                          aria-label="Reset to original text"
+                        >
+                          <Undo2 className="size-3.5" />
+                        </Button>
+                      </div>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Original: “{selected.text}”
+                      </p>
+                    </>
+                  )}
                 </>
               )}
 

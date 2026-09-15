@@ -23,13 +23,14 @@ import {
 
 const manifest = await readManifest();
 
-test("manifest lists the five committed fixtures", () => {
+test("manifest lists the committed fixtures", () => {
   const files = manifest.files.map((f) => f.file).sort();
   assert.deepEqual(files, [
     "image-and-text.pdf",
     "lines-and-text.pdf",
     "multi-font.pdf",
     "multi-page.pdf",
+    "scan-image-only.pdf",
     "simple-text.pdf",
   ]);
 });

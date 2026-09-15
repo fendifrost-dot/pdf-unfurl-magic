@@ -18,8 +18,16 @@ export function FontMatchIndicator({
 
   const blocked = inspection.method === "blocked";
   const inPlace = inspection.method === "in-place";
+  const missingOperator = !inspection.found;
   const tone = blocked ? "text-destructive" : inPlace ? "text-success" : "text-warning";
   const Icon = blocked ? ShieldAlert : ShieldCheck;
+  const status = missingOperator
+    ? "Not a text operator"
+    : blocked
+      ? "Unsafe"
+      : inPlace
+        ? "Safe in-place rewrite"
+        : "Safe standard stand-in";
 
   return (
     <div className="mt-3 rounded-md border border-border/70 bg-surface/60 px-3 py-2.5">
@@ -30,7 +38,7 @@ export function FontMatchIndicator({
         </Badge>
         <span className={`inline-flex items-center gap-1 text-xs ${tone}`}>
           <Icon className="size-3.5" />
-          {blocked ? "Unsafe" : inPlace ? "Safe in-place rewrite" : "Safe standard stand-in"}
+          {status}
         </span>
       </div>
       <p

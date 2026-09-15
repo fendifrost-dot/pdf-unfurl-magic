@@ -18,6 +18,16 @@ export type OcrWord = {
   confidence: number;
 };
 
+/** Pixel-space OCR line (origin top-left, same as the source bitmap). */
+export type OcrLineBox = {
+  text: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  confidence: number;
+};
+
 export type ScanPage = {
   id: string;
   name: string;

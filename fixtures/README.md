@@ -15,6 +15,7 @@ npm run fixtures:generate
 | `lines-and-text.pdf` | 1 | Table rules + a signature line. Neighbouring vectors must survive a one-box edit. |
 | `image-and-text.pdf` | 1 | Embedded PNG + caption. The image object must not flatten when text is edited. |
 | `multi-page.pdf` | 3 | Split / extract / merge, page-count badge, untouched-page regression. Markers `PAGE_MARKER_1`…`3`. |
+| `scan-image-only.pdf` | 1 | Full-page bitmap, no text operators. Scan-aware Enhance / OCR. |
 
 Sizes are capped in `manifest.json` (`maxBytes`). The smoke harness fails if a fixture grows past that cap.
 

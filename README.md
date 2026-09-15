@@ -52,6 +52,10 @@ import photos, drag the document corners if the auto outline misses, pick an enh
 preset, and export an ordered PDF. Optional OCR adds a hidden text layer only — the
 JPEG page stays the picture. Processing is one page at a time.
 
+## Scan-aware edit
+
+Open `/edit` on a scanned or image-only PDF. If the page has no reliable text operators, the editor shows **This page looks scanned** instead of Helvetica Unsafe. Enhance the page (upscale + denoise/contrast, one page at a time) and run local OCR, then edit the OCR lines. Export writes a text layer on the page image — the original picture stays unless you choose **Replace with cleaned image**. Real text PDFs still use in-place rewrite.
+
 ## Phone / PWA
 
 On iPhone or Android, open the web app and use the bottom bar: Home, Split, Merge,

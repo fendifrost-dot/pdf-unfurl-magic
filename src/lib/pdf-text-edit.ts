@@ -349,10 +349,10 @@ function buildInspection(
   else if (found) method = "redraw-standard";
   else method = "blocked";
 
-  const fontLabel = baseFont || match.label;
+  const fontLabel = !found ? "No text operator" : baseFont || match.label;
   const message =
     method === "blocked" && !found
-      ? "This run was not found as a text operator on the page. Export will refuse rather than paint over it."
+      ? "This run was not found as a text operator on the page. If the page is a scan or OCR ghost, use Enhance page instead of rewriting Helvetica over the image. Export will refuse rather than paint over it."
       : describeFontMatch(match, missingGlyphs);
 
   return {

@@ -42,6 +42,8 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Drop `image-and-text.pdf`. Edit the caption. The blue image is still an image, not a smeared bitmap of the whole page.
 - [ ] Drop `multi-page.pdf`. Step **1 / 3 → 3 / 3**. Edit page 1 only, export, re-open: pages 2 and 3 still show `PAGE_MARKER_2` and `PAGE_MARKER_3`.
 
+- [ ] Drop `scan-image-only.pdf`. Banner reads **This page looks scanned**. Font is not Helvetica Unsafe. **Enhance page & OCR**, click `AMOUNT 1987.00` (or the OCR box Tesseract found), change the figure, **Keep this change**, **Export**. Re-open: new amount is there; no white-out rectangle over the rest of the page. Leave **Replace with cleaned image** off once, then on once.
+
 ## Scan (`/scan`) — skip if that PR is not merged
 
 - [ ] Header has **Scan**. Open `/scan`.
@@ -75,5 +77,6 @@ Use the committed files in `fixtures/` — not a real client PDF.
 | `fixtures/lines-and-text.pdf` | 1 | Rules survive a box edit |
 | `fixtures/image-and-text.pdf` | 1 | Image object survives a caption edit |
 | `fixtures/multi-page.pdf` | 3 | Split, extract, merge, untouched pages |
+| `fixtures/scan-image-only.pdf` | 1 | Scan-aware Enhance / OCR (no text operators) |
 
 Regenerate fixtures with `npm run fixtures:generate` only if you change `fixtures/generate.mjs`.

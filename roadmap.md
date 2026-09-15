@@ -17,4 +17,4 @@ Browser-only PDF workshop (pdf-lib + PDF.js). No server, no auth, no DB.
 - [x] In-PDF Image Studio: select an embedded photo, replace / crop / rotate / exposure / contrast / compress; optional rect / redact burns; export keeps text, rules, and unselected images
 - [ ] Later (not this workshop): brushes, generative fill, CMYK print
 - [ ] Deferred: multi-signer routing, email invites, DocuSign API, PKI certificates
-- [x] Phone / PWA shell: `/split` `/merge` `/scan` `/edit`, bottom nav, 44px targets, share sheet
+- [x] Scan-aware Edit: detect image-only / OCR-ghost pages, Enhance + local OCR, export a text layer without Acrobat whiteout
