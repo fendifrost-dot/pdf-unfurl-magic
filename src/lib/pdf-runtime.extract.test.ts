@@ -8,6 +8,7 @@ import {
   looksGarbled,
   mergeLinesByBaseline,
   preferReadableText,
+  joinRunsToLine,
   type RawTextItem,
 } from "./pdf-runtime";
 import { applyTextPatchesWithReport, inspectTextPatch, listPageShownText } from "./pdf-text-edit";
@@ -117,6 +118,39 @@ describe("mergeLinesByBaseline", () => {
     expect(amount?.text).toBe("500.00");
     const expanded = expandToFullLine(lines, row!);
     expect(expanded?.text).toMatch(/500\.00/);
+    expect(expanded?.text).toMatch(/Syd Pay 500\.00/);
+  });
+
+  it("keeps a space when a far amount is merged despite an over-wide label box", () => {
+    const joined = joinRunsToLine([
+      {
+        id: "a",
+        page: 1,
+        text: "Card 6205 POS debit",
+        x: 56,
+        y: 710,
+        width: 400,
+        height: 13,
+        fontSize: 11,
+        fontName: "F1",
+        fontFamily: "Helvetica",
+        kind: "run",
+      },
+      {
+        id: "b",
+        page: 1,
+        text: "2,500.00",
+        x: 420,
+        y: 710,
+        width: 44,
+        height: 13,
+        fontSize: 11,
+        fontName: "F2",
+        fontFamily: "Helvetica",
+        kind: "run",
+      },
+    ]);
+    expect(joined.text).toBe("Card 6205 POS debit 2,500.00");
   });
 
   it("joins overlapping glyph fragments that used to stay tiny", () => {

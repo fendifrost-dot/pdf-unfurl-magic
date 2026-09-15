@@ -227,6 +227,17 @@ function joinRunGap(prev: TextLine, next: TextLine, prevText: string, fontSize: 
   const recovered = recoverThousandsComma(prevText, fake, prev.x + prev.width, fontSize);
   if (recovered) return recovered;
   if (shouldInsertJoinSpace(prevText, fake, prev.x + prev.width, fontSize)) return " ";
+  // PDF.js sometimes over-reports width so a far amount looks like it abuts
+  // the label. Still insert a space between two word-sized runs.
+  if (
+    prev.text.trim().length >= 3 &&
+    next.text.trim().length >= 3 &&
+    !prevText.endsWith(" ") &&
+    !LEADING_PUNCT.test(next.text) &&
+    !(TRAILING_MONEY.test(prevText) && /^\d/.test(next.text))
+  ) {
+    return " ";
+  }
   return "";
 }
 
