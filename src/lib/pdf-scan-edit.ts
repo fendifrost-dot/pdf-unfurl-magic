@@ -304,6 +304,8 @@ export function ocrBoxesToTextLines(
       text: box.text,
       x,
       y,
+      originX: x,
+      originY: y,
       width,
       height,
       fontSize: Math.max(4, height * 0.85),

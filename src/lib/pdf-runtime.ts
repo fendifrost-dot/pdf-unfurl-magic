@@ -59,6 +59,12 @@ export type TextLine = {
   /** PDF user-space coordinates, origin bottom-left. Baseline is `y`. */
   x: number;
   y: number;
+  /**
+   * Extract-time x,y before the user nudges or aligns. Snap-to-original
+   * restores these. Missing means the current x,y *is* the extract position.
+   */
+  originX?: number;
+  originY?: number;
   width: number;
   height: number;
   fontSize: number;
@@ -164,6 +170,8 @@ export function groupTextItems(items: RawTextItem[], pageNumber: number): TextLi
       text: text.replace(/[ \t]+/g, " ").trim(),
       x,
       y,
+      originX: x,
+      originY: y,
       width: Math.max(right - x, fontSize * 0.6),
       height: fontSize * 1.18,
       fontSize,
@@ -289,11 +297,24 @@ export function joinRunsToLine(runs: TextLine[]): TextLine {
     };
   }
   if (sorted.length === 1) {
-    return { ...first, kind: "line", members: first.members ?? [first] };
+    const only = first.members ?? [first];
+    return {
+      ...first,
+      originX: first.originX ?? first.x,
+      originY: first.originY ?? first.y,
+      kind: "line",
+      members: only.map((run) => ({
+        ...run,
+        originX: run.originX ?? run.x,
+        originY: run.originY ?? run.y,
+      })),
+    };
   }
   const x = Math.min(...sorted.map((r) => r.x));
   const right = Math.max(...sorted.map((r) => r.x + r.width));
   const y = Math.min(...sorted.map((r) => r.y));
+  const originX = Math.min(...sorted.map((r) => r.originX ?? r.x));
+  const originY = Math.min(...sorted.map((r) => r.originY ?? r.y));
   const fontSize = Math.max(...sorted.map((r) => r.fontSize));
   let text = "";
   const rawParts: string[] = [];
@@ -316,15 +337,23 @@ export function joinRunsToLine(runs: TextLine[]): TextLine {
     ...(rawJoined && rawJoined !== display ? { rawText: rawJoined } : {}),
     x,
     y,
+    originX,
+    originY,
     width: Math.max(right - x, fontSize * 0.6),
     height: fontSize * 1.18,
     fontSize,
     fontName: first.fontName,
     fontFamily: first.fontFamily,
-    source: first.source,
+    ...(first.source ? { source: first.source } : {}),
     hasTextOperator: sorted.some((r) => r.hasTextOperator !== false),
     kind: "line",
-    members: sorted.flatMap((run) => (run.members?.length ? run.members : [run])),
+    members: sorted
+      .flatMap((run) => (run.members?.length ? run.members : [run]))
+      .map((run) => ({
+        ...run,
+        originX: run.originX ?? run.x,
+        originY: run.originY ?? run.y,
+      })),
   };
 }
 
@@ -383,6 +412,104 @@ export function expandToFullLine(lines: TextLine[], selected: TextLine): TextLin
   const joined = joinRunsToLine(runs);
   if (joined.text === selected.text && Math.abs(joined.width - selected.width) < 1) return null;
   return joined;
+}
+
+function estimatedShowWidth(show: { text: string; fontSize: number }): number {
+  return Math.max(show.fontSize * 0.6, show.text.length * (show.fontSize || 10) * 0.5);
+}
+
+/**
+ * PDF.js sometimes paints a whole statement row as one fat run (missing
+ * standard-font widths, or a wide item). Split it back into column members
+ * using content-stream shows so Align can move description vs amount vs
+ * balance independently.
+ */
+export function splitLineByColumnShows(
+  line: TextLine,
+  shows: Array<{ text: string; x: number; y: number; fontSize: number }>,
+): TextLine {
+  if ((line.members?.length ?? 0) > 1) {
+    return {
+      ...line,
+      originX: line.originX ?? line.x,
+      originY: line.originY ?? line.y,
+      members: line.members!.map((member) => ({
+        ...member,
+        originX: member.originX ?? member.x,
+        originY: member.originY ?? member.y,
+      })),
+    };
+  }
+  const band = Math.max(3, line.fontSize * 0.5);
+  const hits = shows
+    .filter((show) => {
+      if (Math.abs(show.y - line.y) > band) return false;
+      const showW = estimatedShowWidth(show);
+      const overlap = Math.min(show.x + showW, line.x + line.width) - Math.max(show.x, line.x);
+      return overlap > Math.min(showW, line.width) * 0.2;
+    })
+    .sort((a, b) => a.x - b.x);
+  if (hits.length < 2) {
+    return { ...line, originX: line.originX ?? line.x, originY: line.originY ?? line.y };
+  }
+  const groups: Array<typeof hits> = [];
+  let current: typeof hits = [];
+  for (const show of hits) {
+    const prev = current[current.length - 1];
+    if (!prev) {
+      current = [show];
+      continue;
+    }
+    if (
+      shouldStartNewColumn(
+        {
+          x: prev.x,
+          width: estimatedShowWidth(prev),
+          fontSize: prev.fontSize,
+          text: prev.text,
+        },
+        { x: show.x, fontSize: show.fontSize, text: show.text },
+      )
+    ) {
+      groups.push(current);
+      current = [show];
+    } else {
+      current.push(show);
+    }
+  }
+  if (current.length) groups.push(current);
+  if (groups.length < 2) {
+    return { ...line, originX: line.originX ?? line.x, originY: line.originY ?? line.y };
+  }
+  const members: TextLine[] = groups.map((group, index) => {
+    const x = Math.min(...group.map((item) => item.x));
+    const right = Math.max(...group.map((item) => item.x + estimatedShowWidth(item)));
+    const y = Math.min(...group.map((item) => item.y));
+    const fontSize = Math.max(...group.map((item) => item.fontSize), line.fontSize);
+    const text = group
+      .map((item) => item.text)
+      .join(" ")
+      .replace(/[ \t]+/g, " ")
+      .trim();
+    return {
+      id: `${line.id}-col${index}`,
+      page: line.page,
+      text,
+      x,
+      y,
+      originX: x,
+      originY: y,
+      width: Math.max(right - x, fontSize * 0.6),
+      height: fontSize * 1.18,
+      fontSize,
+      fontName: line.fontName,
+      fontFamily: line.fontFamily,
+      ...(line.source ? { source: line.source } : {}),
+      hasTextOperator: true,
+      kind: "run",
+    };
+  });
+  return { ...joinRunsToLine(members), id: line.id };
 }
 
 function attachStreamHints(
@@ -484,7 +611,7 @@ export async function extractLines(
       return mergeLinesByBaseline(pdfjsRuns);
     }
     const hinted = pdfjsRuns.map((run) => attachStreamHints(run, shows));
-    return mergeLinesByBaseline(hinted);
+    return mergeLinesByBaseline(hinted).map((line) => splitLineByColumnShows(line, shows));
   } catch (error) {
     console.error("content-stream text extract failed; using PDF.js runs", error);
     return mergeLinesByBaseline(pdfjsRuns);

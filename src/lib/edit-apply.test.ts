@@ -412,6 +412,81 @@ describe("Apply / Enhance exit contracts", () => {
     expect(members?.find((member) => member.originalText === "4,972.29")?.x).toBe(500);
   });
 
+  it("locates patch members at originX and sets targetX after overlay align", () => {
+    const line = {
+      id: "row",
+      x: 50,
+      y: 640,
+      originX: 50,
+      originY: 640,
+      width: 500,
+      height: 14,
+      fontSize: 10,
+      fontName: "F1",
+      fontFamily: "Helvetica",
+      text: "Paid To merchant 500.00 4,972.29",
+      members: [
+        {
+          id: "desc",
+          x: 430,
+          y: 640,
+          originX: 50,
+          originY: 640,
+          width: 120,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "Paid To merchant",
+        },
+        {
+          id: "amt",
+          x: 400,
+          y: 640,
+          originX: 400,
+          originY: 640,
+          width: 50,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "500.00",
+        },
+        {
+          id: "bal",
+          x: 500,
+          y: 640,
+          originX: 500,
+          originY: 640,
+          width: 50,
+          height: 14,
+          fontSize: 10,
+          fontName: "F1",
+          fontFamily: "Helvetica",
+          text: "4,972.29",
+        },
+      ],
+    };
+    const fields = columnFieldsForLine(line);
+    expect(fields.map((field) => field.label)).toEqual(["Description", "Amount", "Balance"]);
+    expect(fields[1]?.x).toBe(400);
+    const members = membersForLinePatch(line, {
+      desc: "Paid From merchant",
+      amt: "500.00",
+      bal: "4,972.29",
+    });
+    expect(members?.find((member) => member.originalText === "Paid To merchant")).toMatchObject({
+      x: 50,
+      targetX: 430,
+      text: "Paid From merchant",
+    });
+    expect(members?.find((member) => member.originalText === "500.00")).toMatchObject({
+      x: 400,
+    });
+    expect(members?.find((member) => member.originalText === "500.00")?.targetX).toBeUndefined();
+    expect(members?.find((member) => member.originalText === "4,972.29")?.x).toBe(500);
+  });
+
   it("carries a description-only draft onto the expanded full line", () => {
     const desc = {
       id: "desc",

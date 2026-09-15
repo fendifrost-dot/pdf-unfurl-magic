@@ -146,15 +146,21 @@ export function joinRunsInReadingOrder(runs: TextLine[]): TextLine {
     ...(rawJoined && rawJoined !== text.replace(/\s+/g, " ").trim() ? { rawText: rawJoined } : {}),
     x: minX,
     y: minY,
+    originX: Math.min(...members.map((run) => run.originX ?? run.x)),
+    originY: Math.min(...members.map((run) => run.originY ?? run.y)),
     width: Math.max(maxRight - minX, fontSize * 0.6),
     height: Math.max(maxTop - minY, fontSize * 1.18),
     fontSize,
     fontName: first.fontName,
     fontFamily: first.fontFamily,
-    source: first.source,
+    ...(first.source ? { source: first.source } : {}),
     hasTextOperator: members.some((run) => run.hasTextOperator !== false),
     kind: "line",
-    members,
+    members: members.map((run) => ({
+      ...run,
+      originX: run.originX ?? run.x,
+      originY: run.originY ?? run.y,
+    })),
     ...(confidences.length
       ? { confidence: confidences.reduce((sum, value) => sum + value, 0) / confidences.length }
       : {}),

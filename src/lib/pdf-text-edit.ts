@@ -50,6 +50,7 @@ import {
   tokensToBytes,
   type TextShow,
   type Token,
+  shiftShowUserPosition,
 } from "./pdf-content-stream";
 import {
   charsMissingFromWinAnsi,
@@ -99,9 +100,16 @@ export type TextPatch = {
     text?: string;
   }>;
   /**
+   * Destination user-space origin after align / nudge. Locate the operator
+   * at `x,y` (extract-time); write the Tm/Td so the show lands here.
+   */
+  targetX?: number;
+  targetY?: number;
+  /**
    * Segmented rewrite: one entry per positioned operator (description vs
    * amount vs balance). Apply/Export write each member at its original (x,y)
-   * instead of collapsing the row into one Tj at x0.
+   * instead of collapsing the row into one Tj at x0. Members may also carry
+   * `targetX` / `targetY` so align copies through `flattenMemberPatches`.
    */
   members?: TextPatchMember[];
 };
@@ -117,6 +125,8 @@ export type TextPatchMember = {
   fontName?: string;
   fontFamily?: string;
   rawText?: string;
+  targetX?: number;
+  targetY?: number;
 };
 
 const COLUMN_EM = 3.2;
@@ -553,6 +563,14 @@ function membersFromShowsAndDraft(shows: TextShow[], nextText: string): TextPatc
   return members;
 }
 
+function memberHasTarget(member: TextPatchMember): boolean {
+  return typeof member.targetX === "number" || typeof member.targetY === "number";
+}
+
+function memberNeedsWrite(member: TextPatchMember): boolean {
+  return (member.text ?? "") !== (member.originalText ?? "") || memberHasTarget(member);
+}
+
 function memberToPatch(patch: TextPatch, member: TextPatchMember): TextPatch {
   const original = member.originalText ?? "";
   return {
@@ -572,6 +590,8 @@ function memberToPatch(patch: TextPatch, member: TextPatchMember): TextPatch {
     fontName: member.fontName ?? patch.fontName,
     fontFamily: member.fontFamily ?? patch.fontFamily,
     ...(patch.fontChoice ? { fontChoice: patch.fontChoice } : {}),
+    ...(typeof member.targetX === "number" ? { targetX: member.targetX } : {}),
+    ...(typeof member.targetY === "number" ? { targetY: member.targetY } : {}),
   };
 }
 
@@ -583,7 +603,7 @@ function flattenMemberPatches(patches: TextPatch[]): TextPatch[] {
       out.push(patch);
       continue;
     }
-    const changed = members.filter((member) => (member.text ?? "") !== (member.originalText ?? ""));
+    const changed = members.filter(memberNeedsWrite);
     for (const member of [...changed].sort((a, b) => b.x - a.x)) {
       out.push(memberToPatch(patch, member));
     }
@@ -962,8 +982,8 @@ function appendRedraw(
   const color = show.fill;
   const text = patch.text.replace(/\s*\n\s*/g, " ");
   const textToken = encoded ?? encodePdfLiteral(text);
-  const x = show.x;
-  const y = show.y;
+  const x = typeof patch.targetX === "number" ? patch.targetX : show.x;
+  const y = typeof patch.targetY === "number" ? patch.targetY : show.y;
   const snippet = [
     { kind: "ws" as const, raw: "\n" },
     { kind: "op" as const, raw: "BT", value: "BT" },
@@ -1144,9 +1164,7 @@ export async function inspectTextPatch(
   bytes: ArrayBuffer,
   patch: TextPatch,
 ): Promise<TextEditInspection> {
-  const changedMember = (patch.members ?? []).find(
-    (member) => (member.text ?? "") !== (member.originalText ?? ""),
-  );
+  const changedMember = (patch.members ?? []).find(memberNeedsWrite);
   if (changedMember) {
     return inspectTextPatch(bytes, memberToPatch(patch, changedMember));
   }
@@ -1223,6 +1241,36 @@ export async function inspectTextPatch(
   });
 }
 
+function patchDestination(
+  patch: TextPatch,
+  show: TextShow,
+): { x: number; y: number; moved: boolean } {
+  const x = typeof patch.targetX === "number" ? patch.targetX : show.x;
+  const y = typeof patch.targetY === "number" ? patch.targetY : show.y;
+  const moved = Math.abs(x - show.x) > 0.05 || Math.abs(y - show.y) > 0.05;
+  return { x, y, moved };
+}
+
+function relocateShow(stream: PageStream, show: TextShow, x: number, y: number) {
+  stream.tokens = shiftShowUserPosition(stream.tokens, show, x, y);
+  stream.dirty = true;
+}
+
+function showAfterRewrite(
+  stream: PageStream,
+  previous: TextShow,
+  text: string,
+): TextShow | undefined {
+  const shows = collectTextShows(stream.tokens);
+  return (
+    shows.find(
+      (item) =>
+        normalizePdfText(item.text) === normalizePdfText(text) &&
+        Math.hypot(item.x - previous.x, item.y - previous.y) < 1.5,
+    ) ?? shows.find((item) => Math.hypot(item.x - previous.x, item.y - previous.y) < 1.5)
+  );
+}
+
 export async function applyTextPatchesWithReport(
   bytes: ArrayBuffer,
   patches: TextPatch[],
@@ -1296,7 +1344,31 @@ export async function applyTextPatchesWithReport(
         continue;
       }
 
-      if (!patch.members?.length && located.shows.length > 1 && showsAreColumnar(located.shows)) {
+      const dest = patchDestination(patch, head);
+      const alreadyPositioned =
+        typeof patch.targetX === "number" || typeof patch.targetY === "number";
+      const textUnchanged = textMatchKey(nextText) === textMatchKey(original);
+      if (textUnchanged && dest.moved) {
+        relocateShow(located.stream, head, dest.x, dest.y);
+        reports.push({
+          page: patch.page,
+          originalText: original,
+          text: nextText,
+          method: "in-place",
+          fontMatch: match,
+          fontLabel: fontInfo?.baseFont || match.label,
+          missingGlyphs: [],
+          found: true,
+        });
+        continue;
+      }
+
+      if (
+        !patch.members?.length &&
+        !alreadyPositioned &&
+        located.shows.length > 1 &&
+        showsAreColumnar(located.shows)
+      ) {
         const members = membersFromShowsAndDraft(located.shows, nextText);
         const subs = flattenMemberPatches([{ ...patch, members, memberBoxes: undefined }]);
         if (subs.length > 0) {
@@ -1375,6 +1447,10 @@ export async function applyTextPatchesWithReport(
               Math.hypot(s.x - head.x, s.y - head.y) < 1.5,
           );
           if (again) updateTfSize(located.stream.tokens, again, size);
+        }
+        if (dest.moved) {
+          const moved = showAfterRewrite(located.stream, head, write.text);
+          if (moved) relocateShow(located.stream, moved, dest.x, dest.y);
         }
         located.stream.dirty = true;
         reports.push({

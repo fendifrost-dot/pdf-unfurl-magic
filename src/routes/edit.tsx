@@ -56,6 +56,7 @@ import { exportFileName } from "@/lib/pdf-marks";
 import { toDesktopBytes } from "@/lib/desktop";
 import { FontMatchIndicator } from "@/components/font-match-indicator";
 import { FontPicker } from "@/components/font-picker";
+import { AlignSelectionPanel } from "@/components/align-selection-panel";
 import { canCommitSafely, type TextEditInspection } from "@/lib/pdf-text-edit";
 import {
   APPLY_EDIT_LABEL,
@@ -89,6 +90,21 @@ import {
   type PdfRect,
   type TextSelectMode,
 } from "@/lib/text-select";
+import {
+  alignRuns,
+  editIsPending,
+  extractOrigin,
+  groupForAlign,
+  lineAtOrigin,
+  nudgeRuns,
+  patchesFromEdit,
+  positionMoved,
+  remapLinePositions,
+  selectionMembers,
+  showAlignControls,
+  snapRunsToOrigin,
+  type AlignKind,
+} from "@/lib/text-align";
 import {
   applyOcrVerifyDecision,
   collectUncertainSnippets,
@@ -262,13 +278,16 @@ function CommittedImageOverlay({
 function memberBoxesForPatch(line: TextLine): TextPatch["memberBoxes"] {
   const runs = line.members?.length ? line.members : [];
   if (runs.length <= 1) return undefined;
-  return runs.map((run) => ({
-    x: run.x,
-    y: run.y,
-    width: run.width,
-    height: run.height,
-    ...(run.text ? { text: run.text } : {}),
-  }));
+  return runs.map((run) => {
+    const origin = extractOrigin(run);
+    return {
+      x: origin.x,
+      y: origin.y,
+      width: run.width,
+      height: run.height,
+      ...(run.text ? { text: run.text } : {}),
+    };
+  });
 }
 
 function segmentedPatchFields(
@@ -282,6 +301,62 @@ function segmentedPatchFields(
     ...(memberBoxes ? { memberBoxes } : {}),
     ...(members?.length ? { members } : {}),
   };
+}
+
+function patchFontExtras(
+  option: CatalogFont | undefined,
+  embedBytes?: Uint8Array,
+): Pick<TextPatch, "fontChoice"> {
+  if (!option) return {};
+  return {
+    fontChoice: {
+      source: option.source,
+      family: option.family,
+      ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
+      ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
+      ...(embedBytes ? { embedBytes } : {}),
+    },
+  };
+}
+
+/** Column members already carry targetX; otherwise fall back to per-run align patches. */
+function patchesForNativeEdit(
+  edit: Edit,
+  option: CatalogFont | undefined,
+  embedBytes?: Uint8Array,
+): TextPatch[] {
+  const extras = patchFontExtras(option, embedBytes);
+  const segmented = segmentedPatchFields(edit.line, edit.text, edit.memberTexts);
+  if (segmented.members?.length) {
+    const { line, text } = edit;
+    const origin = extractOrigin(line);
+    return [
+      {
+        page: line.page,
+        x: origin.x,
+        y: origin.y,
+        width: line.width,
+        height: line.height,
+        fontSize: line.fontSize,
+        text,
+        originalText: line.text,
+        ...(line.rawText ? { rawText: line.rawText } : {}),
+        ...segmented,
+        fontName: line.fontName,
+        fontFamily: line.fontFamily,
+        ...extras,
+      },
+    ];
+  }
+  return patchesFromEdit(
+    {
+      line: edit.line,
+      text: edit.text,
+      ...(edit.fontChoiceId ? { fontChoiceId: edit.fontChoiceId } : {}),
+      ...(edit.memberTexts ? { memberTexts: edit.memberTexts } : {}),
+    },
+    extras,
+  );
 }
 
 function boxStyle(
@@ -630,7 +705,7 @@ function Editor() {
   useEffect(() => {
     if (!doc) return;
     const nativeEdits = Object.values(edits).filter(
-      (edit) => edit.line.page === page && edit.line.source !== "ocr",
+      (edit) => edit.line.page === page && edit.line.source !== "ocr" && editIsPending(edit),
     );
     let cancelled = false;
     let gen = canvasGenRef.current;
@@ -664,35 +739,12 @@ function Editor() {
 
     void (async () => {
       try {
-        const patches: TextPatch[] = nativeEdits.map(
-          ({ line, text, fontChoiceId: editFontId, memberTexts }) => {
-            const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
-            return {
-              page: line.page,
-              x: line.x,
-              y: line.y,
-              width: line.width,
-              height: line.height,
-              fontSize: line.fontSize,
-              text,
-              originalText: line.text,
-              ...(line.rawText ? { rawText: line.rawText } : {}),
-              ...segmentedPatchFields(line, text, memberTexts),
-              fontName: line.fontName,
-              fontFamily: line.fontFamily,
-              ...(option
-                ? {
-                    fontChoice: {
-                      source: option.source,
-                      family: option.family,
-                      ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
-                      ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
-                    },
-                  }
-                : {}),
-            };
-          },
-        );
+        const patches: TextPatch[] = nativeEdits.flatMap((edit) => {
+          const option = fontCatalog.find(
+            (item) => item.id === (edit.fontChoiceId || fontChoiceId),
+          );
+          return patchesForNativeEdit(edit, option);
+        });
         const bytes = await applyTextPatches(doc.bytes, patches);
         if (cancelled) return;
         const proxy = await openDocument(bytes.slice().buffer as ArrayBuffer);
@@ -829,11 +881,14 @@ function Editor() {
     }
     let cancelled = false;
     setInspecting(true);
-    const coverBoxes = coverBoxesFromLine(selected);
+    const locate = lineAtOrigin(selected);
+    const coverBoxes = coverBoxesFromLine(locate);
+    const origin = extractOrigin(selected);
+    const memberBoxes = memberBoxesForPatch(locate);
     const probe: TextPatch = {
       page: selected.page,
-      x: selected.x,
-      y: selected.y,
+      x: origin.x,
+      y: origin.y,
       width: selected.width,
       height: selected.height,
       fontSize: selected.fontSize,
@@ -843,7 +898,7 @@ function Editor() {
       ...segmentedPatchFields(selected, draft, memberDrafts),
       fontName: selected.fontName,
       fontFamily: selected.fontFamily,
-      ...(memberBoxesForPatch(selected) ? { memberBoxes: memberBoxesForPatch(selected) } : {}),
+      ...(memberBoxes ? { memberBoxes } : {}),
       ...(coverBoxes ? { coverBoxes } : {}),
     };
     const timer = window.setTimeout(() => {
@@ -1052,30 +1107,135 @@ function Editor() {
           )
         : undefined;
     const text = fields.length > 1 ? joinColumnDrafts(fields, memberTexts ?? {}) : draft.trim();
-    const originalJoined =
-      fields.length > 1
-        ? joinColumnDrafts(fields, Object.fromEntries(fields.map((f) => [f.id, f.text])))
-        : selected.text;
     if (!applyEnabled) {
       return;
     }
+    const pending: Edit = {
+      line: { ...selected },
+      text: text || selected.text,
+      ...(fontChoiceId ? { fontChoiceId } : {}),
+      ...(memberTexts ? { memberTexts } : {}),
+    };
     setEdits((prev) => {
       const next = { ...prev };
-      const unchanged = text === originalJoined || (!text && fields.length <= 1);
-      if (unchanged) delete next[selected.id];
-      else
-        next[selected.id] = {
-          line: selected,
-          text,
-          fontChoiceId,
-          ...(memberTexts ? { memberTexts } : {}),
-        };
+      if (!editIsPending(pending)) delete next[selected.id];
+      else next[selected.id] = pending;
       return next;
     });
-    if (text !== originalJoined && (text || fields.length > 1)) {
+    if (editIsPending(pending)) {
       setApplyNotice(APPLY_SUCCESS_MESSAGE);
       setShowOriginalHint(true);
     }
+  };
+
+  const pageLines = () =>
+    showingOcr
+      ? scanSession.ocrLines.length
+        ? scanSession.ocrLines
+        : lines
+      : nativeLines.length
+        ? nativeLines
+        : lines;
+
+  const applyMemberLayout = (
+    nextMembers: ReturnType<typeof selectionMembers>,
+    sourceLines: TextLine[] = pageLines(),
+    anchor: TextLine = selected!,
+  ) => {
+    if (!anchor) return;
+    const nextLines = remapLinePositions(sourceLines, nextMembers);
+    const snapshot =
+      findLineOrMember(nextLines, anchor.id) ?? parentLineFor(nextLines, anchor) ?? anchor;
+    const parent = parentLineFor(nextLines, snapshot) ?? snapshot;
+    if (showingOcr) {
+      setLines(nextLines);
+      patchScanSession({ ocrLines: nextLines });
+    } else {
+      setNativeLines(nextLines);
+      setLines(nextLines);
+    }
+    setSelectedId(parent.id);
+    if (anchor.id !== selected?.id) {
+      setDraft(edits[parent.id]?.text ?? parent.text);
+    }
+    setEdits((prev) => {
+      const touched = new Set(nextMembers.map((run) => run.id));
+      const next: Record<string, Edit> = { ...prev };
+      for (const [id, edit] of Object.entries(prev)) {
+        const live = findLineOrMember(nextLines, id) ?? edit.line;
+        const liveParent = parentLineFor(nextLines, live) ?? live;
+        const pending = {
+          line: liveParent,
+          text: edit.text,
+          ...(edit.fontChoiceId ? { fontChoiceId: edit.fontChoiceId } : {}),
+          ...(edit.memberTexts ? { memberTexts: edit.memberTexts } : {}),
+        };
+        if (!editIsPending(pending)) delete next[id];
+        else if (touched.has(id) || liveParent.members?.some((member) => touched.has(member.id))) {
+          next[id] = pending;
+        }
+      }
+      const existing = next[anchor.id] ?? next[parent.id];
+      const pending = {
+        line: parent,
+        text: existing?.text ?? parent.text,
+        ...((existing?.fontChoiceId ?? fontChoiceId)
+          ? { fontChoiceId: existing?.fontChoiceId ?? fontChoiceId }
+          : {}),
+        ...(existing?.memberTexts ? { memberTexts: existing.memberTexts } : {}),
+      };
+      delete next[anchor.id];
+      if (!editIsPending(pending)) delete next[parent.id];
+      else next[parent.id] = pending;
+      return next;
+    });
+    setApplyNotice(APPLY_SUCCESS_MESSAGE);
+    setShowOriginalHint(true);
+  };
+
+  const workingAlignGroup = () => {
+    if (!selected) return null;
+    const source = pageLines();
+    const current = parentLineFor(source, selected) ?? selected;
+    if (selectionMembers(current).length >= 2) {
+      return { source, anchor: current, members: selectionMembers(current) };
+    }
+    const expanded = expandToFullLine(source, current);
+    if (expanded && selectionMembers(expanded).length >= 2) {
+      const band = Math.max(3, current.fontSize * 0.5);
+      const working = [
+        ...source.filter(
+          (line) => !(line.page === current.page && Math.abs(line.y - current.y) <= band),
+        ),
+        expanded,
+      ].sort((a, b) => b.y - a.y || a.x - b.x);
+      return { source: working, anchor: expanded, members: selectionMembers(expanded) };
+    }
+    return { source, anchor: current, members: selectionMembers(current) };
+  };
+
+  const alignSelection = (kind: AlignKind) => {
+    const group = workingAlignGroup();
+    if (!group) return;
+    applyMemberLayout(alignRuns(group.members, kind), group.source, group.anchor);
+  };
+
+  const nudgeSelection = (dx: number) => {
+    const group = workingAlignGroup();
+    if (!group) return;
+    applyMemberLayout(nudgeRuns(group.members, dx), group.source, group.anchor);
+  };
+
+  const snapSelectionToOrigin = () => {
+    const group = workingAlignGroup();
+    if (!group) return;
+    const pendingOnPage = group.source
+      .filter((line) => line.page === group.anchor.page)
+      .flatMap((line) => (line.members?.length ? line.members : [line]))
+      .filter((run) => positionMoved(run));
+    const selectedIds = new Set(group.members.map((run) => run.id));
+    const extras = pendingOnPage.filter((run) => !selectedIds.has(run.id));
+    applyMemberLayout(snapRunsToOrigin([...group.members, ...extras]), group.source, group.anchor);
   };
 
   const patchScanSession = (partial: Partial<ScanPageSession>) => {
@@ -1376,40 +1536,16 @@ function Editor() {
         }
       }
       const patches: TextPatch[] = [];
-      for (const { line, text, fontChoiceId: editFontId, memberTexts } of Object.values(edits)) {
+      for (const edit of Object.values(edits)) {
+        const { line, fontChoiceId: editFontId } = edit;
         if (line.source === "ocr" || flattenedPages.has(line.page)) continue;
+        if (!editIsPending(edit)) continue;
         const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
         let embedBytes: Uint8Array | undefined;
         if (option?.source === "system" && option.postscriptName) {
           embedBytes = (await loadSystemFontBytes(option.postscriptName)) ?? undefined;
         }
-        const coverBoxes = coverBoxesFromLine(line);
-        patches.push({
-          page: line.page,
-          x: line.x,
-          y: line.y,
-          width: line.width,
-          height: line.height,
-          fontSize: line.fontSize,
-          text,
-          originalText: line.text,
-          ...(line.rawText ? { rawText: line.rawText } : {}),
-          ...segmentedPatchFields(line, text, memberTexts),
-          fontName: line.fontName,
-          fontFamily: line.fontFamily,
-          ...(coverBoxes ? { coverBoxes } : {}),
-          ...(option
-            ? {
-                fontChoice: {
-                  source: option.source,
-                  family: option.family,
-                  ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
-                  ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
-                  ...(embedBytes ? { embedBytes } : {}),
-                },
-              }
-            : {}),
-        });
+        patches.push(...patchesForNativeEdit(edit, option, embedBytes));
       }
       const imagePatches = Object.values(imageEdits).map((edit) => ({
         page: edit.region.page,
@@ -1489,9 +1625,10 @@ function Editor() {
           memberIds: line.members?.map((run) => run.id),
         });
         const memberEdited = line.members?.some((run) => !!edits[run.id]);
-        const isEdited = overlay.isEdited || !!memberEdited;
+        const isMoved = positionMoved(line) || !!line.members?.some((run) => positionMoved(run));
+        const isEdited = overlay.isEdited || !!memberEdited || isMoved;
         const isSelected =
-          selectedId === line.id || line.members?.some((run) => run.id === selectedId);
+          selectedId === line.id || !!line.members?.some((run) => run.id === selectedId);
         const fill = overlayFillMode({
           isEdited,
           isLivePreview: overlay.isLivePreview,
@@ -2388,6 +2525,14 @@ function Editor() {
                         >
                           Expand to full line
                         </Button>
+                      )}
+
+                      {showAlignControls({ selected, lines, textSelectMode }) && (
+                        <AlignSelectionPanel
+                          onAlign={alignSelection}
+                          onNudge={nudgeSelection}
+                          onSnap={snapSelectionToOrigin}
+                        />
                       )}
 
                       <div className="mt-4 flex gap-2">

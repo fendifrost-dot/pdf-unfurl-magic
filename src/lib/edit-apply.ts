@@ -253,6 +253,8 @@ export type ColumnField = {
     id: string;
     x: number;
     y: number;
+    originX?: number;
+    originY?: number;
     width: number;
     height: number;
     fontSize: number;
@@ -260,6 +262,8 @@ export type ColumnField = {
     fontFamily: string;
     text: string;
     rawText?: string;
+    originX?: number;
+    originY?: number;
   }>;
 };
 
@@ -267,6 +271,8 @@ type LineLike = {
   id: string;
   x: number;
   y: number;
+  originX?: number;
+  originY?: number;
   width: number;
   height: number;
   fontSize: number;
@@ -276,6 +282,62 @@ type LineLike = {
   rawText?: string;
   members?: ColumnField["runs"];
 };
+
+const POSITION_EPS = 0.05;
+
+function locateX(run: { x: number; originX?: number }): number {
+  return run.originX ?? run.x;
+}
+
+function locateY(run: { y: number; originY?: number }): number {
+  return run.originY ?? run.y;
+}
+
+function destFields(run: {
+  x: number;
+  y: number;
+  originX?: number;
+  originY?: number;
+}): Pick<TextPatchMember, "targetX" | "targetY"> {
+  const originX = locateX(run);
+  const originY = locateY(run);
+  return {
+    ...(Math.abs(run.x - originX) > POSITION_EPS ? { targetX: run.x } : {}),
+    ...(Math.abs(run.y - originY) > POSITION_EPS ? { targetY: run.y } : {}),
+  };
+}
+
+function clusterRunsByExtractColumn<
+  T extends {
+    id: string;
+    x: number;
+    width: number;
+    fontSize?: number;
+    text?: string;
+    originX?: number;
+  },
+>(runs: T[]): T[][] {
+  const keyed = runs.map((run) => ({ ...run, x: locateX(run) }));
+  return clusterBoxesByColumn(keyed).map((group) =>
+    group.map((item) => runs.find((run) => run.id === item.id) ?? (item as T)),
+  );
+}
+
+function patchMemberFromRun(run: ColumnField["runs"][number], text: string): TextPatchMember {
+  return {
+    x: locateX(run),
+    y: locateY(run),
+    width: run.width,
+    height: run.height,
+    fontSize: run.fontSize,
+    fontName: run.fontName,
+    fontFamily: run.fontFamily,
+    text,
+    originalText: run.text,
+    ...(run.rawText ? { rawText: run.rawText } : {}),
+    ...destFields(run),
+  };
+}
 
 export function memberColumnLabel(groupText: string, index: number, groupTexts: string[]): string {
   const tokens = groupText.trim().split(/\s+/).filter(Boolean);
@@ -300,7 +362,7 @@ export function memberColumnLabel(groupText: string, index: number, groupTexts: 
 export function columnFieldsForLine(line: LineLike): ColumnField[] {
   const members = (line.members?.length ? line.members : []).filter((run) => run.text.trim());
   if (members.length < 2) return [];
-  const groups = clusterBoxesByColumn(members);
+  const groups = clusterRunsByExtractColumn(members);
   if (groups.length < 2) return [];
   const texts = groups.map((group) =>
     group
@@ -311,13 +373,13 @@ export function columnFieldsForLine(line: LineLike): ColumnField[] {
   );
   return groups.map((group, index) => {
     const first = group[0]!;
-    const x = Math.min(...group.map((run) => run.x));
-    const right = Math.max(...group.map((run) => run.x + run.width));
+    const x = Math.min(...group.map((run) => locateX(run)));
+    const right = Math.max(...group.map((run) => locateX(run) + run.width));
     return {
       id: first.id,
       label: memberColumnLabel(texts[index] ?? "", index, texts),
       x,
-      y: Math.min(...group.map((run) => run.y)),
+      y: Math.min(...group.map((run) => locateY(run))),
       width: Math.max(right - x, first.fontSize * 0.6),
       height: Math.max(...group.map((run) => run.height)),
       fontSize: Math.max(...group.map((run) => run.fontSize)),
@@ -366,8 +428,7 @@ export function remapColumnMemberTexts(input: {
     out[to.id] = (live ?? stored ?? to.text).trim() || to.text;
   }
   if (!input.sourceWasColumnar && input.sourceDraft?.trim()) {
-    const desc =
-      input.toFields.find((field) => field.label === "Description") ?? input.toFields[0];
+    const desc = input.toFields.find((field) => field.label === "Description") ?? input.toFields[0];
     if (desc) out[desc.id] = input.sourceDraft.trim();
   }
   return out;
@@ -386,18 +447,7 @@ export function membersForLinePatch(
       runs.map((run) => ({ text: run.text })),
       next,
     );
-    return runs.map((run, index) => ({
-      x: run.x,
-      y: run.y,
-      width: run.width,
-      height: run.height,
-      fontSize: run.fontSize,
-      fontName: run.fontName,
-      fontFamily: run.fontFamily,
-      text: parts[index] ?? "",
-      originalText: run.text,
-      ...(run.rawText ? { rawText: run.rawText } : {}),
-    }));
+    return runs.map((run, index) => patchMemberFromRun(run, parts[index] ?? ""));
   }
   const members: TextPatchMember[] = [];
   const hasFieldDrafts = fields.some((field) => drafts?.[field.id] !== undefined);
@@ -414,18 +464,7 @@ export function membersForLinePatch(
       next,
     );
     field.runs.forEach((run, index) => {
-      members.push({
-        x: run.x,
-        y: run.y,
-        width: run.width,
-        height: run.height,
-        fontSize: run.fontSize,
-        fontName: run.fontName,
-        fontFamily: run.fontFamily,
-        text: parts[index] ?? "",
-        originalText: run.text,
-        ...(run.rawText ? { rawText: run.rawText } : {}),
-      });
+      members.push(patchMemberFromRun(run, parts[index] ?? ""));
     });
   });
   return members;
