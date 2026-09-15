@@ -12,6 +12,7 @@ import {
   joinRunsToLine,
   splitLineByColumnShows,
   type RawTextItem,
+  type TextLine,
 } from "./pdf-runtime";
 import {
   applyTextPatchesWithReport,
@@ -241,6 +242,44 @@ describe("mergeLinesByBaseline", () => {
     );
     expect(mergeLinesByBaseline(lines)).toHaveLength(1);
     expect(mergeLinesByBaseline(lines)[0]?.text).toMatch(/Paid To/);
+  });
+});
+
+describe("expandToFullLine", () => {
+  it("returns an already-complete 3-member columnar row instead of null", () => {
+    const member = (
+      id: string,
+      text: string,
+      x: number,
+      width: number,
+      fontName = "F1",
+    ): TextLine => ({
+      id,
+      page: 1,
+      text,
+      x,
+      y: 640,
+      width,
+      height: 13,
+      fontSize: 11,
+      fontName,
+      fontFamily: "Helvetica",
+      kind: "run",
+    });
+    const line = joinRunsToLine([
+      member("desc", "06-08 Paid To - Synchrony card Syd Pay", 56, 320),
+      member("amt", "500.00", 430, 44, "F2"),
+      member("bal", "4,972.29", 546, 44, "F2"),
+    ]);
+    expect(line.members).toHaveLength(3);
+    expect(line.width).toBeCloseTo(534, 0);
+
+    const expanded = expandToFullLine([line], line);
+    expect(expanded).not.toBeNull();
+    expect(expanded).toBe(line);
+    expect(expanded?.members).toHaveLength(3);
+    expect(expanded?.text).toBe(line.text);
+    expect(expanded?.width).toBeCloseTo(534, 0);
   });
 });
 
