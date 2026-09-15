@@ -62,6 +62,8 @@ export type TextLine = {
   /** `ocr` lines come from Enhance/OCR. Content-stream vs PDF.js is for native text. */
   source?: "pdf" | "ocr" | "content-stream" | "pdfjs";
   confidence?: number;
+  /** Word-level Tesseract hits used by the OCR verify gate. */
+  ocrWords?: Array<{ text: string; confidence: number }>;
   hasTextOperator?: boolean;
   /** `line` is a merged visual row; `run` is a tighter fragment (shift-click). */
   kind?: "run" | "line";

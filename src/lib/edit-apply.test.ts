@@ -91,6 +91,25 @@ describe("Apply / Enhance exit contracts", () => {
     ).toBe(true);
   });
 
+  it("blocks OCR Apply while low-confidence snippets are still pending", () => {
+    expect(
+      canApplyTextEdit({
+        selectedIsOcr: true,
+        source: "ocr",
+        canCommitSafely: true,
+        ocrVerifyPending: true,
+      }),
+    ).toBe(false);
+    expect(
+      canApplyTextEdit({
+        selectedIsOcr: true,
+        source: "ocr",
+        canCommitSafely: true,
+        ocrVerifyPending: false,
+      }),
+    ).toBe(true);
+  });
+
   it("does not block native lines solely because OCR exists — only ghost / deferToScan", () => {
     expect(
       canApplyTextEdit({
