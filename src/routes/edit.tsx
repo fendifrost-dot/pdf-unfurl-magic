@@ -303,6 +303,62 @@ function segmentedPatchFields(
   };
 }
 
+function patchFontExtras(
+  option: CatalogFont | undefined,
+  embedBytes?: Uint8Array,
+): Pick<TextPatch, "fontChoice"> {
+  if (!option) return {};
+  return {
+    fontChoice: {
+      source: option.source,
+      family: option.family,
+      ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
+      ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
+      ...(embedBytes ? { embedBytes } : {}),
+    },
+  };
+}
+
+/** Column members already carry targetX; otherwise fall back to per-run align patches. */
+function patchesForNativeEdit(
+  edit: Edit,
+  option: CatalogFont | undefined,
+  embedBytes?: Uint8Array,
+): TextPatch[] {
+  const extras = patchFontExtras(option, embedBytes);
+  const segmented = segmentedPatchFields(edit.line, edit.text, edit.memberTexts);
+  if (segmented.members?.length) {
+    const { line, text } = edit;
+    const origin = extractOrigin(line);
+    return [
+      {
+        page: line.page,
+        x: origin.x,
+        y: origin.y,
+        width: line.width,
+        height: line.height,
+        fontSize: line.fontSize,
+        text,
+        originalText: line.text,
+        ...(line.rawText ? { rawText: line.rawText } : {}),
+        ...segmented,
+        fontName: line.fontName,
+        fontFamily: line.fontFamily,
+        ...extras,
+      },
+    ];
+  }
+  return patchesFromEdit(
+    {
+      line: edit.line,
+      text: edit.text,
+      ...(edit.fontChoiceId ? { fontChoiceId: edit.fontChoiceId } : {}),
+      ...(edit.memberTexts ? { memberTexts: edit.memberTexts } : {}),
+    },
+    extras,
+  );
+}
+
 function boxStyle(
   x: number,
   y: number,
@@ -683,29 +739,12 @@ function Editor() {
 
     void (async () => {
       try {
-        const patches: TextPatch[] = nativeEdits.flatMap(
-          ({ line, text, fontChoiceId: editFontId, memberTexts }) => {
-            const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
-            return patchesFromEdit(
-              {
-                line,
-                text,
-                ...(editFontId ? { fontChoiceId: editFontId } : {}),
-                ...(memberTexts ? { memberTexts } : {}),
-              },
-              option
-                ? {
-                    fontChoice: {
-                      source: option.source,
-                      family: option.family,
-                      ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
-                      ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
-                    },
-                  }
-                : {},
-            );
-          },
-        );
+        const patches: TextPatch[] = nativeEdits.flatMap((edit) => {
+          const option = fontCatalog.find(
+            (item) => item.id === (edit.fontChoiceId || fontChoiceId),
+          );
+          return patchesForNativeEdit(edit, option);
+        });
         const bytes = await applyTextPatches(doc.bytes, patches);
         if (cancelled) return;
         const proxy = await openDocument(bytes.slice().buffer as ArrayBuffer);
@@ -1071,7 +1110,7 @@ function Editor() {
     if (!applyEnabled) {
       return;
     }
-    const pending = {
+    const pending: Edit = {
       line: { ...selected },
       text: text || selected.text,
       ...(fontChoiceId ? { fontChoiceId } : {}),
@@ -1498,7 +1537,7 @@ function Editor() {
       }
       const patches: TextPatch[] = [];
       for (const edit of Object.values(edits)) {
-        const { line, text, fontChoiceId: editFontId, memberTexts } = edit;
+        const { line, fontChoiceId: editFontId } = edit;
         if (line.source === "ocr" || flattenedPages.has(line.page)) continue;
         if (!editIsPending(edit)) continue;
         const option = fontCatalog.find((item) => item.id === (editFontId || fontChoiceId));
@@ -1506,27 +1545,7 @@ function Editor() {
         if (option?.source === "system" && option.postscriptName) {
           embedBytes = (await loadSystemFontBytes(option.postscriptName)) ?? undefined;
         }
-        patches.push(
-          ...patchesFromEdit(
-            {
-              line,
-              text,
-              ...(editFontId ? { fontChoiceId: editFontId } : {}),
-              ...(memberTexts ? { memberTexts } : {}),
-            },
-            option
-              ? {
-                  fontChoice: {
-                    source: option.source,
-                    family: option.family,
-                    ...(option.resourceKey ? { resourceKey: option.resourceKey } : {}),
-                    ...(option.postscriptName ? { postscriptName: option.postscriptName } : {}),
-                    ...(embedBytes ? { embedBytes } : {}),
-                  },
-                }
-              : {},
-          ),
-        );
+        patches.push(...patchesForNativeEdit(edit, option, embedBytes));
       }
       const imagePatches = Object.values(imageEdits).map((edit) => ({
         page: edit.region.page,

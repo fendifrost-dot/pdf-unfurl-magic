@@ -1111,4 +1111,46 @@ describe("align writes x into the content stream", () => {
     expect(after.find((show) => show.text === "1,200.00")?.x).toBeCloseTo(500, 1);
     expect(after.some((show) => show.text === "Paid To")).toBe(false);
   });
+
+  it("member targetX relocates one column without rewriting siblings", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Paid To", { x: 50, y: 640, size: 10, font });
+    page.drawText("500.00", { x: 400, y: 640, size: 10, font });
+    page.drawText("1,200.00", { x: 500, y: 640, size: 10, font });
+    const bytes = await doc.save();
+    const before = bytes.slice().buffer as ArrayBuffer;
+    const originals = await listPageTextShows(before, 1);
+    const amount = originals[1]!;
+    const result = await applyTextPatchesWithReport(before, [
+      {
+        page: 1,
+        x: originals[0]!.x,
+        y: originals[0]!.y,
+        width: 520,
+        height: 12,
+        fontSize: 10,
+        text: "Paid To 500.00 1,200.00",
+        originalText: "Paid To 500.00 1,200.00",
+        fontFamily: "Helvetica",
+        members: originals.map((show) => ({
+          x: show.x,
+          y: show.y,
+          width: font.widthOfTextAtSize(show.text, 10),
+          height: 12,
+          text: show.text,
+          originalText: show.text,
+          fontSize: 10,
+          fontFamily: "Helvetica",
+          ...(show.text === "500.00" ? { targetX: amount.x + 24, targetY: amount.y } : {}),
+        })),
+      },
+    ]);
+    const moved = await listPageTextShows(result.bytes.slice().buffer as ArrayBuffer, 1);
+    expect(moved.map((show) => show.text)).toEqual(["Paid To", "500.00", "1,200.00"]);
+    expect(moved[0]!.x).toBeCloseTo(originals[0]!.x, 1);
+    expect(moved[1]!.x).toBeCloseTo(amount.x + 24, 1);
+    expect(moved[2]!.x).toBeCloseTo(originals[2]!.x, 1);
+  });
 });

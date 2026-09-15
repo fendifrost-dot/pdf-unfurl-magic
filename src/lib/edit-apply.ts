@@ -262,6 +262,8 @@ export type ColumnField = {
     fontFamily: string;
     text: string;
     rawText?: string;
+    originX?: number;
+    originY?: number;
   }>;
 };
 

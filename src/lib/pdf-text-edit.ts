@@ -108,7 +108,8 @@ export type TextPatch = {
   /**
    * Segmented rewrite: one entry per positioned operator (description vs
    * amount vs balance). Apply/Export write each member at its original (x,y)
-   * instead of collapsing the row into one Tj at x0.
+   * instead of collapsing the row into one Tj at x0. Members may also carry
+   * `targetX` / `targetY` so align copies through `flattenMemberPatches`.
    */
   members?: TextPatchMember[];
 };
@@ -562,6 +563,14 @@ function membersFromShowsAndDraft(shows: TextShow[], nextText: string): TextPatc
   return members;
 }
 
+function memberHasTarget(member: TextPatchMember): boolean {
+  return typeof member.targetX === "number" || typeof member.targetY === "number";
+}
+
+function memberNeedsWrite(member: TextPatchMember): boolean {
+  return (member.text ?? "") !== (member.originalText ?? "") || memberHasTarget(member);
+}
+
 function memberToPatch(patch: TextPatch, member: TextPatchMember): TextPatch {
   const original = member.originalText ?? "";
   return {
@@ -594,13 +603,7 @@ function flattenMemberPatches(patches: TextPatch[]): TextPatch[] {
       out.push(patch);
       continue;
     }
-    const changed = members.filter((member) => {
-      const textChanged = (member.text ?? "") !== (member.originalText ?? "");
-      const moved =
-        (typeof member.targetX === "number" && Math.abs(member.targetX - member.x) > 0.05) ||
-        (typeof member.targetY === "number" && Math.abs(member.targetY - member.y) > 0.05);
-      return textChanged || moved;
-    });
+    const changed = members.filter(memberNeedsWrite);
     for (const member of [...changed].sort((a, b) => b.x - a.x)) {
       out.push(memberToPatch(patch, member));
     }
@@ -1161,9 +1164,7 @@ export async function inspectTextPatch(
   bytes: ArrayBuffer,
   patch: TextPatch,
 ): Promise<TextEditInspection> {
-  const changedMember = (patch.members ?? []).find(
-    (member) => (member.text ?? "") !== (member.originalText ?? ""),
-  );
+  const changedMember = (patch.members ?? []).find(memberNeedsWrite);
   if (changedMember) {
     return inspectTextPatch(bytes, memberToPatch(patch, changedMember));
   }
@@ -1344,6 +1345,8 @@ export async function applyTextPatchesWithReport(
       }
 
       const dest = patchDestination(patch, head);
+      const alreadyPositioned =
+        typeof patch.targetX === "number" || typeof patch.targetY === "number";
       const textUnchanged = textMatchKey(nextText) === textMatchKey(original);
       if (textUnchanged && dest.moved) {
         relocateShow(located.stream, head, dest.x, dest.y);
@@ -1360,7 +1363,12 @@ export async function applyTextPatchesWithReport(
         continue;
       }
 
-      if (!patch.members?.length && located.shows.length > 1 && showsAreColumnar(located.shows)) {
+      if (
+        !patch.members?.length &&
+        !alreadyPositioned &&
+        located.shows.length > 1 &&
+        showsAreColumnar(located.shows)
+      ) {
         const members = membersFromShowsAndDraft(located.shows, nextText);
         const subs = flattenMemberPatches([{ ...patch, members, memberBoxes: undefined }]);
         if (subs.length > 0) {
