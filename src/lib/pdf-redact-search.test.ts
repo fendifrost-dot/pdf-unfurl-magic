@@ -26,6 +26,7 @@ import {
   pdfjsItemsFromTextContent,
   searchDocumentText,
 } from "./pdf-redact-search";
+import { estimateWidth } from "./text-helpers";
 
 function fixture(name: string): Uint8Array {
   const buf = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../fixtures", name));
@@ -155,6 +156,38 @@ describe("findHitsInPageItems", () => {
     ]);
     expect(items[0]).toMatchObject({ str: "SECRET", x: 40, y: 360, width: 72, height: 18 });
     expect(findHitsInPageItems(items, "SECRET", 1)).toHaveLength(1);
+  });
+
+  it("grows a too-small reported width up to the estimated glyph run", () => {
+    // pdf.js under-reports SECRET (20pt for a ~68pt run). The erase box would
+    // otherwise stop short and leave the tail extractable.
+    const estimated = estimateWidth("SECRET", 18);
+    const items = pdfjsItemsFromTextContent([
+      { str: "SECRET", transform: [18, 0, 0, 18, 40, 360], width: 20, height: 18 },
+    ]);
+    expect(items[0]?.width).toBeGreaterThanOrEqual(estimated);
+    expect(items[0]?.width).toBeGreaterThan(20);
+  });
+
+  it("keeps an accurate reported width instead of shrinking it to the estimate", () => {
+    // A generous report (wider than our heuristic) must not be clipped.
+    const generous = estimateWidth("SECRET", 18) + 25;
+    const items = pdfjsItemsFromTextContent([
+      { str: "SECRET", transform: [18, 0, 0, 18, 40, 360], width: generous, height: 18 },
+    ]);
+    expect(items[0]?.width).toBe(generous);
+  });
+
+  it("covers the full run when pdf.js reports the width too small", () => {
+    // End to end from the raw pdf.js item: the erase rect must span roughly the
+    // estimated width so every glyph of the match lands inside the hole.
+    const items = pdfjsItemsFromTextContent([
+      { str: "SECRET", transform: [18, 0, 0, 18, 40, 360], width: 20, height: 18 },
+    ]);
+    const hits = findHitsInPageItems(items, "SECRET", 1);
+    expect(hits).toHaveLength(1);
+    const rect = hits[0]?.rects[0];
+    expect(rect?.width).toBeGreaterThanOrEqual(estimateWidth("SECRET", 18));
   });
 });
 

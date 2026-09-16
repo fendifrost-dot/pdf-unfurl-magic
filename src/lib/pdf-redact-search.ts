@@ -81,7 +81,14 @@ export function pdfjsItemsFromTextContent(
     if (typeof item.str !== "string") continue;
     const t = item.transform ?? [];
     const height = Math.abs(t[3] ?? 0) || Math.abs(item.height ?? 0) || 10;
-    const width = item.width || estimateWidth(item.str, height);
+    // pdf.js can report a run width far narrower than the glyphs actually
+    // occupy (missing/partial Widths array, or a font it maps to a default
+    // glyph). For redaction an under-sized erase box leaves the tail of the
+    // match extractable, so prefer the estimated width whenever the reported
+    // one looks too small. Over-covering by a hair is the safe direction.
+    const reported = typeof item.width === "number" && item.width > 0 ? item.width : 0;
+    const estimated = estimateWidth(item.str, height);
+    const width = Math.max(reported, estimated);
     out.push({
       str: item.str,
       x: t[4] ?? 0,
