@@ -8,6 +8,10 @@
  * hole is visible. Algorithms follow PDFBox / qpdf *ideas* (content-stream
  * walk, CTM, image XObject replace) reimplemented on pdf-lib. No AGPL.
  *
+ * Find and permanently redact (`src/lib/pdf-redact-search.ts`) locates strings
+ * with pdf.js text content and creates `erase` marks. Cover boxes are never
+ * search results.
+ *
  * MVP gaps (do not claim these are handled):
  * - Form XObject text is stripped in form space only (nested paint CTM skipped).
  * - Inline BI…EI images are not punched.
