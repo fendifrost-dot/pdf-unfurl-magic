@@ -6,7 +6,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { applyTextPatches, extractPages, getPageCount, mergeFiles } from "../../src/lib/pdf-tools";
+import {
+  applyTextPatches,
+  extractPages,
+  getPageCount,
+  mergeFiles,
+  rotatePagesBy,
+  listPageRotations,
+} from "../../src/lib/pdf-tools";
+import { bytesToArrayBuffer } from "../../src/lib/pdf-io";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures");
 
@@ -45,5 +53,11 @@ describe("pdf helpers × fixtures", () => {
     ]);
     expect(bytes.byteLength).toBeGreaterThan(200);
     expect(bytes.byteLength).toBeLessThan(source.byteLength * 3);
+  });
+
+  it("rotates page 2 of multi-page by 90° and leaves 1 and 3 at 0", async () => {
+    const source = load("multi-page.pdf");
+    const bytes = await rotatePagesBy(source, [2], 90);
+    expect(await listPageRotations(bytesToArrayBuffer(bytes))).toEqual([0, 90, 0]);
   });
 });

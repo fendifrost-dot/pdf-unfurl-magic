@@ -14,6 +14,7 @@ import {
   shouldStartNewColumn,
 } from "./pdf-text-edit";
 import { sameVisibleRun } from "./pdf-content-stream";
+import { normalizeRotateDeg } from "./pdf-rotate";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -684,14 +685,16 @@ export async function renderPage(
   doc: PDFDocumentProxy,
   pageNumber: number,
   cssWidth: number,
+  rotation?: number,
 ): Promise<RenderResult> {
   const page = await doc.getPage(pageNumber);
-  const base = page.getViewport({ scale: 1 });
+  const displayRotation = rotation === undefined ? page.rotate : normalizeRotateDeg(rotation);
+  const base = page.getViewport({ scale: 1, rotation: displayRotation });
   const scale = cssWidth / base.width;
   // Phones keep one page in memory; cap backing-store size so a 3x display does not 3x RAM.
   const dprCap = cssWidth < 520 ? 1.5 : 2;
   const dpr = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, dprCap);
-  const viewport = page.getViewport({ scale });
+  const viewport = page.getViewport({ scale, rotation: displayRotation });
   const canvas = document.createElement("canvas");
   canvas.width = Math.floor(viewport.width * dpr);
   canvas.height = Math.floor(viewport.height * dpr);

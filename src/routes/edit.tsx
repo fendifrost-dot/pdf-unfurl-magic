@@ -25,6 +25,8 @@ import {
   ListChecks,
   MousePointer2,
   BoxSelect,
+  RotateCcw,
+  RotateCw,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
@@ -54,6 +56,24 @@ import {
   inspectTextPatch,
   type TextPatch,
 } from "@/lib/pdf-tools";
+import {
+  ROTATE_180_DELTA,
+  ROTATE_180_LABEL,
+  ROTATE_LEFT_DELTA,
+  ROTATE_LEFT_LABEL,
+  ROTATE_RIGHT_DELTA,
+  ROTATE_RIGHT_LABEL,
+  displayPageRotation,
+  inspectPageLayout,
+  pdfRectToViewportBox,
+  pendingRotationCount,
+  sessionRotationList,
+  stepSessionRotation,
+  viewportPointToPdf,
+  viewBoxFromSize,
+  type PageRotateDeg,
+  type PdfViewBox,
+} from "@/lib/pdf-rotate";
 import { exportFileName } from "@/lib/pdf-marks";
 import { isDesktopApp, pickDesktopPdf, toDesktopBytes } from "@/lib/desktop";
 import { saveBytesWithResult } from "@/lib/file-export";
@@ -271,10 +291,12 @@ function CommittedImageOverlay({
   edit,
   scale,
   viewSize,
+  layout,
 }: {
   edit: ImageEdit;
   scale: number;
   viewSize: { width: number; height: number };
+  layout?: { viewBox: PdfViewBox; rotation: PageRotateDeg };
 }) {
   const url = useMemo(() => {
     const blob = new Blob([edit.output.bytes.slice(0) as unknown as BlobPart], {
@@ -295,6 +317,7 @@ function CommittedImageOverlay({
         edit.region.height,
         scale,
         viewSize,
+        layout,
       )}
     />
   );
@@ -391,14 +414,18 @@ function boxStyle(
   height: number,
   scale: number,
   view: { width: number; height: number },
+  layout?: { viewBox: PdfViewBox; rotation: PageRotateDeg },
 ) {
-  const left = x * scale;
-  const top = view.height - (y + height) * scale;
+  const rotation = layout?.rotation ?? 0;
+  const viewBox =
+    layout?.viewBox ??
+    viewBoxFromSize(view.width / Math.max(scale, 1e-6), view.height / Math.max(scale, 1e-6));
+  const box = pdfRectToViewportBox(x, y, width, height, viewBox, scale, rotation);
   return {
-    left: `${(left / view.width) * 100}%`,
-    top: `${(top / view.height) * 100}%`,
-    width: `${(Math.max(width * scale, 8) / view.width) * 100}%`,
-    height: `${(Math.max(height * scale, 8) / view.height) * 100}%`,
+    left: `${(box.x / view.width) * 100}%`,
+    top: `${(box.y / view.height) * 100}%`,
+    width: `${(Math.max(box.width, 8) / view.width) * 100}%`,
+    height: `${(Math.max(box.height, 8) / view.height) * 100}%`,
   };
 }
 
@@ -443,6 +470,9 @@ function Editor() {
   const [formOriginal, setFormOriginal] = useState<Record<string, AcroFormValue>>({});
   const [formFlatten, setFormFlatten] = useState(true);
   const [selectedFieldName, setSelectedFieldName] = useState<string | null>(null);
+  const [originalRotations, setOriginalRotations] = useState<PageRotateDeg[]>([]);
+  const [sessionRotations, setSessionRotations] = useState<Record<number, PageRotateDeg>>({});
+  const [pageViewBoxes, setPageViewBoxes] = useState<PdfViewBox[]>([]);
   const [fontCatalog, setFontCatalog] = useState<CatalogFont[]>([]);
   const [fontChoiceId, setFontChoiceId] = useState("");
   const [closestFontReason, setClosestFontReason] = useState("");
@@ -487,11 +517,27 @@ function Editor() {
   ).length;
   const formPending =
     formReport.fillableCount > 0 && formFlatten ? Math.max(1, formDirtyCount) : formDirtyCount;
+  const rotationPending = pendingRotationCount(sessionRotations);
   const pendingCount =
-    editedIds.length + imageEditIds.length + marks.length + scanExportReady + formPending;
+    editedIds.length +
+    imageEditIds.length +
+    marks.length +
+    scanExportReady +
+    formPending +
+    rotationPending;
   pendingCountRef.current = pendingCount;
   docRef.current = doc;
   const scanSession = scanByPage[page] ?? emptyScanSession();
+  const originalRotation = originalRotations[page - 1] ?? 0;
+  const displayRotation = displayPageRotation(sessionRotations, page, originalRotation);
+  const overlayLayout = useMemo(
+    () => ({
+      viewBox: pageViewBoxes[page - 1] ?? viewBoxFromSize(595, 842),
+      rotation: displayRotation,
+    }),
+    [pageViewBoxes, page, displayRotation],
+  );
+  const pageViewBox = overlayLayout.viewBox;
   const looksScanned = !!scanReport?.looksScanned;
   const previewLayers = editPreviewLayers({
     looksScanned,
@@ -584,6 +630,7 @@ function Editor() {
     setStatus("Opening the file in this tab");
     try {
       const proxy = await openDocument(bytes.slice(0));
+      const layout = await inspectPageLayout(bytes.slice(0));
       setDoc({
         name,
         base: name.replace(/\.pdf$/i, ""),
@@ -591,6 +638,9 @@ function Editor() {
         proxy,
         pageCount: proxy.numPages,
       });
+      setOriginalRotations(layout.rotations);
+      setPageViewBoxes(layout.viewBoxes);
+      setSessionRotations({});
       setEdits({});
       setImageEdits({});
       setMarks([]);
@@ -620,6 +670,9 @@ function Editor() {
       setPage(1);
     } catch {
       setDoc(null);
+      setOriginalRotations([]);
+      setSessionRotations({});
+      setPageViewBoxes([]);
       setError(
         "This PDF could not be opened here. Password-protected files and badly damaged files are the usual reasons.",
       );
@@ -669,6 +722,9 @@ function Editor() {
     setFormValues({});
     setFormOriginal({});
     setSelectedFieldName(null);
+    setOriginalRotations([]);
+    setSessionRotations({});
+    setPageViewBoxes([]);
     setFindings(null);
     setError(null);
     setPage(1);
@@ -802,7 +858,7 @@ function Editor() {
     (async () => {
       try {
         const [{ canvas, viewport }, pageLines, pageImages] = await Promise.all([
-          renderPage(doc.proxy, page, CANVAS_WIDTH),
+          renderPage(doc.proxy, page, CANVAS_WIDTH, displayRotation),
           extractLines(doc.proxy, page, doc.bytes),
           extractImages(doc.proxy, page),
         ]);
@@ -847,7 +903,7 @@ function Editor() {
     };
     // OCR lines are applied in enhanceAndOcr; do not re-rasterize on session edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, page]);
+  }, [doc, page, displayRotation]);
 
   // After Apply, rewrite a copy and paint that page so replacement glyphs match
   // the rest of the file — no overlay whiteout over watermarks.
@@ -860,7 +916,7 @@ function Editor() {
     let gen = canvasGenRef.current;
 
     const paint = async (proxy: PDFDocumentProxy) => {
-      const { canvas, viewport } = await renderPage(proxy, page, CANVAS_WIDTH);
+      const { canvas, viewport } = await renderPage(proxy, page, CANVAS_WIDTH, displayRotation);
       if (cancelled || gen !== canvasGenRef.current) return;
       const holder = holderRef.current;
       if (holder) {
@@ -919,7 +975,7 @@ function Editor() {
     return () => {
       cancelled = true;
     };
-  }, [doc, page, edits, fontCatalog, fontChoiceId]);
+  }, [doc, page, edits, fontCatalog, fontChoiceId, displayRotation]);
 
   useEffect(() => {
     if (!doc || !selectedImage) {
@@ -1574,11 +1630,9 @@ function Editor() {
     const box = pageBoxRef.current;
     if (!box || !viewSize.width) return null;
     const rect = box.getBoundingClientRect();
-    const pageWidth = viewSize.width / scale;
-    const pageHeight = viewSize.height / scale;
-    const x = ((event.clientX - rect.left) / rect.width) * pageWidth;
-    const y = pageHeight - ((event.clientY - rect.top) / rect.height) * pageHeight;
-    return { x, y };
+    const cssX = ((event.clientX - rect.left) / rect.width) * viewSize.width;
+    const cssY = ((event.clientY - rect.top) / rect.height) * viewSize.height;
+    return viewportPointToPdf(cssX, cssY, pageViewBox, scale, displayRotation);
   };
 
   const onMarkPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -1730,6 +1784,14 @@ function Editor() {
     }
   };
 
+  const rotateCurrentPage = (delta: number) => {
+    if (!doc) return;
+    setSessionRotations((prev) => stepSessionRotation(prev, page, originalRotation, delta));
+    setApplyNotice(
+      `Page ${page} rotated in this tab. Save As… writes a new PDF. The original file is unchanged.`,
+    );
+  };
+
   const exportPdf = async () => {
     if (!doc) return;
     setStatus("Writing the edited boxes");
@@ -1810,6 +1872,7 @@ function Editor() {
         formReport.hasAcroForm && formReport.fillableCount > 0
           ? { values: formValues, flatten: formFlatten }
           : null;
+      const pageRotations = sessionRotationList(sessionRotations);
       const bytes = await applyWorkshopPatches(
         doc.bytes,
         patches,
@@ -1817,6 +1880,7 @@ function Editor() {
         marks,
         scanPatches,
         formFill,
+        pageRotations,
       );
       const filename = ensureNewPdfName(
         doc.name,
@@ -1825,6 +1889,7 @@ function Editor() {
           patches.length + imagePatches.length + scanPatches.length > 0,
           marks,
           !!formFill,
+          pageRotations.length > 0,
         ),
       );
       setStatus("Saving a new PDF");
@@ -1915,7 +1980,7 @@ function Editor() {
             }}
             title={overlay.displayText}
             data-text={overlay.displayText}
-            style={boxStyle(box.x, box.y, box.width, box.height, scale, viewSize)}
+            style={boxStyle(box.x, box.y, box.width, box.height, scale, viewSize, overlayLayout)}
             className={[
               textOverlayChromeClass({
                 isSelected,
@@ -1956,6 +2021,7 @@ function Editor() {
       pageHasPatchedPreview,
       previewLayers.showNativeCanvas,
       marqueeEnabled,
+      overlayLayout,
     ],
   );
 
@@ -1969,7 +2035,15 @@ function Editor() {
             type="button"
             onClick={() => selectImage(image)}
             title="Edit this photo"
-            style={boxStyle(image.x, image.y, image.width, image.height, scale, viewSize)}
+            style={boxStyle(
+              image.x,
+              image.y,
+              image.width,
+              image.height,
+              scale,
+              viewSize,
+              overlayLayout,
+            )}
             className={[
               "absolute cursor-pointer rounded-[2px] border-2 transition-colors",
               selectedImageId === image.id
@@ -1984,7 +2058,7 @@ function Editor() {
         );
       }),
 
-    [images, scale, viewSize, selectedImageId, imageEdits],
+    [images, scale, viewSize, selectedImageId, imageEdits, overlayLayout],
   );
 
   const markOverlay = [...marks.filter((m) => m.page === page), draftMark].filter(Boolean) as Array<
@@ -2152,6 +2226,51 @@ function Editor() {
                   >
                     <ChevronRight className="size-4" />
                   </Button>
+                  <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="min-h-11 min-w-11 touch-manipulation"
+                    disabled={!!status}
+                    onClick={() => rotateCurrentPage(ROTATE_LEFT_DELTA)}
+                    aria-label={ROTATE_LEFT_LABEL}
+                    title={ROTATE_LEFT_LABEL}
+                    data-testid="rotate-left"
+                  >
+                    <RotateCcw className="size-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="min-h-11 touch-manipulation px-2"
+                    disabled={!!status}
+                    onClick={() => rotateCurrentPage(ROTATE_180_DELTA)}
+                    aria-label={ROTATE_180_LABEL}
+                    title={ROTATE_180_LABEL}
+                    data-testid="rotate-180"
+                  >
+                    180°
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="min-h-11 min-w-11 touch-manipulation"
+                    disabled={!!status}
+                    onClick={() => rotateCurrentPage(ROTATE_RIGHT_DELTA)}
+                    aria-label={ROTATE_RIGHT_LABEL}
+                    title={ROTATE_RIGHT_LABEL}
+                    data-testid="rotate-right"
+                  >
+                    <RotateCw className="size-4" />
+                  </Button>
+                  {displayRotation !== 0 && (
+                    <span
+                      className="text-gauge px-1 text-xs text-muted-foreground"
+                      data-testid="page-rotation"
+                    >
+                      {displayRotation}°
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -2383,6 +2502,7 @@ function Editor() {
                               draftMarquee.height,
                               scale,
                               viewSize,
+                              overlayLayout,
                             )}
                             className="pointer-events-none absolute border border-dashed border-primary bg-primary/10"
                           />
@@ -2405,6 +2525,7 @@ function Editor() {
                                   widget.height,
                                   scale,
                                   viewSize,
+                                  overlayLayout,
                                 )}
                                 className={[
                                   "absolute min-h-[22px] cursor-text touch-manipulation rounded-[2px] border transition-colors",
@@ -2430,6 +2551,7 @@ function Editor() {
                               edit={edit}
                               scale={scale}
                               viewSize={viewSize}
+                              layout={overlayLayout}
                             />
                           ))}
                       {mode === "image" && selectedImage && previewUrl && (
@@ -2444,13 +2566,22 @@ function Editor() {
                             selectedImage.height,
                             scale,
                             viewSize,
+                            overlayLayout,
                           )}
                         />
                       )}
                       {markOverlay.map((mark, index) => (
                         <div
                           key={mark.id ?? `draft-${index}`}
-                          style={boxStyle(mark.x, mark.y, mark.width, mark.height, scale, viewSize)}
+                          style={boxStyle(
+                            mark.x,
+                            mark.y,
+                            mark.width,
+                            mark.height,
+                            scale,
+                            viewSize,
+                            overlayLayout,
+                          )}
                           className={
                             mark.kind === "erase"
                               ? "pointer-events-none absolute bg-black ring-2 ring-red-700"
@@ -2588,8 +2719,8 @@ function Editor() {
                       <AlertTriangle className="size-4" />
                       <AlertTitle>Cannot be undone</AlertTitle>
                       <AlertDescription>
-                        Save As removes text operators and image pixels under this box from the copy.
-                        Cover box only hides them. The original file on disk is never changed.
+                        Save As removes text operators and image pixels under this box from the
+                        copy. Cover box only hides them. The original file on disk is never changed.
                       </AlertDescription>
                     </Alert>
                   ) : null}
@@ -3087,6 +3218,12 @@ function Editor() {
                         <span className="text-success">flatten on Save As</span>
                       </li>
                     )}
+                    {sessionRotationList(sessionRotations).map((rot) => (
+                      <li key={`rotate-${rot.page}`} className="text-xs">
+                        <span className="text-gauge text-muted-foreground">p{rot.page} rotate</span>{" "}
+                        <span className="text-success">{rot.degrees}°</span>
+                      </li>
+                    ))}
                   </ul>
                 </>
               )}

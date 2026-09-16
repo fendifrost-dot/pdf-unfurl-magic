@@ -15,7 +15,16 @@ import { editorMarksForSave } from "./pdf-redact";
 import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 import { applyAcroFormToDocument, type AcroFormFillRequest } from "./pdf-acroform";
+import { applyPageRotationsToDocument, type PageRotation } from "./pdf-rotate";
 export type { AcroFormFillRequest } from "./pdf-acroform";
+export type { PageRotation, PageRotateDeg } from "./pdf-rotate";
+export {
+  applyPageRotations,
+  applyPageRotationsToDocument,
+  inspectPageLayout,
+  listPageRotations,
+  rotatePagesBy,
+} from "./pdf-rotate";
 export type {
   TextPatch,
   TextEditReport,
@@ -114,6 +123,8 @@ export async function getPageCount(bytes: ArrayBuffer): Promise<number> {
  * Overlay white-rect + stacked drawImage is only used when no identifiable
  * image XObject exists on the page. Optional AcroForm fill + flatten burns
  * field appearances into the page and drops widget annotations.
+ * Optional page rotations write /Rotate last so text, forms, and marks stay
+ * in user space (Acrobat-style). The source bytes are never overwritten.
  */
 export async function applyWorkshopPatches(
   bytes: ArrayBuffer,
@@ -122,6 +133,7 @@ export async function applyWorkshopPatches(
   marks: AnnotationBurn[],
   scanPatches: ScanPageExport[] = [],
   formFill?: AcroFormFillRequest | null,
+  pageRotations: PageRotation[] = [],
 ): Promise<Uint8Array> {
   const afterText = textPatches.length ? await applyTextPatches(bytes, textPatches) : null;
   const afterScan = scanPatches.length
@@ -160,6 +172,10 @@ export async function applyWorkshopPatches(
 
   if (marks.length) {
     await applyBurnAndNativeMarks(doc, marks);
+  }
+
+  if (pageRotations.length) {
+    applyPageRotationsToDocument(doc, pageRotations);
   }
 
   let out = await doc.save();

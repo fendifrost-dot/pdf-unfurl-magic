@@ -20,10 +20,12 @@ export function exportFileName(
   hasEdits: boolean,
   marks: AnnotationBurn[],
   formFlattened = false,
+  hasRotation = false,
 ): string {
   if (marks.some((m) => m.kind === "erase")) return `${base}-redacted.pdf`;
   if (marks.length) return `${base}-marked.pdf`;
   if (formFlattened && !hasEdits) return `${base}-filled.pdf`;
+  if (hasRotation && !hasEdits) return `${base}-rotated.pdf`;
   return `${base}-edited.pdf`;
 }
 

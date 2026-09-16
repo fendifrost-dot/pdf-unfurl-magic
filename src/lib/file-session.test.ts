@@ -29,6 +29,7 @@ describe("Save As / Close document copy", () => {
     expect(ensureNewPdfName("memo.pdf", "memo-edited.pdf")).toBe("memo-edited.pdf");
     expect(ensureNewPdfName("memo.pdf", "memo-marked.pdf")).toBe("memo-marked.pdf");
     expect(ensureNewPdfName("memo.pdf", "memo-redacted.pdf")).toBe("memo-redacted.pdf");
+    expect(ensureNewPdfName("memo.pdf", "memo-rotated.pdf")).toBe("memo-rotated.pdf");
     expect(isSamePdfBaseName("June_statement.pdf", "June_statement.pdf")).toBe(true);
     expect(isSamePdfBaseName("June_statement.pdf", "June_statement-edited.pdf")).toBe(false);
   });
@@ -39,5 +40,9 @@ describe("Save As / Close document copy", () => {
     expect(ensureNewPdfName("statement.pdf", exportFileName("statement", false, []))).toBe(
       "statement-edited.pdf",
     );
+    expect(exportFileName("statement", false, [], false, true)).toBe("statement-rotated.pdf");
+    expect(
+      ensureNewPdfName("statement.pdf", exportFileName("statement", false, [], false, true)),
+    ).toBe("statement-rotated.pdf");
   });
 });
