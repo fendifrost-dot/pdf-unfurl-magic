@@ -30,6 +30,9 @@ describe("Save As / Close document copy", () => {
     expect(ensureNewPdfName("memo.pdf", "memo-marked.pdf")).toBe("memo-marked.pdf");
     expect(ensureNewPdfName("memo.pdf", "memo-redacted.pdf")).toBe("memo-redacted.pdf");
     expect(ensureNewPdfName("memo.pdf", "memo-rotated.pdf")).toBe("memo-rotated.pdf");
+    expect(ensureNewPdfName("multi-page.pdf", "multi-page-reordered.pdf")).toBe(
+      "multi-page-reordered.pdf",
+    );
     expect(isSamePdfBaseName("June_statement.pdf", "June_statement.pdf")).toBe(true);
     expect(isSamePdfBaseName("June_statement.pdf", "June_statement-edited.pdf")).toBe(false);
   });

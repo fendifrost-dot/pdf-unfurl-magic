@@ -1,9 +1,9 @@
 # PDF Relief
 
-A PDF workshop that runs on your own machine — split, extract, merge, click-to-edit
-text, fill and flatten AcroForm fields, scan pages into a multi-page PDF, and **E-Sign**
-a PDF. There is no account, no database, and nothing is uploaded: files stay on the
-computer. Ships in two shapes from this one repo:
+A PDF workshop that runs on your own machine — split, extract, merge, reorder pages,
+click-to-edit text, fill and flatten AcroForm fields, scan pages into a multi-page PDF,
+and **E-Sign** a PDF. There is no account, no database, and nothing is uploaded: files stay
+on the computer. Ships in two shapes from this one repo:
 
 - **Browser** — the TanStack Start + Vite web app, including a phone-sized
   shell (bottom nav, large tap targets, camera scan, Save / Share).
@@ -89,6 +89,13 @@ Scan, Edit. Choose a PDF (drag-and-drop is optional). Export uses the browser
 download or the OS share sheet. Electron still uses its Save dialog.
 
 Install: Android Chrome may offer **Install**. iOS Safari → Share → Add to Home Screen.
+
+## Reorder pages
+
+On **Merge**, **Split**, or the home bench, open a multi-page PDF (or merge files first).
+The **Reorder** tab — and the strip on Merge — lets you drag pages or nudge them with
+arrows. **Save this page order** copies pages with pdf-lib into a new file
+(`*-reordered.pdf` or `merged.pdf`). The original on disk is never overwritten.
 
 ## Built with
 

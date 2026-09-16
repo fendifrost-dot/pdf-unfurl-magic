@@ -330,9 +330,9 @@ function Home() {
             Split the PDF, edit a piece, merge it back
           </h2>
           <p className="mt-3 max-w-2xl text-muted-foreground">
-            Files never leave this tab. The splitter copies pages without rendering thumbnails — the
-            thing Acrobat does that fills RAM. Open a 10-page chunk in Acrobat, make the edits, then
-            merge.
+            Files never leave this tab. Split copies pages without a thumbnail pile — the thing
+            Acrobat Organize Pages does that fills RAM. Reorder uses a small strip (and skips thumbs
+            on huge files). Open a 10-page chunk in Acrobat, make the edits, then merge.
           </p>
           <div className="mt-8">
             <PdfWorkbench />

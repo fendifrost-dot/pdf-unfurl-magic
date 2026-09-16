@@ -19,6 +19,8 @@ import {
   extractPages,
   getPageCount,
   mergeFiles,
+  pageContentLatin1,
+  reorderPages,
   splitIntoChunks,
 } from "./helpers/pdf-ops.mjs";
 
@@ -75,6 +77,24 @@ test("multi-page split / extract / merge: page counts and export sizes are sane"
   ]);
   assert.equal(merged.pages, 4);
   assertExportSizeSane("merge simple+multi", merged.bytes, bytes, { minRatio: 0.8, maxRatio: 3 });
+});
+
+test("reorder multi-page 3-1-2: markers follow the new order, source untouched", async () => {
+  const { bytes } = await loadFixture("multi-page.pdf");
+  const original = Buffer.from(bytes);
+  const out = await reorderPages(bytes, [3, 1, 2], "multi-page");
+  assert.equal(out.pages, 3);
+  assert.equal(out.name, "multi-page-reordered.pdf");
+  assert.equal(Buffer.from(bytes).equals(original), true);
+  assertExportSizeSane("reorder 3-1-2", out.bytes, bytes, { minRatio: 0.7, maxRatio: 1.4 });
+
+  const first = await pageContentLatin1(out.bytes, 1);
+  const second = await pageContentLatin1(out.bytes, 2);
+  const third = await pageContentLatin1(out.bytes, 3);
+  assert.match(first, /PAGE_MARKER_3/);
+  assert.doesNotMatch(first, /PAGE_MARKER_1/);
+  assert.match(second, /PAGE_MARKER_1/);
+  assert.match(third, /PAGE_MARKER_2/);
 });
 
 test("a one-line text-patch export stays in a sane size band", async () => {

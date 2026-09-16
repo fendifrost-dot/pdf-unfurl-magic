@@ -88,6 +88,7 @@ Install the `.dmg` to `/Applications`, first-launch via Control-click → Open (
 | D3 | **File → Merge PDFs**, multi-page + simple-text | **4 pages**, order preserved | ☐ |
 | D4 | Cancel a Save dialog mid-export | App returns to a usable state. No stuck spinner, no orphan file | ☐ |
 | D5 | Save into a folder that already has that filename | macOS overwrite confirm, and it honors your answer | ☐ |
+| D6 | Home/Merge bench, `multi-page.pdf`, reorder 3-1-2, Save As | Re-open shows `PAGE_MARKER_3` then `1` then `2`. Source fixture mtime unchanged | ☐ |
 
 ### Block E — Kill switches (13:30 → 15:00)
 
@@ -169,7 +170,7 @@ Read this as: *what must be true in PDF Relief before you cancel.* Pull the real
 
 | Subscription | What you actually use it for | PDF Relief today | Must-have to cancel | Later / never |
 | --- | --- | --- | --- | --- |
-| **Acrobat Pro** | Split, merge, edit text, fill forms, combine client packets | Split, extract, merge, in-place text edit, image studio, **AcroForm fill + flatten** — shipped (no XFA / field JS) | Page rotate. Password-protected open. Reorder pages in a merged file | Preflight, PDF/A, Bates numbering, compare, redaction search, portfolios, XFA / LiveCycle |
+| **Acrobat Pro** | Split, merge, edit text, fill forms, combine client packets | Split, extract, merge, **reorder pages** (thumbnail strip + Save As), in-place text edit, image studio, **AcroForm fill + flatten** — shipped (no XFA / field JS) | Page rotate. Password-protected open | Preflight, PDF/A, Bates numbering, compare, redaction search, portfolios, XFA / LiveCycle |
 | **Genius Scan** | Phone capture of statements, receipts, IDs → clean multi-page PDF | Scan lane with edge detect, perspective, presets, OCR, reorder — shipped, desktop-verified | Scan lane proven **on the actual phone**, camera + share sheet, 5+ pages without a memory kill. That is Mobile AC #4 and #7 | Cloud sync, folders/tags, auto-upload to Drive, business-card mode, batch OCR search across a library |
 | **DocuSign** | Getting a document signed and having it hold up | E-Sign MVP: single signer, drawn/typed mark, date, SHA-256 audit page — shipped | Two things only: the audit page **verifies** (hash reproduces), and a signed file opens clean in Preview + Chrome | Multi-signer routing, email invites, reminders, templates, PKI/AATL, legal audit trail hosting. If a counterparty *requires* DocuSign, you are not cancelling it — you are downgrading to per-envelope |
 | **Photoshop** | Fixing a photo that is going into a PDF | Image studio: replace, crop, rotate, exposure, contrast, compress, redact | Redact proven destructive (Image Studio AC #4). Rotate + straighten a crooked scan | Layers, masks, brushes, generative fill, CMYK, RAW. Do not chase this one — if you need real Photoshop work, you need Photoshop |

@@ -1,8 +1,17 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, Highlighter, Loader2, Scissors, Layers, FileStack } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpDown,
+  Highlighter,
+  Loader2,
+  Scissors,
+  Layers,
+  FileStack,
+} from "lucide-react";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { PdfPasswordDialog } from "@/components/pdf-password-dialog";
+import { PageOrderStrip } from "@/components/page-order-strip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +23,20 @@ import { formatBytes, parsePageRanges } from "@/lib/pdf-runtime";
 import { PDF_OPEN_DAMAGED_MESSAGE } from "@/lib/pdf-open";
 import { useOpenPdf } from "@/hooks/use-open-pdf";
 import { FileActions } from "@/components/file-actions";
-import { extractPages, mergeFiles, splitIntoChunks, type SplitOutput } from "@/lib/pdf-tools";
+import { ensureNewPdfName } from "@/lib/file-session";
+import { PdfEncryptedMutationError } from "@/lib/pdf-io";
+import {
+  copyPagesInOrder,
+  extractPages,
+  getPageCount,
+  refsFromSlots,
+  slotsFromPdf,
+  slotsFromPdfs,
+  slotsMatchFileOrder,
+  splitIntoChunks,
+  type PageSlot,
+  type SplitOutput,
+} from "@/lib/pdf-tools";
 
 type Loaded = {
   name: string;
@@ -25,11 +47,13 @@ type Loaded = {
   canMutate: boolean;
   restrictionMessage: string | null;
 };
-type ToolTab = "split" | "extract" | "merge";
+type ExtraFile = { name: string; bytes: ArrayBuffer; pages: number };
+type ToolTab = "split" | "extract" | "merge" | "reorder";
 
 export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [extra, setExtra] = useState<Array<{ name: string; bytes: ArrayBuffer }>>([]);
+  const [extra, setExtra] = useState<ExtraFile[]>([]);
+  const [slots, setSlots] = useState<PageSlot[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<SplitOutput[]>([]);
@@ -48,7 +72,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
     try {
       const opened = await openPdf(name, bytes, password);
       if (!opened) return;
-      setLoaded({
+      const next: Loaded = {
         name,
         base: name.replace(/\.pdf$/i, ""),
         size,
@@ -56,9 +80,14 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
         pages: opened.pageCount,
         canMutate: opened.canMutate,
         restrictionMessage: opened.restrictionMessage,
-      });
+      };
+      setLoaded(next);
+      setExtra([]);
+      setSlots(slotsFromPdf(next));
     } catch {
       setLoaded(null);
+      setExtra([]);
+      setSlots([]);
       setError(PDF_OPEN_DAMAGED_MESSAGE);
     } finally {
       setBusy(null);
@@ -81,6 +110,26 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
     } finally {
       setBusy(null);
     }
+  };
+
+  const sources = loaded ? [loaded, ...extra] : [];
+  const orderChanged = loaded ? !slotsMatchFileOrder(slots, sources) : false;
+  const canSaveOrder = !!loaded && loaded.canMutate && slots.length >= 2 && !busy;
+
+  const saveCurrentOrder = () => {
+    if (!loaded?.canMutate) return;
+    const combined = extra.length > 0;
+    const filename = combined
+      ? ensureNewPdfName(loaded.name, "merged.pdf")
+      : ensureNewPdfName(loaded.name, `${loaded.base}-reordered.pdf`);
+    void run(combined ? "Merging the copies" : "Reordering pages", async () => [
+      await copyPagesInOrder(refsFromSlots(slots), filename),
+    ]);
+  };
+
+  const restoreFileOrder = () => {
+    if (!loaded) return;
+    setSlots(slotsFromPdfs([loaded, ...extra]));
   };
 
   return (
@@ -158,6 +207,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                 onClick={() => {
                   setLoaded(null);
                   setExtra([]);
+                  setSlots([]);
                   reset();
                 }}
               >
@@ -174,7 +224,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
             )}
 
             <Tabs defaultValue={initialTab} className="mt-5">
-              <TabsList className="h-auto w-full sm:w-auto">
+              <TabsList className="h-auto w-full flex-wrap sm:w-auto">
                 <TabsTrigger
                   value="split"
                   className="min-h-11 flex-1 touch-manipulation sm:flex-none"
@@ -192,6 +242,13 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                   className="min-h-11 flex-1 touch-manipulation sm:flex-none"
                 >
                   <FileStack className="mr-1.5 size-3.5" /> Merge
+                </TabsTrigger>
+                <TabsTrigger
+                  value="reorder"
+                  data-testid="tab-reorder"
+                  className="min-h-11 flex-1 touch-manipulation sm:flex-none"
+                >
+                  <ArrowUpDown className="mr-1.5 size-3.5" /> Reorder
                 </TabsTrigger>
               </TabsList>
 
@@ -262,42 +319,103 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
 
               <TabsContent value="merge" className="mt-5 space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  The loaded file goes first, then anything you add below, in order.
+                  The loaded file goes first, then anything you add below. Drag pages in the strip
+                  to change order before you save. Originals on disk are never overwritten.
                 </p>
                 <PdfDropZone
                   multiple
                   className="p-6"
+                  disabled={!loaded.canMutate}
                   onFiles={async (files) => {
                     reset();
-                    const added = await Promise.all(
-                      files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })),
-                    );
-                    setExtra((prev) => [...prev, ...added]);
+                    try {
+                      const added: ExtraFile[] = await Promise.all(
+                        files.map(async (f) => {
+                          const bytes = await f.arrayBuffer();
+                          const pages = await getPageCount(bytes);
+                          return { name: f.name, bytes, pages };
+                        }),
+                      );
+                      setExtra((prev) => [...prev, ...added]);
+                      setSlots((prev) => [...prev, ...slotsFromPdfs(added)]);
+                    } catch (e) {
+                      setError(
+                        e instanceof PdfEncryptedMutationError
+                          ? e.message
+                          : "A file could not be opened. It may be password-protected, or the PDF structure is damaged.",
+                      );
+                    }
                   }}
                   title="Add more PDFs"
                   hint="Drop or choose the files to append."
                 />
                 {extra.length > 0 && (
                   <ol className="space-y-2 text-sm">
-                    <li className="text-gauge text-muted-foreground">1. {loaded.name}</li>
+                    <li className="text-gauge text-muted-foreground">
+                      1. {loaded.name} · {loaded.pages} pages
+                    </li>
                     {extra.map((f, i) => (
                       <li key={`${f.name}-${i}`} className="text-gauge text-muted-foreground">
-                        {i + 2}. {f.name}
+                        {i + 2}. {f.name} · {f.pages} pages
                       </li>
                     ))}
                   </ol>
                 )}
-                <Button
-                  className="min-h-11 touch-manipulation"
-                  disabled={!!busy || extra.length === 0 || !loaded.canMutate}
-                  onClick={() =>
-                    run("Merging the copies", async () => [
-                      await mergeFiles([{ name: loaded.name, bytes: loaded.bytes }, ...extra]),
-                    ])
-                  }
-                >
-                  Merge {extra.length + 1} files
-                </Button>
+                <PageOrderStrip slots={slots} onReorder={setSlots} />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    className="min-h-11 touch-manipulation"
+                    disabled={!canSaveOrder}
+                    onClick={saveCurrentOrder}
+                    data-testid="save-page-order"
+                  >
+                    {extra.length > 0 ? `Merge ${extra.length + 1} files` : "Save this page order"}
+                  </Button>
+                  {orderChanged && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-h-11 touch-manipulation"
+                      onClick={restoreFileOrder}
+                    >
+                      Restore file order
+                    </Button>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="reorder" className="mt-5 space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Same pages, new order. Use this on a multi-page file or after adding PDFs on
+                  Merge. Save As writes a copy via page copy — nothing is uploaded and the source
+                  file is not touched.
+                </p>
+                {slots.length < 2 && (
+                  <p className="text-sm text-muted-foreground">
+                    Need two or more pages. Open a multi-page PDF, or add files on the Merge tab.
+                  </p>
+                )}
+                <PageOrderStrip slots={slots} onReorder={setSlots} />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    className="min-h-11 touch-manipulation"
+                    disabled={!canSaveOrder}
+                    onClick={saveCurrentOrder}
+                    data-testid="save-page-order-tab"
+                  >
+                    Save this page order
+                  </Button>
+                  {orderChanged && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="min-h-11 touch-manipulation"
+                      onClick={restoreFileOrder}
+                    >
+                      Restore file order
+                    </Button>
+                  )}
+                </div>
               </TabsContent>
             </Tabs>
           </>
