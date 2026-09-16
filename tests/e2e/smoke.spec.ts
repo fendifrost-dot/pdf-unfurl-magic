@@ -91,5 +91,7 @@ test.describe("PDF Relief fixture smoke", () => {
     await expect(page.getByText(/1\s*\/\s*1/)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("pdf-view-only-banner")).toBeVisible();
     await expect(page.getByTestId("save-as")).toBeDisabled();
+    await expect(page.getByTestId("rotate-left")).toBeDisabled();
+    await expect(page.getByTestId("rotate-right")).toBeDisabled();
   });
 });

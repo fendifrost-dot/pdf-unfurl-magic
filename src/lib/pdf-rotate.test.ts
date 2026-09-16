@@ -22,8 +22,9 @@ import {
   type PageRotateDeg,
 } from "./pdf-rotate";
 import { applyTextPatches, applyWorkshopPatches, buildSamplePdf } from "./pdf-tools";
-import { bytesToArrayBuffer } from "./pdf-io";
+import { bytesToArrayBuffer, PdfEncryptedMutationError } from "./pdf-io";
 import { listPageShownText } from "./pdf-text-edit";
+import { buildPasswordOpenPdf } from "./pdf-password-fixture";
 import {
   buildSampleAcroFormPdf,
   fillAndFlattenAcroForm,
@@ -236,6 +237,14 @@ describe("rotate keeps text edit and forms intact", () => {
     expect(await rotationsOf(out)).toEqual([0, 90, 0]);
     expect(await listPageShownText(asBuffer(out), 2)).toContain("UNTOUCHED PAGE");
     expect(await listPageShownText(asBuffer(out), 1)).toContain("Northgate Joinery");
+  });
+
+  it("reads /Rotate on an encrypted file but will not write it", async () => {
+    const encrypted = asBuffer(buildPasswordOpenPdf());
+    expect(await listPageRotations(encrypted)).toEqual([0]);
+    await expect(applyPageRotations(encrypted, [{ page: 1, degrees: 90 }])).rejects.toBeInstanceOf(
+      PdfEncryptedMutationError,
+    );
   });
 });
 
