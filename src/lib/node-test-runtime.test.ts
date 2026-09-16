@@ -15,9 +15,9 @@ type PromiseWithResolversCtor = PromiseConstructor & {
 
 describe("Node test runtime (Node 20 + 22)", () => {
   it("exposes Promise.withResolvers so pdfjs can load on Node 20", async () => {
-    const withResolvers = (Promise as PromiseWithResolversCtor).withResolvers;
-    expect(typeof withResolvers).toBe("function");
-    const { promise, resolve } = withResolvers!<number>();
+    const ctor = Promise as PromiseWithResolversCtor;
+    expect(typeof ctor.withResolvers).toBe("function");
+    const { promise, resolve } = ctor.withResolvers!<number>();
     resolve(42);
     await expect(promise).resolves.toBe(42);
   });
@@ -43,7 +43,7 @@ describe("Node test runtime (Node 20 + 22)", () => {
 
   it("CI runs the unit suite on Node 20 while engines still allow 20", () => {
     const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
-    expect(workflow).toMatch(/node(?:-version)?[^:\n]*:\s*["']?20\b/);
+    expect(workflow).toMatch(/node:\s*\["20"/);
     expect(workflow).toMatch(/npm test/);
     expect(workflow).toMatch(/test:scan/);
   });

@@ -16,10 +16,5 @@ export default defineConfig({
     // Forks + --require so pdfjs sees Promise.withResolvers before it evaluates.
     pool: "forks",
     execArgv: ["--require", promiseWithResolversPolyfill],
-    poolOptions: {
-      forks: {
-        execArgv: ["--require", promiseWithResolversPolyfill],
-      },
-    },
   },
 });
