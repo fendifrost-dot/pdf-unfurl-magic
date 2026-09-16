@@ -31,8 +31,12 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
           <p className="mt-1 text-xs text-muted-foreground">
             Drag or use the arrows. Save As writes a new PDF; the files you opened stay as they are.
           </p>
-          <p className="sr-only" aria-live="polite">
-            Page order is {slots.map((slot) => slot.sourcePage).join(", ")}.
+          <p
+            className="mt-1 text-sm font-medium"
+            data-testid="page-order-sequence"
+            aria-live="polite"
+          >
+            Original pages in this order: {slots.map((slot) => slot.sourcePage).join(" · ")}
           </p>
         </div>
         {slots.length > PAGE_THUMB_LIMIT && (
@@ -49,6 +53,8 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
           return (
             <li
               key={slot.id}
+              data-testid={`page-slot-${index}`}
+              data-source-page={slot.sourcePage}
               className={[
                 "w-[132px] shrink-0 rounded-md",
                 isOver ? "ring-2 ring-primary/40" : "",
@@ -87,25 +93,33 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
               >
                 <div className="flex items-center justify-between gap-1 px-1.5 py-1 text-muted-foreground">
                   <GripVertical className="size-3.5 shrink-0" aria-hidden />
-                  <span className="text-gauge truncate text-[10px]">
-                    {slot.sourceName} · p.{slot.sourcePage}
+                  <span className="text-gauge truncate text-[10px]" title={slot.sourceName}>
+                    {slot.sourceName}
                   </span>
                 </div>
-                {thumb ? (
-                  <img
-                    src={thumb}
-                    alt={`Position ${index + 1}: ${slot.sourceName} page ${slot.sourcePage}`}
-                    className="h-36 w-full bg-paper object-contain"
-                    draggable={false}
-                  />
-                ) : (
-                  <div
-                    className="flex h-36 items-center justify-center bg-paper px-2 text-center text-xs text-muted-foreground"
-                    aria-label={`Position ${index + 1}: ${slot.sourceName} page ${slot.sourcePage}`}
+                <div className="relative">
+                  {thumb ? (
+                    <img
+                      src={thumb}
+                      alt={`Position ${index + 1}: ${slot.sourceName} page ${slot.sourcePage}`}
+                      className="h-36 w-full bg-paper object-contain"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div
+                      className="flex h-36 items-center justify-center bg-paper px-2 text-center text-xs text-muted-foreground"
+                      aria-label={`Position ${index + 1}: ${slot.sourceName} page ${slot.sourcePage}`}
+                    >
+                      Page {slot.sourcePage}
+                    </div>
+                  )}
+                  <span
+                    className="absolute left-1 top-1 rounded bg-background/90 px-1.5 py-0.5 text-[11px] font-semibold"
+                    data-testid={`source-page-${index}`}
                   >
-                    Page {slot.sourcePage}
-                  </div>
-                )}
+                    p.{slot.sourcePage}
+                  </span>
+                </div>
               </div>
               <div className="mt-1.5 flex items-center justify-between gap-1">
                 <span className="text-gauge text-xs font-medium">{index + 1}</span>

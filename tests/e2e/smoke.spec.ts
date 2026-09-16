@@ -102,6 +102,9 @@ test.describe("PDF Relief fixture smoke", () => {
     await expect(page.getByTestId("page-order-strip")).toBeVisible();
     await page.getByTestId("move-page-earlier-2").click();
     await page.getByTestId("move-page-earlier-1").click();
+    await expect(page.getByTestId("page-order-sequence")).toHaveText(
+      /Original pages in this order:\s*3\s*·\s*1\s*·\s*2/,
+    );
     await page.getByTestId("save-page-order").click();
     await expect(page.getByText(/Ready to save/i)).toBeVisible({ timeout: 15_000 });
 
