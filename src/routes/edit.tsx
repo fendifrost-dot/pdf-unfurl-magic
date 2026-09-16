@@ -791,17 +791,21 @@ function Editor() {
   useEffect(() => {
     if (!doc) return;
     let cancelled = false;
-    void inspectAcroForm(doc.bytes).then((report) => {
-      if (cancelled) return;
-      setFormReport(report);
-      const values = valuesFromReport(report);
-      setFormValues(values);
-      setFormOriginal(values);
-      const hash = typeof window === "undefined" ? "" : window.location.hash;
-      if (report.fillableCount > 0 && (hash === "#form" || hash === "")) {
-        setMode((current) => (hash === "#form" || current === "text" ? "form" : current));
-      }
-    });
+    void inspectAcroForm(doc.bytes)
+      .then((report) => {
+        if (cancelled) return;
+        setFormReport(report);
+        const values = valuesFromReport(report);
+        setFormValues(values);
+        setFormOriginal(values);
+        const hash = typeof window === "undefined" ? "" : window.location.hash;
+        if (report.fillableCount > 0 && (hash === "#form" || hash === "")) {
+          setMode((current) => (hash === "#form" || current === "text" ? "form" : current));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFormReport(emptyAcroFormReport());
+      });
     return () => {
       cancelled = true;
     };
@@ -872,7 +876,7 @@ function Editor() {
       try {
         const [{ canvas, viewport }, pageLines, pageImages] = await Promise.all([
           renderPage(doc.proxy, page, CANVAS_WIDTH, displayRotation),
-          extractLines(doc.proxy, page, doc.bytes),
+          extractLines(doc.proxy, page, doc.canMutate ? doc.bytes : undefined),
           extractImages(doc.proxy, page),
         ]);
         if (cancelled) return;
@@ -1107,7 +1111,7 @@ function Editor() {
   const exportSize = selected ? fitFontSize(draft, selected.fontSize, boxWidth) : 0;
 
   useEffect(() => {
-    if (!doc || !selected || selected.source === "ocr") {
+    if (!doc || !selected || selected.source === "ocr" || !doc.canMutate) {
       setInspection(null);
       setInspecting(false);
       setClosestFontReason("");

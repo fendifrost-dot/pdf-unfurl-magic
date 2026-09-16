@@ -138,6 +138,14 @@ describe("password-protected PDF open", () => {
     await expect(loadPdfDocument(bytes)).rejects.toThrow(ENCRYPTED_MUTATION_MESSAGE);
   });
 
+  it("view inspectors do not throw on encrypted bytes", async () => {
+    const bytes = asBuffer(buildPasswordOpenPdf());
+    const { inspectPageScan } = await import("./pdf-scan-edit");
+    const { inspectAcroForm } = await import("./pdf-acroform");
+    await expect(inspectPageScan(bytes, 1, [])).resolves.toMatchObject({ looksScanned: false });
+    await expect(inspectAcroForm(bytes)).resolves.toMatchObject({ hasAcroForm: false });
+  });
+
   it("opens owner-only encryption without a prompt and still blocks mutate", async () => {
     const bytes = asBuffer(
       buildPasswordOpenPdf({

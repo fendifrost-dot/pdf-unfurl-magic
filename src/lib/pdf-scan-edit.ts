@@ -24,7 +24,7 @@ import {
   showPaintsVisibleGlyphs,
   tokenizeContentStream,
 } from "./pdf-content-stream";
-import { loadPdfDocument } from "./pdf-io";
+import { loadPdfDocument, PdfEncryptedMutationError } from "./pdf-io";
 import { fitFontSize } from "./text-helpers";
 import { canvasToJpeg } from "./image-process";
 import { renderPageToImageData, looksGarbled, type TextLine } from "./pdf-runtime";
@@ -246,7 +246,24 @@ export async function inspectPageScan(
   pageNumber: number,
   pdfJsLineTexts: string[] = [],
 ): Promise<PageScanReport> {
-  const doc = await loadPdfDocument(bytes);
+  let doc;
+  try {
+    doc = await loadPdfDocument(bytes);
+  } catch (error) {
+    if (error instanceof PdfEncryptedMutationError) {
+      return {
+        looksScanned: false,
+        reason: "ok",
+        message: "",
+        showCount: 0,
+        imageCount: 0,
+        pdfJsLineCount: pdfJsLineTexts.length,
+        matchedLineCount: 0,
+        matchRatio: 0,
+      };
+    }
+    throw error;
+  }
   const page = doc.getPages()[pageNumber - 1];
   if (!page) {
     return {
