@@ -185,29 +185,8 @@ function snippetAround(text: string, start: number, end: number, radius = 28): s
   return `${prefix}${text.slice(from, to).replace(/\s+/g, " ").trim()}${suffix}`;
 }
 
-function findInsensitive(haystack: string, needle: string): Array<{ start: number; end: number }> {
+function indexOfAll(haystack: string, needle: string): Array<{ start: number; end: number }> {
   if (!needle) return [];
-  const h = haystack.toLowerCase();
-  const n = needle.toLowerCase();
-  if (h.length !== haystack.length || n.length !== needle.length) {
-    // Rare locale length change — fall back to the lowered strings.
-    return findInsensitiveOnLowered(h, n);
-  }
-  const out: Array<{ start: number; end: number }> = [];
-  let from = 0;
-  while (from <= h.length - n.length) {
-    const at = h.indexOf(n, from);
-    if (at < 0) break;
-    out.push({ start: at, end: at + n.length });
-    from = at + n.length;
-  }
-  return out;
-}
-
-function findInsensitiveOnLowered(
-  haystack: string,
-  needle: string,
-): Array<{ start: number; end: number }> {
   const out: Array<{ start: number; end: number }> = [];
   let from = 0;
   while (from <= haystack.length - needle.length) {
@@ -229,21 +208,44 @@ export function findHitsInPageItems(
   if (!needle) return [];
   const glyphs = glyphsFromItems(items, page);
   if (!glyphs.length) return [];
-  const haystack = glyphs.map((g) => g.ch).join("");
-  const ranges = findInsensitive(haystack, needle);
+  // A glyph carries one Unicode code point, but `indexOf` works in UTF-16 code
+  // units and `toLowerCase()` can even change a run's length (astral emoji count
+  // as two units; Turkish İ lowercases to two units). Slicing the glyph array by
+  // raw string offsets therefore drifts and the erase box lands on the wrong
+  // glyphs — a redaction-honesty leak that leaves the head/tail of a match
+  // exposed. Build the searched string per glyph and keep unit→glyph maps so
+  // every match translates back to the exact glyphs it covers.
+  const chars = glyphs.map((g) => g.ch);
+  let raw = "";
+  let lowered = "";
+  const rawStart: number[] = []; // rawStart[i] = raw offset where glyph i begins
+  const lowGlyph: number[] = []; // lowGlyph[u] = glyph index owning lowered unit u
+  chars.forEach((ch, i) => {
+    rawStart.push(raw.length);
+    raw += ch;
+    const low = ch.toLowerCase();
+    lowered += low;
+    for (let u = 0; u < low.length; u++) lowGlyph.push(i);
+  });
+  rawStart.push(raw.length); // sentinel for the last glyph's end
+  const ranges = indexOfAll(lowered, needle.toLowerCase());
   return ranges.flatMap((range, index) => {
-    const slice = glyphs.slice(range.start, range.end).filter((g) => g.ch !== "\n");
+    const gStart = lowGlyph[range.start] ?? 0;
+    const gEnd = (lowGlyph[range.end - 1] ?? glyphs.length - 1) + 1;
+    const slice = glyphs.slice(gStart, gEnd).filter((g) => g.ch !== "\n");
     if (!slice.length) return [];
     const bands = clusterByBaseline(slice);
     const rects = (bands.length ? bands : [slice]).map(unionRect);
-    const matched = haystack.slice(range.start, range.end);
+    const rawFrom = rawStart[gStart] ?? 0;
+    const rawTo = rawStart[gEnd] ?? raw.length;
+    const matched = raw.slice(rawFrom, rawTo);
     return [
       {
-        id: `p${page}-${range.start}-${range.end}-${index}`,
+        id: `p${page}-${gStart}-${gEnd}-${index}`,
         page,
         query: needle,
         matched,
-        snippet: snippetAround(haystack, range.start, range.end),
+        snippet: snippetAround(raw, rawFrom, rawTo),
         rects,
       },
     ];
