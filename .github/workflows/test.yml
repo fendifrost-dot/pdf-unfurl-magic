@@ -1,0 +1,40 @@
+# Unit and scripted QA on the engines.node range (Node 20 LTS + 22).
+# Desktop packaging stays on Node 22 in desktop-mac-release.yml.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Scan geometry
+        run: npm run test:scan
+
+      - name: Image studio
+        run: npm run test:image-studio
+
+      - name: Fixture smoke
+        run: npm run test:smoke
