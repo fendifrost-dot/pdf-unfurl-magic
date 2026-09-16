@@ -7,7 +7,7 @@
  * values. The file that was opened is never written.
  */
 import { PDFDocument, degrees, type PDFPage } from "pdf-lib";
-import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
+import { bytesToArrayBuffer, loadPdfDocument, PdfEncryptedMutationError } from "./pdf-io";
 
 export type PageRotateDeg = 0 | 90 | 180 | 270;
 
@@ -223,7 +223,18 @@ export async function inspectPageLayout(bytes: ArrayBuffer): Promise<{
   rotations: PageRotateDeg[];
   viewBoxes: PdfViewBox[];
 }> {
-  const doc = await loadPdfDocument(bytes);
+  let doc;
+  try {
+    doc = await loadPdfDocument(bytes);
+  } catch (error) {
+    // /Rotate and MediaBox are numbers; ignoreEncryption is safe for this read.
+    // applyPageRotations still refuses encryption so Save As cannot corrupt.
+    if (!(error instanceof PdfEncryptedMutationError)) throw error;
+    doc = await PDFDocument.load(bytes.slice(0), {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+  }
   const pages = doc.getPages();
   return {
     rotations: pages.map((page) => pageRotationOf(page)),

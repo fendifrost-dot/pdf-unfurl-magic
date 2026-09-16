@@ -7,6 +7,7 @@
  * applyTextPatches.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 import { partitionMarks, saveEditorAnnotations, writeNativeAnnotations } from "./pdf-annotate-js";
 import type { AnnotationBurn } from "./pdf-images";
 import { applyPermanentRedaction, editorMarksForSave, markOverlapsErase } from "./pdf-redact";
@@ -165,7 +166,7 @@ export async function applyPageMarks(
   marks: AnnotationBurn[],
 ): Promise<Uint8Array> {
   const src = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const doc = await PDFDocument.load(src.slice(), { ignoreEncryption: true });
+  const doc = await loadPdfDocument(bytesToArrayBuffer(src));
   await applyBurnAndNativeMarks(doc, marks);
   let out = await doc.save();
   const editor = editorMarksForSave(marks);

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { buildSampleAcroFormPdf } from "../src/lib/pdf-acroform.ts";
 import { encodePng } from "../src/lib/tiny-png.ts";
+import { buildPasswordOpenPdf } from "../src/lib/pdf-password-fixture.ts";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -407,6 +408,16 @@ const BUILDERS = [
       "Blank AcroForm (5 widgets: name, email, city, size, agree). Email has format/calculate JS so Form UI must warn.",
     build: () => buildSampleAcroFormPdf({ includeFieldJs: true }),
     maxBytes: 24_000,
+    expect: "opens",
+  },
+  {
+    file: "password-open.pdf",
+    pages: 1,
+    kind: "password-open",
+    summary: "User-password encrypted page. Open path must prompt; password is pdfrelief.",
+    build: () => buildPasswordOpenPdf(),
+    maxBytes: 8_000,
+    expect: "opens-with-prompt",
   },
 ];
 
@@ -424,6 +435,7 @@ for (const item of BUILDERS) {
     summary: item.summary,
     bytes: bytes.byteLength,
     maxBytes: item.maxBytes,
+    expect: item.expect ?? "opens",
   });
   console.log(`wrote ${item.file} (${bytes.byteLength} bytes, ${item.pages} page(s))`);
 }

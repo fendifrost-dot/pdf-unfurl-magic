@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
+import { PdfPasswordDialog } from "@/components/pdf-password-dialog";
 import { ImageStudioPanel } from "@/components/image-studio-panel";
 import { AcroFormPanel } from "@/components/acroform-panel";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,8 @@ import {
   renderPage,
   type TextLine,
 } from "@/lib/pdf-runtime";
+import { PDF_OPEN_DAMAGED_MESSAGE, VIEW_ONLY_ENCRYPTED_MESSAGE } from "@/lib/pdf-open";
+import { useOpenPdf } from "@/hooks/use-open-pdf";
 import {
   applyTextPatches,
   applyWorkshopPatches,
@@ -237,6 +240,9 @@ type Doc = {
   bytes: ArrayBuffer;
   proxy: PDFDocumentProxy;
   pageCount: number;
+  encrypted: boolean;
+  canMutate: boolean;
+  restrictionMessage: string | null;
 };
 
 type Edit = {
@@ -453,6 +459,7 @@ function Editor() {
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { prompt: passwordPrompt, openPdf, cancelPrompt } = useOpenPdf();
   const [findings, setFindings] = useState<NumberFinding[] | null>(null);
   const [inspection, setInspection] = useState<TextEditInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -592,17 +599,18 @@ function Editor() {
           )
         : selected.text
     : "";
-  const applyEnabled = selected
-    ? canApplyTextEdit({
-        selectedIsOcr,
-        source: selected.source,
-        deferToScan: inspection?.deferToScan,
-        canCommitSafely: canCommitSafely(inspection, applyText, applyOriginal),
-        looksScanned,
-        hasTextOperator: selected.hasTextOperator,
-        ocrVerifyPending: selectedVerifyPending,
-      })
-    : false;
+  const applyEnabled =
+    selected && doc?.canMutate !== false
+      ? canApplyTextEdit({
+          selectedIsOcr,
+          source: selected.source,
+          deferToScan: inspection?.deferToScan,
+          canCommitSafely: canCommitSafely(inspection, applyText, applyOriginal),
+          looksScanned,
+          hasTextOperator: selected.hasTextOperator,
+          ocrVerifyPending: selectedVerifyPending,
+        })
+      : false;
   const panelReport: PageScanReport = scanReport ?? {
     looksScanned,
     reason: looksScanned ? "image-only" : "ok",
@@ -620,66 +628,71 @@ function Editor() {
     setPreviewUrl(null);
   };
 
-  const loadBytes = useCallback(async (name: string, bytes: ArrayBuffer) => {
-    const previous = docRef.current;
-    if (previous?.proxy) {
-      void previous.proxy.destroy().catch(() => undefined);
-    }
-    setError(null);
-    setFindings(null);
-    setStatus("Opening the file in this tab");
-    try {
-      const proxy = await openDocument(bytes.slice(0));
-      const layout = await inspectPageLayout(bytes.slice(0));
-      setDoc({
-        name,
-        base: name.replace(/\.pdf$/i, ""),
-        bytes: bytes.slice(0),
-        proxy,
-        pageCount: proxy.numPages,
-      });
-      setOriginalRotations(layout.rotations);
-      setPageViewBoxes(layout.viewBoxes);
-      setSessionRotations({});
-      setEdits({});
-      setImageEdits({});
-      setMarks([]);
-      setSelectedId(null);
-      setSelectedImageId(null);
-      setSourceCanvas(null);
-      setInspection(null);
-      setScanReport(null);
-      setNativeLines([]);
-      setApplyNotice(null);
-      setShowOriginalHint(false);
-      setPageHasPatchedPreview(false);
-      if (patchedPreviewRef.current) {
-        void patchedPreviewRef.current.destroy();
-        patchedPreviewRef.current = null;
+  const loadBytes = useCallback(
+    async (name: string, bytes: ArrayBuffer, password?: string) => {
+      setError(null);
+      setFindings(null);
+      setStatus("Opening the file in this tab");
+      try {
+        const opened = await openPdf(name, bytes, password);
+        if (!opened) return;
+        const previous = docRef.current;
+        if (previous?.proxy) {
+          void previous.proxy.destroy().catch(() => undefined);
+        }
+        const layout = await inspectPageLayout(opened.bytes);
+        setDoc({
+          name,
+          base: name.replace(/\.pdf$/i, ""),
+          bytes: opened.bytes,
+          proxy: opened.proxy,
+          pageCount: opened.pageCount,
+          encrypted: opened.encrypted,
+          canMutate: opened.canMutate,
+          restrictionMessage: opened.restrictionMessage,
+        });
+        setOriginalRotations(layout.rotations);
+        setPageViewBoxes(layout.viewBoxes);
+        setSessionRotations({});
+        setEdits({});
+        setImageEdits({});
+        setMarks([]);
+        setSelectedId(null);
+        setSelectedImageId(null);
+        setSourceCanvas(null);
+        setInspection(null);
+        setScanReport(null);
+        setNativeLines([]);
+        setApplyNotice(null);
+        setShowOriginalHint(false);
+        setPageHasPatchedPreview(false);
+        if (patchedPreviewRef.current) {
+          void patchedPreviewRef.current.destroy();
+          patchedPreviewRef.current = null;
+        }
+        enhanceDismissedRef.current = false;
+        setEnhanceOpen(false);
+        setScanByPage((prev) => {
+          Object.values(prev).forEach(releaseScanSession);
+          return {};
+        });
+        setFormReport(emptyAcroFormReport());
+        setFormValues({});
+        setFormOriginal({});
+        setSelectedFieldName(null);
+        setPage(1);
+      } catch {
+        setDoc(null);
+        setOriginalRotations([]);
+        setSessionRotations({});
+        setPageViewBoxes([]);
+        setError(PDF_OPEN_DAMAGED_MESSAGE);
+      } finally {
+        setStatus(null);
       }
-      enhanceDismissedRef.current = false;
-      setEnhanceOpen(false);
-      setScanByPage((prev) => {
-        Object.values(prev).forEach(releaseScanSession);
-        return {};
-      });
-      setFormReport(emptyAcroFormReport());
-      setFormValues({});
-      setFormOriginal({});
-      setSelectedFieldName(null);
-      setPage(1);
-    } catch {
-      setDoc(null);
-      setOriginalRotations([]);
-      setSessionRotations({});
-      setPageViewBoxes([]);
-      setError(
-        "This PDF could not be opened here. Password-protected files and badly damaged files are the usual reasons.",
-      );
-    } finally {
-      setStatus(null);
-    }
-  }, []);
+    },
+    [openPdf],
+  );
 
   const closeDocument = useCallback(() => {
     if (!docRef.current) return;
@@ -1785,7 +1798,7 @@ function Editor() {
   };
 
   const rotateCurrentPage = (delta: number) => {
-    if (!doc) return;
+    if (!doc || !doc.canMutate) return;
     setSessionRotations((prev) => stepSessionRotation(prev, page, originalRotation, delta));
     setApplyNotice(
       `Page ${page} rotated in this tab. Save As… writes a new PDF. The original file is unchanged.`,
@@ -1794,6 +1807,10 @@ function Editor() {
 
   const exportPdf = async () => {
     if (!doc) return;
+    if (!doc.canMutate) {
+      setError(doc.restrictionMessage ?? VIEW_ONLY_ENCRYPTED_MESSAGE);
+      return;
+    }
     setStatus("Writing the edited boxes");
     try {
       const flattenedPages = new Set<number>();
@@ -2067,6 +2084,17 @@ function Editor() {
 
   return (
     <AppShell hideFooter>
+      <PdfPasswordDialog
+        open={!!passwordPrompt}
+        fileName={passwordPrompt?.name ?? ""}
+        incorrect={passwordPrompt?.incorrect ?? false}
+        busy={!!status}
+        onUnlock={(password) => {
+          if (!passwordPrompt) return;
+          void loadBytes(passwordPrompt.name, passwordPrompt.bytes, password);
+        }}
+        onCancel={cancelPrompt}
+      />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-8 sm:py-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -2100,7 +2128,7 @@ function Editor() {
                 data-testid="save-as"
                 title={SAVE_AS_HINT}
                 onClick={() => void exportPdf()}
-                disabled={!!status}
+                disabled={!!status || !doc.canMutate}
               >
                 <Download className="mr-1.5 size-3.5" /> {SAVE_AS_LABEL}
               </Button>
@@ -2113,6 +2141,14 @@ function Editor() {
             <AlertTriangle className="size-4" />
             <AlertTitle>That did not work</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {doc?.restrictionMessage && (
+          <Alert className="mt-6" data-testid="pdf-view-only-banner">
+            <AlertTriangle className="size-4" />
+            <AlertTitle>View only</AlertTitle>
+            <AlertDescription>{doc.restrictionMessage}</AlertDescription>
           </Alert>
         )}
 
@@ -2231,7 +2267,7 @@ function Editor() {
                     size="icon"
                     variant="ghost"
                     className="min-h-11 min-w-11 touch-manipulation"
-                    disabled={!!status}
+                    disabled={!!status || !doc.canMutate}
                     onClick={() => rotateCurrentPage(ROTATE_LEFT_DELTA)}
                     aria-label={ROTATE_LEFT_LABEL}
                     title={ROTATE_LEFT_LABEL}
@@ -2243,7 +2279,7 @@ function Editor() {
                     size="sm"
                     variant="ghost"
                     className="min-h-11 touch-manipulation px-2"
-                    disabled={!!status}
+                    disabled={!!status || !doc.canMutate}
                     onClick={() => rotateCurrentPage(ROTATE_180_DELTA)}
                     aria-label={ROTATE_180_LABEL}
                     title={ROTATE_180_LABEL}
@@ -2255,7 +2291,7 @@ function Editor() {
                     size="icon"
                     variant="ghost"
                     className="min-h-11 min-w-11 touch-manipulation"
-                    disabled={!!status}
+                    disabled={!!status || !doc.canMutate}
                     onClick={() => rotateCurrentPage(ROTATE_RIGHT_DELTA)}
                     aria-label={ROTATE_RIGHT_LABEL}
                     title={ROTATE_RIGHT_LABEL}

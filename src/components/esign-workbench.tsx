@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
+import { PdfPasswordDialog } from "@/components/pdf-password-dialog";
 import { SignatureCapture } from "@/components/signature-capture";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +46,9 @@ import {
   type Signer,
 } from "@/lib/esign";
 import { saveBytesWithResult, saveTextSidecar } from "@/lib/file-export";
-import { openDocument, renderPage } from "@/lib/pdf-runtime";
+import { PDF_OPEN_DAMAGED_MESSAGE, VIEW_ONLY_ENCRYPTED_MESSAGE } from "@/lib/pdf-open";
+import { useOpenPdf } from "@/hooks/use-open-pdf";
+import { renderPage } from "@/lib/pdf-runtime";
 
 type Doc = {
   name: string;
@@ -53,6 +56,9 @@ type Doc = {
   bytes: ArrayBuffer;
   proxy: PDFDocumentProxy;
   pageCount: number;
+  encrypted: boolean;
+  canMutate: boolean;
+  restrictionMessage: string | null;
 };
 
 type Mode = "prepare" | "sign";
@@ -79,6 +85,7 @@ export function EsignWorkbench() {
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { prompt: passwordPrompt, openPdf, cancelPrompt } = useOpenPdf();
   const [capture, setCapture] = useState<CaptureTarget | null>(null);
   const [textDraft, setTextDraft] = useState("");
   const holderRef = useRef<HTMLDivElement>(null);
@@ -98,17 +105,22 @@ export function EsignWorkbench() {
       name: string,
       bytes: ArrayBuffer,
       preset?: { signers: Signer[]; fields: SignField[] },
+      password?: string,
     ) => {
       setError(null);
       setStatus("Opening the file in this tab");
       try {
-        const proxy = await openDocument(bytes);
+        const opened = await openPdf(name, bytes, password);
+        if (!opened) return;
         setDoc({
           name,
           base: name.replace(/\.pdf$/i, ""),
-          bytes,
-          proxy,
-          pageCount: proxy.numPages,
+          bytes: opened.bytes,
+          proxy: opened.proxy,
+          pageCount: opened.pageCount,
+          encrypted: opened.encrypted,
+          canMutate: opened.canMutate,
+          restrictionMessage: opened.restrictionMessage,
         });
         const nextSigners = preset?.signers ?? [createSigner({ index: 1 })];
         setSigners(nextSigners);
@@ -119,14 +131,12 @@ export function EsignWorkbench() {
         setMode(preset ? "sign" : "prepare");
       } catch {
         setDoc(null);
-        setError(
-          "This PDF could not be opened here. Password-protected files and badly damaged files are the usual reasons.",
-        );
+        setError(PDF_OPEN_DAMAGED_MESSAGE);
       } finally {
         setStatus(null);
       }
     },
-    [],
+    [openPdf],
   );
 
   useEffect(() => {
@@ -278,6 +288,10 @@ export function EsignWorkbench() {
 
   const exportSigned = async () => {
     if (!doc) return;
+    if (!doc.canMutate) {
+      setError(doc.restrictionMessage ?? VIEW_ONLY_ENCRYPTED_MESSAGE);
+      return;
+    }
     if (!fields.some(isFieldFilled)) {
       setError("Sign at least one field before exporting.");
       return;
@@ -409,11 +423,30 @@ export function EsignWorkbench() {
 
   return (
     <div>
+      <PdfPasswordDialog
+        open={!!passwordPrompt}
+        fileName={passwordPrompt?.name ?? ""}
+        incorrect={passwordPrompt?.incorrect ?? false}
+        busy={!!status}
+        onUnlock={(password) => {
+          if (!passwordPrompt) return;
+          void loadBytes(passwordPrompt.name, passwordPrompt.bytes, undefined, password);
+        }}
+        onCancel={cancelPrompt}
+      />
       {error && (
         <Alert variant="destructive" className="mb-6">
           <AlertTriangle className="size-4" />
           <AlertTitle>That did not work</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {doc?.restrictionMessage && (
+        <Alert className="mb-6" data-testid="pdf-view-only-banner">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>View only</AlertTitle>
+          <AlertDescription>{doc.restrictionMessage}</AlertDescription>
         </Alert>
       )}
 
@@ -585,7 +618,7 @@ export function EsignWorkbench() {
               <Button
                 size="sm"
                 onClick={() => void exportSigned()}
-                disabled={!!status || filledCount === 0}
+                disabled={!!status || filledCount === 0 || !doc.canMutate}
               >
                 <Download className="size-3.5" /> Export signed PDF
               </Button>

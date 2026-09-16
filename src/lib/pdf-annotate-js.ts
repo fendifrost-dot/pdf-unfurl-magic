@@ -13,6 +13,7 @@
  */
 import { PDFDict, PDFDocument, PDFName, type PDFPage } from "pdf-lib";
 import type { AnnotationBurn } from "./pdf-images";
+import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
 
 /** pdfjs-dist@4.10.38 AnnotationEditorPrefix */
 export const PDFJS_EDITOR_PREFIX = "pdfjs_internal_editor_";
@@ -236,7 +237,7 @@ export async function listPageAnnotationSubtypes(
   pageNumber: number,
 ): Promise<string[]> {
   const src = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const doc = await PDFDocument.load(src.slice(), { ignoreEncryption: true });
+  const doc = await loadPdfDocument(bytesToArrayBuffer(src));
   const page = doc.getPages()[pageNumber - 1];
   if (!page) return [];
   const annots = page.node.Annots();
@@ -318,7 +319,7 @@ export async function writeEditorAnnotationsWithPdfLib(
   marks: AnnotationBurn[],
 ): Promise<Uint8Array> {
   const src = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const doc = await PDFDocument.load(src.slice(), { ignoreEncryption: true });
+  const doc = await loadPdfDocument(bytesToArrayBuffer(src));
   writeNativeAnnotations(doc, marks);
   return doc.save();
 }

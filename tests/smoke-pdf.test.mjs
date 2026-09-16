@@ -11,6 +11,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { PDFDocument } from "pdf-lib";
 import { loadFixture, readManifest } from "./helpers/load-fixture.mjs";
 import {
   applyTextPatch,
@@ -32,6 +33,7 @@ test("manifest lists the committed fixtures", () => {
     "lines-and-text.pdf",
     "multi-font.pdf",
     "multi-page.pdf",
+    "password-open.pdf",
     "redact-secret.pdf",
     "scan-image-only.pdf",
     "simple-text.pdf",
@@ -94,4 +96,12 @@ test("a one-line text-patch export stays in a sane size band", async () => {
     );
     assertExportSizeSane(`${name} patched`, exported, bytes, { minRatio: 0.5, maxRatio: 3 });
   }
+});
+
+test("password-open is encrypted and listed as opens-with-prompt", async () => {
+  const item = manifest.files.find((f) => f.file === "password-open.pdf");
+  assert.ok(item, "password-open.pdf missing from manifest");
+  assert.equal(item.expect, "opens-with-prompt");
+  const { bytes } = await loadFixture("password-open.pdf");
+  await assert.rejects(() => PDFDocument.load(new Uint8Array(bytes).slice()), /encrypted/i);
 });

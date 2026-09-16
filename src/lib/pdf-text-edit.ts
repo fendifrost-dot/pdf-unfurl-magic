@@ -29,6 +29,7 @@ import {
   decodePDFRawStream,
   type PDFFont,
 } from "pdf-lib";
+import { loadPdfDocument } from "./pdf-io";
 import {
   collectTextShows,
   encodePdfHex,
@@ -327,7 +328,7 @@ type PageStream = {
 };
 
 function loadDoc(bytes: ArrayBuffer) {
-  return PDFDocument.load(bytes.slice(0), { ignoreEncryption: true, updateMetadata: false });
+  return loadPdfDocument(bytes, { updateMetadata: false });
 }
 
 function decodeStream(stream: PDFStream): Uint8Array {
