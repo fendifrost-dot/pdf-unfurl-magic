@@ -11,10 +11,12 @@ import {
   extractPages,
   getPageCount,
   mergeFiles,
+  reorderPages,
   rotatePagesBy,
   listPageRotations,
 } from "../../src/lib/pdf-tools";
 import { bytesToArrayBuffer } from "../../src/lib/pdf-io";
+import { listPageShownText } from "../../src/lib/pdf-text-edit";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures");
 
@@ -44,6 +46,23 @@ describe("pdf helpers × fixtures", () => {
     expect(out.pages).toBe(4);
     expect(out.bytes.byteLength).toBeGreaterThan(400);
     expect(out.bytes.byteLength).toBeLessThan(40_000);
+  });
+
+  it("reorders multi-page 3-1-2 without changing the fixture on disk", async () => {
+    const source = load("multi-page.pdf");
+    const before = new Uint8Array(source.slice(0));
+    const out = await reorderPages(source, [3, 1, 2], "multi-page");
+    expect(out.pages).toBe(3);
+    expect(out.name).toBe("multi-page-reordered.pdf");
+    expect(new Uint8Array(source)).toEqual(before);
+    const exported = out.bytes;
+    const buf = exported.buffer.slice(
+      exported.byteOffset,
+      exported.byteOffset + exported.byteLength,
+    ) as ArrayBuffer;
+    expect((await listPageShownText(buf, 1)).join(" ")).toMatch(/PAGE_MARKER_3/);
+    expect((await listPageShownText(buf, 2)).join(" ")).toMatch(/PAGE_MARKER_1/);
+    expect((await listPageShownText(buf, 3)).join(" ")).toMatch(/PAGE_MARKER_2/);
   });
 
   it("applyTextPatches export stays in a sane size band", async () => {

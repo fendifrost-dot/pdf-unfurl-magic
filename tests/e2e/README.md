@@ -11,7 +11,10 @@ npm i -D vitest
 npx vitest run tests/e2e/pdf-helpers.smoke.ts
 ```
 
-`tests/e2e/pdf-helpers.smoke.ts` imports `getPageCount`, `extractPages`, `mergeFiles`, and `applyTextPatches` from `@/lib/pdf-tools` and the same fixtures. Copy `tests/e2e/vitest.config.ts` or merge its `resolve.alias` into a root `vitest.config.ts` if you already have one.
+`tests/e2e/pdf-helpers.smoke.ts` imports `getPageCount`, `extractPages`, `mergeFiles`,
+`reorderPages`, and `applyTextPatches` from `@/lib/pdf-tools` and the same fixtures. Copy
+`tests/e2e/vitest.config.ts` or merge its `resolve.alias` into a root `vitest.config.ts` if
+you already have one.
 
 Suggested `package.json` addition (do not replace `test:smoke`):
 

@@ -31,8 +31,8 @@ function SplitPage() {
           Make a huge file small enough to open.
         </h1>
         <p className="mt-4 max-w-2xl text-muted-foreground">
-          Choose a PDF, cut it into chunks, or pull just the pages you need. Save or share the
-          result from this phone — the original file is never changed.
+          Choose a PDF, cut it into chunks, pull just the pages you need, or reorder pages before
+          Save As. The original file is never changed.
         </p>
         <div className="mt-8">
           <PdfWorkbench initialTab="split" />

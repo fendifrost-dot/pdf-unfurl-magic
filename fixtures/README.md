@@ -15,7 +15,7 @@ npm run fixtures:generate
 | `lines-and-text.pdf`  | 1     | Table rules + a signature line. Neighbouring vectors must survive a one-box edit.                                                               |
 | `image-and-text.pdf`  | 1     | Embedded PNG + caption. The image object must not flatten when text is edited.                                                                  |
 | `comma-amounts.pdf`   | 1     | Amounts with commas (`2,500.00`) plus a multi-run POS line. Text-extract / font-mimic QA.                                                       |
-| `multi-page.pdf`      | 3     | Split / extract / merge, page-count badge, untouched-page regression. Markers `PAGE_MARKER_1`…`3`.                                              |
+| `multi-page.pdf`      | 3     | Split / extract / merge / **reorder 3-1-2**, page-count badge, untouched-page regression. Markers `PAGE_MARKER_1`…`3`.                          |
 | `scan-image-only.pdf` | 1     | Full-page bitmap, no text operators. Scan-aware Enhance / OCR.                                                                                  |
 | `redact-secret.pdf`   | 1     | `KEEP` / `SECRET` / `VISIBLE` plus a magenta-cyan PNG. Permanent redact QA.                                                                     |
 | `acroform-blank.pdf`  | 1     | Five AcroForm widgets (name, email, city, size, agree). Email has format/calculate JS so Form UI must warn.                                     |

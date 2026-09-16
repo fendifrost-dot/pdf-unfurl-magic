@@ -3,7 +3,7 @@
  * Mirrors src/lib/pdf-tools.ts (load / split / extract / merge / save) so
  * feature PRs can assert page counts and export size without importing TS.
  */
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFArray, PDFName, PDFRawStream, PDFRef, StandardFonts, decodePDFRawStream, rgb } from "pdf-lib";
 
 function asBytes(bytes) {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -60,6 +60,76 @@ export async function mergeFiles(inputs) {
     pages += copied.length;
   }
   return { name: "merged.pdf", bytes: await doc.save(), pages };
+}
+
+export function assertPageOrder(order, pageCount) {
+  if (!Number.isInteger(pageCount) || pageCount < 1) {
+    throw new Error("This file has no pages to reorder.");
+  }
+  if (order.length !== pageCount) {
+    throw new Error(`Page order must list all ${pageCount} pages once.`);
+  }
+  const seen = new Set();
+  for (const page of order) {
+    if (!Number.isInteger(page) || page < 1 || page > pageCount) {
+      throw new Error(`Page ${page} is outside 1–${pageCount}.`);
+    }
+    if (seen.has(page)) throw new Error(`Page ${page} is listed twice.`);
+    seen.add(page);
+  }
+  return [...order];
+}
+
+export async function copyPagesInOrder(pages, name = "merged.pdf") {
+  if (!pages.length) throw new Error("Add at least one page.");
+  const doc = await PDFDocument.create();
+  const cache = new Map();
+  for (const slot of pages) {
+    let src = cache.get(slot.bytes);
+    if (!src) {
+      src = await load(slot.bytes);
+      cache.set(slot.bytes, src);
+    }
+    const index = slot.page - 1;
+    const total = src.getPageCount();
+    if (!Number.isInteger(slot.page) || index < 0 || index >= total) {
+      throw new Error(`Page ${slot.page} is outside 1–${total}.`);
+    }
+    const [copied] = await doc.copyPages(src, [index]);
+    doc.addPage(copied);
+  }
+  return { name, bytes: await doc.save(), pages: pages.length };
+}
+
+/** Rewrite one file with pages in a new 1-based order. Source bytes are only read. */
+export async function reorderPages(bytes, order, baseName = "document") {
+  const src = await load(bytes);
+  const normalized = assertPageOrder(order, src.getPageCount());
+  return copyPagesInOrder(
+    normalized.map((page) => ({ bytes, page })),
+    `${baseName}-reordered.pdf`,
+  );
+}
+
+function streamLatin1(doc, refOrStream) {
+  const obj = refOrStream instanceof PDFRef ? doc.context.lookup(refOrStream) : refOrStream;
+  if (obj instanceof PDFRawStream) {
+    return Buffer.from(decodePDFRawStream(obj).decode()).toString("latin1");
+  }
+  if (obj instanceof PDFArray) {
+    return obj.asArray().map((item) => streamLatin1(doc, item)).join("");
+  }
+  return "";
+}
+
+/** Decoded page content (not the flate raw bytes) so markers are searchable. */
+export async function pageContentLatin1(bytes, pageNumber) {
+  const doc = await load(bytes);
+  const page = doc.getPages()[pageNumber - 1];
+  if (!page) return "";
+  const raw = streamLatin1(doc, page.node.get(PDFName.of("Contents")));
+  // pdf-lib copyPages often rewrites Tj strings as hex: <504147...> 
+  return raw.replace(/<([0-9A-Fa-f]+)>/g, (_, hex) => Buffer.from(hex, "hex").toString("latin1"));
 }
 
 /** Minimal stand-in for applyTextPatches: cover one box and write replacement text. */

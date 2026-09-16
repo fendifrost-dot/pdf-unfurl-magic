@@ -35,6 +35,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Split with **1** page per file → three downloads, each a small PDF (not empty, not megabytes).
 - [ ] Extract pages `2-3` → one 2-page file, smaller than the source.
 - [ ] Merge `simple-text.pdf` after the loaded multi-page file → **4** pages.
+- [ ] Reorder tab (or the Merge page strip): `multi-page.pdf` → move last page first (3-1-2) → **Save this page order**. Re-open: `PAGE_MARKER_3`, then `1`, then `2`. Source file on disk unchanged.
 - [ ] Original files on disk are unchanged.
 
 ## Editor (`/edit`)

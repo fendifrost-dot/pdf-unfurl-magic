@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { containFit } from "./image-process";
 import { encodeDemoPhoto } from "./tiny-png";
 import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
+import { assertPageOrder, type PageRef } from "./page-order";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
 import { replaceImageXObject } from "./pdf-image-xobject";
@@ -16,6 +17,18 @@ import { applyTextPatches, type TextPatch } from "./pdf-text-edit";
 import { applyScanPagePatches, type ScanPageExport } from "./pdf-scan-edit";
 import { applyAcroFormToDocument, type AcroFormFillRequest } from "./pdf-acroform";
 import { applyPageRotationsToDocument, type PageRotation } from "./pdf-rotate";
+
+export type { PageRef, PageSlot } from "./page-order";
+export {
+  assertPageOrder,
+  identityOrder,
+  isIdentityOrder,
+  moveIndex,
+  refsFromSlots,
+  slotsFromPdf,
+  slotsFromPdfs,
+  slotsMatchFileOrder,
+} from "./page-order";
 export type { AcroFormFillRequest } from "./pdf-acroform";
 export type { PageRotation, PageRotateDeg } from "./pdf-rotate";
 export {
@@ -108,6 +121,57 @@ export async function mergeFiles(
     pages += copied.length;
   }
   return { name: "merged.pdf", bytes: await doc.save(), pages };
+}
+
+/**
+ * Copy specific 1-based pages from one or more source buffers, in list order.
+ * Used by merge + reorder so a thumbnail strip can export 3-1-2 without
+ * touching the files on disk.
+ */
+export async function copyPagesInOrder(
+  pages: PageRef[],
+  name = "merged.pdf",
+): Promise<SplitOutput> {
+  if (pages.length === 0) {
+    throw new Error("Add at least one page.");
+  }
+  const doc = await PDFDocument.create();
+  const cache = new Map<ArrayBuffer, Awaited<ReturnType<typeof load>>>();
+  for (const slot of pages) {
+    let src = cache.get(slot.bytes);
+    if (!src) {
+      src = await load(slot.bytes);
+      cache.set(slot.bytes, src);
+    }
+    const index = slot.page - 1;
+    const total = src.getPageCount();
+    if (!Number.isInteger(slot.page) || index < 0 || index >= total) {
+      throw new Error(`Page ${slot.page} is outside 1–${total}.`);
+    }
+    const [copied] = await doc.copyPages(src, [index]);
+    if (!copied) {
+      throw new Error(`Page ${slot.page} could not be copied.`);
+    }
+    doc.addPage(copied);
+  }
+  return { name, bytes: await doc.save(), pages: pages.length };
+}
+
+/**
+ * Rewrite one file with pages in a new order (1-based permutation).
+ * Original bytes are only read; the result is a new document.
+ */
+export async function reorderPages(
+  bytes: ArrayBuffer,
+  order: number[],
+  baseName = "document",
+): Promise<SplitOutput> {
+  const src = await load(bytes);
+  const normalized = assertPageOrder(order, src.getPageCount());
+  return copyPagesInOrder(
+    normalized.map((page) => ({ bytes, page })),
+    `${baseName}-reordered.pdf`,
+  );
 }
 
 export async function getPageCount(bytes: ArrayBuffer): Promise<number> {

@@ -94,4 +94,32 @@ test.describe("PDF Relief fixture smoke", () => {
     await expect(page.getByTestId("rotate-left")).toBeDisabled();
     await expect(page.getByTestId("rotate-right")).toBeDisabled();
   });
+
+  test("merge bench: reorder multi-page 3-1-2 then Save As", async ({ page }) => {
+    await page.goto(`${baseURL}/merge`);
+    await dropPdf(page, "main", "multi-page.pdf");
+    await expect(page.getByText(/3 pages/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("page-order-strip")).toBeVisible();
+    await page.getByTestId("move-page-earlier-2").click();
+    await page.getByTestId("move-page-earlier-1").click();
+    await expect(page.getByTestId("page-order-sequence")).toHaveText(
+      /Original pages in this order:\s*3\s*·\s*1\s*·\s*2/,
+    );
+    await page.getByTestId("save-page-order").click();
+    await expect(page.getByText(/Ready to save/i)).toBeVisible({ timeout: 15_000 });
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page
+        .getByRole("button", { name: /Save As/i })
+        .first()
+        .click(),
+    ]);
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.concat(chunks);
+    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(bytes.toString("latin1")).toMatch(/PAGE_MARKER_3/);
+  });
 });
