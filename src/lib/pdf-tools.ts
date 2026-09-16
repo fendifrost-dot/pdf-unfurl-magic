@@ -6,7 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { containFit } from "./image-process";
 import { encodeDemoPhoto } from "./tiny-png";
 import { bytesToArrayBuffer, loadPdfDocument } from "./pdf-io";
-import { assertPageOrder, type PageRef } from "./page-order";
+import { assertPageOrder, identityOrder, type PageRef } from "./page-order";
 import type { AnnotationBurn, ImagePatch } from "./pdf-images";
 import { jpegMagic } from "./pdf-images";
 import { replaceImageXObject } from "./pdf-image-xobject";
@@ -25,6 +25,8 @@ export {
   isIdentityOrder,
   moveIndex,
   refsFromSlots,
+  slotsAfterDelete,
+  slotsForExtract,
   slotsFromPdf,
   slotsFromPdfs,
   slotsMatchFileOrder,
@@ -92,20 +94,50 @@ export async function splitIntoChunks(
   return out;
 }
 
-/** Pull specific pages (1-based) into one new file. */
+/** Pull specific pages (1-based) into one new file, in the given order. */
 export async function extractPages(
   bytes: ArrayBuffer,
   baseName: string,
   pages: number[],
 ): Promise<SplitOutput> {
-  const src = await load(bytes);
-  const doc = await PDFDocument.create();
-  const copied = await doc.copyPages(
-    src,
-    pages.map((p) => p - 1),
+  return copyPagesInOrder(
+    pages.map((page) => ({ bytes, page })),
+    `${baseName}-extract.pdf`,
   );
-  copied.forEach((p) => doc.addPage(p));
-  return { name: `${baseName}-extract.pdf`, bytes: await doc.save(), pages: pages.length };
+}
+
+/**
+ * Drop 1-based pages and write the remainder in the original order.
+ * Source bytes are only read.
+ */
+export async function deletePages(
+  bytes: ArrayBuffer,
+  pagesToRemove: number[],
+  baseName = "document",
+): Promise<SplitOutput> {
+  const src = await load(bytes);
+  const total = src.getPageCount();
+  if (total < 1) {
+    throw new Error("This file has no pages to edit.");
+  }
+  const remove = new Set<number>();
+  for (const page of pagesToRemove) {
+    if (!Number.isInteger(page) || page < 1 || page > total) {
+      throw new Error(`Page ${page} is outside 1–${total}.`);
+    }
+    remove.add(page);
+  }
+  if (remove.size === 0) {
+    throw new Error("Select at least one page to delete.");
+  }
+  if (remove.size >= total) {
+    throw new Error("Keep at least one page.");
+  }
+  const keep = identityOrder(total).filter((page) => !remove.has(page));
+  return copyPagesInOrder(
+    keep.map((page) => ({ bytes, page })),
+    `${baseName}-pages.pdf`,
+  );
 }
 
 /** Merge several files, in the given order, into one. */
@@ -125,8 +157,8 @@ export async function mergeFiles(
 
 /**
  * Copy specific 1-based pages from one or more source buffers, in list order.
- * Used by merge + reorder so a thumbnail strip can export 3-1-2 without
- * touching the files on disk.
+ * Used by merge, reorder, extract-selection, and delete-pages so a thumbnail
+ * strip can export a new PDF without touching the files on disk.
  */
 export async function copyPagesInOrder(
   pages: PageRef[],

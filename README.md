@@ -1,9 +1,10 @@
 # PDF Relief
 
 A PDF workshop that runs on your own machine — split, extract, merge, reorder pages,
-rotate pages, click-to-edit text, fill and flatten AcroForm fields, scan pages into a
-multi-page PDF, and **E-Sign** a PDF. There is no account, no database, and nothing is
-uploaded: files stay on the computer. Ships in two shapes from this one repo:
+delete or extract selected pages, rotate pages, click-to-edit text, fill and flatten
+AcroForm fields, scan pages into a multi-page PDF, and **E-Sign** a PDF. There is no
+account, no database, and nothing is uploaded: files stay on the computer. Ships in two
+shapes from this one repo:
 
 - **Browser** — the TanStack Start + Vite web app, including a phone-sized
   shell (bottom nav, large tap targets, camera scan, Save / Share).
@@ -90,12 +91,15 @@ download or the OS share sheet. Electron still uses its Save dialog.
 
 Install: Android Chrome may offer **Install**. iOS Safari → Share → Add to Home Screen.
 
-## Reorder pages
+## Reorder / Organize Pages
 
 On **Merge**, **Split**, or the home bench, open a multi-page PDF (or merge files first).
 The **Reorder** tab — and the strip on Merge — lets you drag pages or nudge them with
-arrows. **Save this page order** copies pages with pdf-lib into a new file
-(`*-reordered.pdf` or `merged.pdf`). The original on disk is never overwritten.
+arrows, tick pages, then **Extract selected** (new PDF of the selection, current strip
+order) or **Delete selected** (drop them from the strip, then Save remaining pages).
+Exports use pdf-lib page copy into a new file (`*-extract.pdf`, `*-pages.pdf`,
+`*-reordered.pdf`, or `merged.pdf`). The original on disk is never overwritten.
+Password-protected files stay view-only after unlock. Thumbnails stay off above 40 pages.
 
 ## Built with
 

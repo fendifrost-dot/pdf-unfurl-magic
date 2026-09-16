@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   applyTextPatches,
+  deletePages,
   extractPages,
   getPageCount,
   mergeFiles,
@@ -63,6 +64,36 @@ describe("pdf helpers × fixtures", () => {
     expect((await listPageShownText(buf, 1)).join(" ")).toMatch(/PAGE_MARKER_3/);
     expect((await listPageShownText(buf, 2)).join(" ")).toMatch(/PAGE_MARKER_1/);
     expect((await listPageShownText(buf, 3)).join(" ")).toMatch(/PAGE_MARKER_2/);
+  });
+
+  it("extracts page 2 of multi-page without changing the fixture on disk", async () => {
+    const source = load("multi-page.pdf");
+    const before = new Uint8Array(source.slice(0));
+    const out = await extractPages(source, "multi-page", [2]);
+    expect(out.pages).toBe(1);
+    expect(out.name).toBe("multi-page-extract.pdf");
+    expect(new Uint8Array(source)).toEqual(before);
+    const buf = out.bytes.buffer.slice(
+      out.bytes.byteOffset,
+      out.bytes.byteOffset + out.bytes.byteLength,
+    ) as ArrayBuffer;
+    expect((await listPageShownText(buf, 1)).join(" ")).toMatch(/PAGE_MARKER_2/);
+  });
+
+  it("deletes page 2 of multi-page then remaining markers are 1 then 3", async () => {
+    const source = load("multi-page.pdf");
+    const before = new Uint8Array(source.slice(0));
+    const out = await deletePages(source, [2], "multi-page");
+    expect(out.pages).toBe(2);
+    expect(out.name).toBe("multi-page-pages.pdf");
+    expect(new Uint8Array(source)).toEqual(before);
+    const exported = out.bytes;
+    const buf = exported.buffer.slice(
+      exported.byteOffset,
+      exported.byteOffset + exported.byteLength,
+    ) as ArrayBuffer;
+    expect((await listPageShownText(buf, 1)).join(" ")).toMatch(/PAGE_MARKER_1/);
+    expect((await listPageShownText(buf, 2)).join(" ")).toMatch(/PAGE_MARKER_3/);
   });
 
   it("applyTextPatches export stays in a sane size band", async () => {

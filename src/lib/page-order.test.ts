@@ -5,6 +5,8 @@ import {
   isIdentityOrder,
   moveIndex,
   refsFromSlots,
+  slotsAfterDelete,
+  slotsForExtract,
   slotsFromPdfs,
   slotsMatchFileOrder,
   type NamedPdf,
@@ -56,5 +58,29 @@ describe("page order helpers", () => {
     const reordered = moveIndex(slots, 2, 0);
     expect(slotsMatchFileOrder(reordered, files)).toBe(false);
     expect(refsFromSlots(reordered).map((r) => r.page)).toEqual([1, 1, 2]);
+  });
+
+  it("extracts selected slots in current strip order", () => {
+    const files = [fakePdf("a.pdf", 3, 1)];
+    const slots = slotsFromPdfs(files);
+    const selected = new Set([slots[1]!.id]);
+    const picked = slotsForExtract(slots, selected);
+    expect(picked.map((s) => s.sourcePage)).toEqual([2]);
+    const afterReorder = moveIndex(slots, 2, 0);
+    expect(afterReorder.map((s) => s.sourcePage)).toEqual([3, 1, 2]);
+    const mixed = new Set([afterReorder[0]!.id, afterReorder[2]!.id]);
+    expect(slotsForExtract(afterReorder, mixed).map((s) => s.sourcePage)).toEqual([3, 2]);
+    expect(() => slotsForExtract(slots, new Set())).toThrow(/select at least one page to extract/i);
+  });
+
+  it("deletes selected slots and keeps remaining strip order", () => {
+    const files = [fakePdf("a.pdf", 3, 1)];
+    const slots = slotsFromPdfs(files);
+    const remaining = slotsAfterDelete(slots, new Set([slots[1]!.id]));
+    expect(remaining.map((s) => s.sourcePage)).toEqual([1, 3]);
+    expect(() => slotsAfterDelete(slots, new Set())).toThrow(/select at least one page to delete/i);
+    expect(() => slotsAfterDelete(slots, new Set(slots.map((s) => s.id)))).toThrow(
+      /keep at least one page/i,
+    );
   });
 });

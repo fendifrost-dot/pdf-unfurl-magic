@@ -36,6 +36,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 - [ ] Extract pages `2-3` → one 2-page file, smaller than the source.
 - [ ] Merge `simple-text.pdf` after the loaded multi-page file → **4** pages.
 - [ ] Reorder tab (or the Merge page strip): `multi-page.pdf` → move last page first (3-1-2) → **Save this page order**. Re-open: `PAGE_MARKER_3`, then `1`, then `2`. Source file on disk unchanged.
+- [ ] Same strip: tick page 2 → **Extract selected** → one-page PDF with `PAGE_MARKER_2`. Tick page 2 → **Delete selected** → **Save remaining pages**. Re-open: `PAGE_MARKER_1` then `PAGE_MARKER_3`. Source file on disk unchanged.
 - [ ] Original files on disk are unchanged.
 
 ## Editor (`/edit`)
@@ -84,7 +85,7 @@ Use the committed files in `fixtures/` — not a real client PDF.
 | `fixtures/lines-and-text.pdf` | 1 | Rules survive a box edit |
 | `fixtures/image-and-text.pdf` | 1 | Image object survives a caption edit |
 | `fixtures/comma-amounts.pdf` | 1 | Comma amounts + multi-run POS line |
-| `fixtures/multi-page.pdf` | 3 | Split, extract, merge, untouched pages |
+| `fixtures/multi-page.pdf` | 3 | Split, extract, merge, reorder, delete/extract selected pages |
 | `fixtures/scan-image-only.pdf` | 1 | Scan-aware Enhance / OCR (no text operators) |
 | `fixtures/redact-secret.pdf` | 1 | Permanent redact: `SECRET` must vanish; Cover box must not |
 | `fixtures/acroform-blank.pdf` | 1 | Form fill + flatten; JS warning; non-flatten values visible |

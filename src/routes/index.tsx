@@ -332,7 +332,8 @@ function Home() {
           <p className="mt-3 max-w-2xl text-muted-foreground">
             Files never leave this tab. Split copies pages without a thumbnail pile — the thing
             Acrobat Organize Pages does that fills RAM. Reorder uses a small strip (and skips thumbs
-            on huge files). Open a 10-page chunk in Acrobat, make the edits, then merge.
+            on huge files) with select to delete or extract. Open a 10-page chunk in Acrobat, make
+            the edits, then merge.
           </p>
           <div className="mt-8">
             <PdfWorkbench />

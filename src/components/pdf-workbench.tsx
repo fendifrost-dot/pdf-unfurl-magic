@@ -113,17 +113,46 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
   };
 
   const sources = loaded ? [loaded, ...extra] : [];
+  const sourcePageCount = sources.reduce((n, file) => n + file.pages, 0);
   const orderChanged = loaded ? !slotsMatchFileOrder(slots, sources) : false;
-  const canSaveOrder = !!loaded && loaded.canMutate && slots.length >= 2 && !busy;
+  const pagesDropped = slots.length !== sourcePageCount;
+  const saveOrderLabel =
+    extra.length > 0 && !pagesDropped
+      ? `Merge ${extra.length + 1} files`
+      : pagesDropped
+        ? "Save remaining pages"
+        : "Save this page order";
+  const canSaveOrder =
+    !!loaded &&
+    loaded.canMutate &&
+    !busy &&
+    slots.length >= 1 &&
+    (slots.length >= 2 || pagesDropped);
 
   const saveCurrentOrder = () => {
-    if (!loaded?.canMutate) return;
+    if (!loaded?.canMutate || slots.length < 1) return;
     const combined = extra.length > 0;
     const filename = combined
       ? ensureNewPdfName(loaded.name, "merged.pdf")
-      : ensureNewPdfName(loaded.name, `${loaded.base}-reordered.pdf`);
-    void run(combined ? "Merging the copies" : "Reordering pages", async () => [
-      await copyPagesInOrder(refsFromSlots(slots), filename),
+      : ensureNewPdfName(
+          loaded.name,
+          pagesDropped ? `${loaded.base}-pages.pdf` : `${loaded.base}-reordered.pdf`,
+        );
+    void run(
+      combined
+        ? "Merging the copies"
+        : pagesDropped
+          ? "Saving remaining pages"
+          : "Reordering pages",
+      async () => [await copyPagesInOrder(refsFromSlots(slots), filename)],
+    );
+  };
+
+  const extractSelected = (picked: PageSlot[]) => {
+    if (!loaded?.canMutate) return;
+    const filename = ensureNewPdfName(loaded.name, `${loaded.base}-extract.pdf`);
+    void run("Extracting selected pages", async () => [
+      await copyPagesInOrder(refsFromSlots(picked), filename),
     ]);
   };
 
@@ -320,7 +349,8 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
               <TabsContent value="merge" className="mt-5 space-y-4">
                 <p className="text-sm text-muted-foreground">
                   The loaded file goes first, then anything you add below. Drag pages in the strip
-                  to change order before you save. Originals on disk are never overwritten.
+                  to change order, or tick pages to extract or delete, before you save. Originals on
+                  disk are never overwritten.
                 </p>
                 <PdfDropZone
                   multiple
@@ -361,7 +391,13 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                     ))}
                   </ol>
                 )}
-                <PageOrderStrip slots={slots} onReorder={setSlots} />
+                <PageOrderStrip
+                  slots={slots}
+                  onReorder={setSlots}
+                  onExtract={extractSelected}
+                  onDelete={setSlots}
+                  actionsDisabled={!!busy || !loaded.canMutate}
+                />
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     className="min-h-11 touch-manipulation"
@@ -369,7 +405,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                     onClick={saveCurrentOrder}
                     data-testid="save-page-order"
                   >
-                    {extra.length > 0 ? `Merge ${extra.length + 1} files` : "Save this page order"}
+                    {saveOrderLabel}
                   </Button>
                   {orderChanged && (
                     <Button
@@ -386,16 +422,23 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
 
               <TabsContent value="reorder" className="mt-5 space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Same pages, new order. Use this on a multi-page file or after adding PDFs on
-                  Merge. Save As writes a copy via page copy — nothing is uploaded and the source
-                  file is not touched.
+                  Organize Pages on this strip: reorder with drag or arrows, tick pages to extract
+                  (new PDF of the selection) or delete (drop them here, then Save). Save As writes a
+                  copy via page copy — nothing is uploaded and the source file is not touched.
                 </p>
                 {slots.length < 2 && (
                   <p className="text-sm text-muted-foreground">
-                    Need two or more pages. Open a multi-page PDF, or add files on the Merge tab.
+                    Need two or more pages to reorder or delete. Open a multi-page PDF, or add files
+                    on the Merge tab. Extract still works on a single selected page.
                   </p>
                 )}
-                <PageOrderStrip slots={slots} onReorder={setSlots} />
+                <PageOrderStrip
+                  slots={slots}
+                  onReorder={setSlots}
+                  onExtract={extractSelected}
+                  onDelete={setSlots}
+                  actionsDisabled={!!busy || !loaded.canMutate}
+                />
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
                     className="min-h-11 touch-manipulation"
@@ -403,7 +446,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                     onClick={saveCurrentOrder}
                     data-testid="save-page-order-tab"
                   >
-                    Save this page order
+                    {saveOrderLabel}
                   </Button>
                   {orderChanged && (
                     <Button

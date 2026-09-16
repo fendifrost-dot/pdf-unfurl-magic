@@ -31,7 +31,7 @@ const TOOLS = [
   {
     to: "/merge" as const,
     title: "Merge",
-    body: "Stack PDFs, then reorder pages.",
+    body: "Stack PDFs, then organize pages.",
     icon: FileStack,
   },
   {

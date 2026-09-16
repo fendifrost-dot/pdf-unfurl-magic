@@ -16,6 +16,7 @@ import { loadFixture, readManifest } from "./helpers/load-fixture.mjs";
 import {
   applyTextPatch,
   assertExportSizeSane,
+  deletePages,
   extractPages,
   getPageCount,
   mergeFiles,
@@ -95,6 +96,36 @@ test("reorder multi-page 3-1-2: markers follow the new order, source untouched",
   assert.doesNotMatch(first, /PAGE_MARKER_1/);
   assert.match(second, /PAGE_MARKER_1/);
   assert.match(third, /PAGE_MARKER_2/);
+});
+
+test("extract page 2 of multi-page: PAGE_MARKER_2 only, source untouched", async () => {
+  const { bytes } = await loadFixture("multi-page.pdf");
+  const original = Buffer.from(bytes);
+  const out = await extractPages(bytes, "multi-page", [2]);
+  assert.equal(out.pages, 1);
+  assert.equal(out.name, "multi-page-extract.pdf");
+  assert.equal(Buffer.from(bytes).equals(original), true);
+  assertExportSizeSane("extract page 2", out.bytes, bytes, { minRatio: 0.15, maxRatio: 1.1 });
+  const only = await pageContentLatin1(out.bytes, 1);
+  assert.match(only, /PAGE_MARKER_2/);
+  assert.doesNotMatch(only, /PAGE_MARKER_1/);
+  assert.doesNotMatch(only, /PAGE_MARKER_3/);
+});
+
+test("delete page 2 of multi-page: markers 1 then 3, source untouched", async () => {
+  const { bytes } = await loadFixture("multi-page.pdf");
+  const original = Buffer.from(bytes);
+  const out = await deletePages(bytes, [2], "multi-page");
+  assert.equal(out.pages, 2);
+  assert.equal(out.name, "multi-page-pages.pdf");
+  assert.equal(Buffer.from(bytes).equals(original), true);
+  assertExportSizeSane("delete page 2", out.bytes, bytes, { minRatio: 0.4, maxRatio: 1.2 });
+  const first = await pageContentLatin1(out.bytes, 1);
+  const second = await pageContentLatin1(out.bytes, 2);
+  assert.match(first, /PAGE_MARKER_1/);
+  assert.doesNotMatch(first, /PAGE_MARKER_2/);
+  assert.match(second, /PAGE_MARKER_3/);
+  assert.doesNotMatch(second, /PAGE_MARKER_2/);
 });
 
 test("a one-line text-patch export stays in a sane size band", async () => {
