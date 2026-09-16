@@ -4,6 +4,7 @@
  */
 import type { PDFDocumentProxy, PageViewport } from "pdfjs-dist";
 import { installMapPolyfills } from "./map-polyfill";
+import { installPromiseWithResolvers } from "./promise-with-resolvers-polyfill";
 import { isDesktopApp } from "./desktop";
 import { saveBytes } from "./file-export";
 import {
@@ -21,8 +22,9 @@ let pdfjsPromise: Promise<PdfJs> | null = null;
 export async function getPdfJs(): Promise<PdfJs> {
   if (!pdfjsPromise) {
     pdfjsPromise = (async () => {
-      // PDF.js reaches for Map.getOrInsertComputed; older engines (Electron) lack it.
+      // PDF.js reaches for Map.getOrInsertComputed and Promise.withResolvers.
       installMapPolyfills();
+      installPromiseWithResolvers();
 
       if (isDesktopApp()) {
         // Desktop runs the legacy build with a worker boot file that polyfills first.

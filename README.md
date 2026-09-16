@@ -24,6 +24,14 @@ npm run desktop
 On a Mac you can also double-click **Open PDF Relief.command** inside the project folder;
 on Windows, **Open PDF Relief.bat**.
 
+## Node version
+
+`engines.node` is **>=20**. Contributors can use Node 20 LTS or 22+. Automated tests
+(`npm test`, `test:scan`, `test:image-studio`, `test:smoke`) are written for both:
+Vitest installs a `Promise.withResolvers` polyfill before pdfjs loads, and
+`test:scan` uses `tsx --test` instead of Node’s `--experimental-strip-types` flag
+(Node 22+ only). GitHub Actions runs that suite on Node 20 and 22.
+
 ## Scripts
 
 | Script                      | What it does                                                              |
@@ -34,6 +42,9 @@ on Windows, **Open PDF Relief.bat**.
 | `npm run desktop:dev`       | Desktop app against the Vite dev server (127.0.0.1:47321)                 |
 | `npm run pack`              | Package installers with electron-builder (current platform)               |
 | `npm run pack:mac`          | Build unsigned Apple Silicon `.dmg` and `.zip` into `release/`            |
+| `npm test`                  | Vitest helpers, e-sign node tests, desktop static UI                      |
+| `npm run test:scan`         | Scan geometry (`tsx` + node:test; works on Node 20)                       |
+| `npm run test:image-studio` | Headless in-PDF photo replace check                                       |
 | `npm run test:smoke`        | Load the synthetic PDFs in `fixtures/`, check page counts and export size |
 | `npm run fixtures:generate` | Rebuild the committed files in `fixtures/`                                |
 

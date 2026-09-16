@@ -9,6 +9,9 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "main": "desktop/main.cjs",
   "scripts": {
     "dev": "vite dev",
@@ -18,7 +21,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run && tsx --test src/lib/esign.test.ts && node --test tests/desktop-static-ui.test.mjs",
-    "test:scan": "node --experimental-strip-types --test src/lib/scan/geometry.node-test.ts",
+    "test:scan": "tsx --test src/lib/scan/geometry.node-test.ts",
     "test:image-studio": "tsx scripts/verify-image-studio.mjs",
     "test:smoke": "node --test tests/smoke-pdf.test.mjs",
     "fixtures:generate": "tsx fixtures/generate.mjs",

@@ -2,10 +2,13 @@
 
 Run this after **edit**, **scan**, and **e-sign** have merged. The goal is “did we break load / page count / export?”, not a full design review.
 
-Automated first (about 30 seconds):
+Automated first (about 30 seconds). Needs **Node 20 or newer** (`engines.node`):
 
 ```bash
 npm install
+npm test
+npm run test:scan
+npm run test:image-studio
 npm run test:smoke
 ```
 
