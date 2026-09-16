@@ -268,6 +268,11 @@ export type AnnotationBurn = {
   width: number;
   height: number;
   text?: string;
+  /**
+   * Query that produced this mark via Find and permanently redact.
+   * Only set on `kind: "erase"`. Cover boxes never carry this.
+   */
+  searchQuery?: string;
 };
 
 export type ImageEdit = {

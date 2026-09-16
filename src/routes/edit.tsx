@@ -33,6 +33,7 @@ import { PdfDropZone } from "@/components/pdf-drop-zone";
 import { PdfPasswordDialog } from "@/components/pdf-password-dialog";
 import { ImageStudioPanel } from "@/components/image-studio-panel";
 import { AcroFormPanel } from "@/components/acroform-panel";
+import { RedactSearchPanel } from "@/components/redact-search-panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -78,6 +79,12 @@ import {
   type PdfViewBox,
 } from "@/lib/pdf-rotate";
 import { exportFileName } from "@/lib/pdf-marks";
+import {
+  eraseMarksFromHits,
+  markListLabel,
+  searchDocumentText,
+  type RedactSearchHit,
+} from "@/lib/pdf-redact-search";
 import { isDesktopApp, pickDesktopPdf, toDesktopBytes } from "@/lib/desktop";
 import { saveBytesWithResult } from "@/lib/file-export";
 import {
@@ -270,11 +277,8 @@ function readShowEditHighlight(): boolean {
   }
 }
 
-function markKindLabel(kind: AnnotationBurn["kind"]): string {
-  if (kind === "redact") return "cover box";
-  if (kind === "erase") return "permanent redact";
-  if (kind === "rect") return "rectangle";
-  return kind;
+function markKindLabel(mark: AnnotationBurn): string {
+  return markListLabel(mark);
 }
 
 const CANVAS_WIDTH = 720;
@@ -455,6 +459,12 @@ function Editor() {
   const [marks, setMarks] = useState<AnnotationBurn[]>([]);
   const [markTool, setMarkTool] = useState<MarkTool>("redact");
   const [draftMark, setDraftMark] = useState<Omit<AnnotationBurn, "id"> | null>(null);
+  const [redactQuery, setRedactQuery] = useState("");
+  const [redactHits, setRedactHits] = useState<RedactSearchHit[]>([]);
+  const [redactSelectedIds, setRedactSelectedIds] = useState<string[]>([]);
+  const [redactActiveId, setRedactActiveId] = useState<string | null>(null);
+  const [redactSearchBusy, setRedactSearchBusy] = useState(false);
+  const [redactSearchMessage, setRedactSearchMessage] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [status, setStatus] = useState<string | null>(null);
@@ -657,6 +667,11 @@ function Editor() {
         setEdits({});
         setImageEdits({});
         setMarks([]);
+        setRedactQuery("");
+        setRedactHits([]);
+        setRedactSelectedIds([]);
+        setRedactActiveId(null);
+        setRedactSearchMessage(null);
         setSelectedId(null);
         setSelectedImageId(null);
         setSourceCanvas(null);
@@ -710,6 +725,11 @@ function Editor() {
     setEdits({});
     setImageEdits({});
     setMarks([]);
+    setRedactQuery("");
+    setRedactHits([]);
+    setRedactSelectedIds([]);
+    setRedactActiveId(null);
+    setRedactSearchMessage(null);
     setSelectedId(null);
     setSelectedImageId(null);
     setSourceCanvas(null);
@@ -1785,6 +1805,58 @@ function Editor() {
     setDraftMark(null);
   };
 
+  const runRedactSearch = async () => {
+    if (!doc) return;
+    const needle = redactQuery.trim();
+    if (!needle) {
+      setRedactHits([]);
+      setRedactSelectedIds([]);
+      setRedactActiveId(null);
+      setRedactSearchMessage("Type the text to find.");
+      return;
+    }
+    setRedactSearchBusy(true);
+    setRedactSearchMessage(null);
+    try {
+      const hits = await searchDocumentText(doc.proxy, needle);
+      setRedactHits(hits);
+      setRedactSelectedIds(hits.map((hit) => hit.id));
+      const first = hits[0];
+      setRedactActiveId(first?.id ?? null);
+      if (first && first.page !== page) setPage(first.page);
+      setRedactSearchMessage(hits.length ? null : "No matches in this file.");
+    } catch {
+      setRedactHits([]);
+      setRedactSelectedIds([]);
+      setRedactActiveId(null);
+      setError("The text in this file could not be searched.");
+    } finally {
+      setRedactSearchBusy(false);
+    }
+  };
+
+  const confirmRedactSearch = () => {
+    if (!doc) return;
+    if (!doc.canMutate) {
+      setError(doc.restrictionMessage ?? VIEW_ONLY_ENCRYPTED_MESSAGE);
+      return;
+    }
+    const chosen = redactHits.filter((hit) => redactSelectedIds.includes(hit.id));
+    if (!chosen.length) return;
+    const nextMarks = eraseMarksFromHits(chosen);
+    setMarks((prev) => {
+      const existing = new Set(prev.map((mark) => mark.id));
+      return [...prev, ...nextMarks.filter((mark) => !existing.has(mark.id))];
+    });
+    setRedactHits([]);
+    setRedactSelectedIds([]);
+    setRedactActiveId(null);
+    setMarkTool("erase");
+    setApplyNotice(
+      `Marked ${chosen.length} hit${chosen.length === 1 ? "" : "s"} for permanent redaction. Save As… writes a new PDF. The original file is unchanged.`,
+    );
+  };
+
   const runCheck = async () => {
     if (!doc) return;
     setStatus("Checking the numbers on every page");
@@ -2085,6 +2157,15 @@ function Editor() {
   const markOverlay = [...marks.filter((m) => m.page === page), draftMark].filter(Boolean) as Array<
     Omit<AnnotationBurn, "id"> & { id?: string }
   >;
+  const searchHitRects = redactHits
+    .filter((hit) => hit.page === page)
+    .flatMap((hit) =>
+      hit.rects.map((rect, index) => ({
+        id: `${hit.id}-${index}`,
+        hitId: hit.id,
+        ...rect,
+      })),
+    );
 
   return (
     <AppShell hideFooter>
@@ -2339,7 +2420,9 @@ function Editor() {
                         ? "edit-mode-form"
                         : value === "text"
                           ? "edit-mode-text"
-                          : undefined
+                          : value === "mark"
+                            ? "edit-mode-mark"
+                            : undefined
                     }
                     onClick={() => {
                       setMode(value);
@@ -2610,32 +2693,53 @@ function Editor() {
                           )}
                         />
                       )}
-                      {markOverlay.map((mark, index) => (
-                        <div
-                          key={mark.id ?? `draft-${index}`}
-                          style={boxStyle(
-                            mark.x,
-                            mark.y,
-                            mark.width,
-                            mark.height,
-                            scale,
-                            viewSize,
-                            overlayLayout,
-                          )}
-                          className={
-                            mark.kind === "erase"
-                              ? "pointer-events-none absolute bg-black ring-2 ring-red-700"
-                              : mark.kind === "redact"
-                                ? "pointer-events-none absolute bg-black"
-                                : mark.kind === "highlight"
-                                  ? "pointer-events-none absolute border border-amber-500/70 bg-amber-300/45"
-                                  : mark.kind === "underline"
-                                    ? "pointer-events-none absolute bg-transparent shadow-[inset_0_-3px_0_0_rgb(185,50,35)]"
-                                    : mark.kind === "note"
-                                      ? "pointer-events-none absolute overflow-hidden border border-amber-700/40 bg-amber-200/95 text-[10px] leading-tight text-foreground/80"
-                                      : "pointer-events-none absolute border-2 border-primary bg-primary/10"
-                          }
-                        >
+                        {mode === "mark" &&
+                          searchHitRects.map((rect) => (
+                            <div
+                              key={rect.id}
+                              data-testid="redact-search-overlay"
+                              style={boxStyle(
+                                rect.x,
+                                rect.y,
+                                rect.width,
+                                rect.height,
+                                scale,
+                                viewSize,
+                                overlayLayout,
+                              )}
+                              className={
+                                rect.hitId === redactActiveId
+                                  ? "pointer-events-none absolute bg-red-600/30 ring-2 ring-red-800"
+                                  : "pointer-events-none absolute bg-red-500/20 ring-1 ring-red-700/80"
+                              }
+                            />
+                          ))}
+                        {markOverlay.map((mark, index) => (
+                          <div
+                            key={mark.id ?? `draft-${index}`}
+                            style={boxStyle(
+                              mark.x,
+                              mark.y,
+                              mark.width,
+                              mark.height,
+                              scale,
+                              viewSize,
+                              overlayLayout,
+                            )}
+                            className={
+                              mark.kind === "erase"
+                                ? "pointer-events-none absolute bg-black ring-2 ring-red-700"
+                                : mark.kind === "redact"
+                                  ? "pointer-events-none absolute bg-black"
+                                  : mark.kind === "highlight"
+                                    ? "pointer-events-none absolute border border-amber-500/70 bg-amber-300/45"
+                                    : mark.kind === "underline"
+                                      ? "pointer-events-none absolute bg-transparent shadow-[inset_0_-3px_0_0_rgb(185,50,35)]"
+                                      : mark.kind === "note"
+                                        ? "pointer-events-none absolute overflow-hidden border border-amber-700/40 bg-amber-200/95 text-[10px] leading-tight text-foreground/80"
+                                        : "pointer-events-none absolute border-2 border-primary bg-primary/10"
+                            }
+                          >
                           {mark.kind === "note" ? (
                             <span className="block truncate px-1 py-0.5">
                               {mark.text || "Note"}
@@ -2659,7 +2763,7 @@ function Editor() {
                 {mode === "image" &&
                   `${images.length} embedded photo${images.length === 1 ? "" : "s"} on this page. Only the selected image is decoded.`}
                 {mode === "mark" &&
-                  "Drag a highlight, underline, note, cover box, or permanent redaction rectangle. Highlights and notes save as real PDF annotations. A cover box draws an opaque box — the text or image underneath is still in the file. Redact (permanent) removes intersecting text operators and punches image pixels in the exported copy; that cannot be undone."}
+                  "Find text and mark hits for permanent redaction, or drag a highlight, underline, note, cover box, or permanent redaction rectangle. Cover boxes only hide text — they are not search results. Highlights and notes save as real PDF annotations. Redact (permanent) removes intersecting text operators and punches image pixels in the exported copy; that cannot be undone."}
                 {mode === "form" &&
                   (formReport.fillableCount
                     ? `${formReport.fillableCount} fillable AcroForm field${formReport.fillableCount === 1 ? "" : "s"}. Click a box or use the list. Save As fills, then flattens to a static PDF.`
@@ -2710,6 +2814,30 @@ function Editor() {
                     intersecting text and punches image pixels; it cannot be undone after export.
                     The original file is never changed.
                   </p>
+                  <RedactSearchPanel
+                    query={redactQuery}
+                    onQueryChange={setRedactQuery}
+                    hits={redactHits}
+                    selectedIds={redactSelectedIds}
+                    activeId={redactActiveId}
+                    busy={redactSearchBusy || !!status}
+                    canMutate={doc.canMutate}
+                    message={redactSearchMessage}
+                    onFind={() => void runRedactSearch()}
+                    onToggle={(id) =>
+                      setRedactSelectedIds((prev) =>
+                        prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+                      )
+                    }
+                    onToggleAll={(on) =>
+                      setRedactSelectedIds(on ? redactHits.map((hit) => hit.id) : [])
+                    }
+                    onHighlight={(hit) => {
+                      setRedactActiveId(hit.id);
+                      if (hit.page !== page) setPage(hit.page);
+                    }}
+                    onConfirm={confirmRedactSearch}
+                  />
                   <div className="mt-4 grid grid-cols-2 gap-2">
                     <Button
                       size="sm"
@@ -2791,7 +2919,7 @@ function Editor() {
                         <li key={mark.id} className="space-y-1">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-muted-foreground">
-                              p{mark.page} · {markKindLabel(mark.kind)}
+                              p{mark.page} · {markKindLabel(mark)}
                             </span>
                             <Button
                               size="sm"

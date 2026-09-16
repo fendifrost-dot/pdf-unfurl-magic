@@ -389,10 +389,10 @@ Visual black boxes are **not** redaction. Underlying operators remain.
 | [firstlookmedia/pdf-redact-tools](https://github.com/firstlookmedia/pdf-redact-tools) | archived | **skip** |
 | Stirling redaction (MIT parts) | mixed open-core | **port algorithms** from MIT files only after reading `LICENSE` carve-outs |
 
-Honest redact for this app (MVP landed): walk page content streams, drop or rewrite intersecting `Tj`/`TJ`/`'`/`"`, punch Flate RGB image XObjects in place (reuse #19), strip overlapping annots, then burn a black appearance. Cover box (`kind: "redact"`) remains visual-only. Gaps are listed in `src/lib/pdf-redact.ts` (`PERMANENT_REDACT_GAPS`) — JPEG is replaced entirely, Form XObject text is form-space only, vectors are covered not erased. Never label a path “redaction” if `SECRET` is still extractable.
+Honest redact for this app (MVP landed): walk page content streams, drop or rewrite intersecting `Tj`/`TJ`/`'`/`"`, punch Flate RGB image XObjects in place (reuse #19), strip overlapping annots, then burn a black appearance. Cover box (`kind: "redact"`) remains visual-only. **Find and permanently redact** (`src/lib/pdf-redact-search.ts`) uses pdf.js text content to mark hits as `erase` — never as cover boxes. Gaps are listed in `src/lib/pdf-redact.ts` (`PERMANENT_REDACT_GAPS`) — JPEG is replaced entirely, Form XObject text is form-space only, vectors are covered not erased. Never label a path “redaction” if `SECRET` is still extractable.
 
 | **Action** | **port algorithms** (content-stream erasure + image punch). |
-| **Integration** | `src/lib/pdf-redact.ts` `kind === "erase"`; Cover box stays `kind === "redact"` in `pdf-marks.ts`. |
+| **Integration** | `src/lib/pdf-redact.ts` `kind === "erase"`; Cover box stays `kind === "redact"` in `pdf-marks.ts`; search hits become `erase` via `pdf-redact-search.ts`. |
 | **Effort** | MVP landed; Form-XObject CTM and CID glyph-split remain. |
 
 **2-week verdict:** signature_pad + pdf.js editor for live marks; flatten-on-export for redact; no AGPL e-sign suite.
