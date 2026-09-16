@@ -1,9 +1,9 @@
 # PDF Relief
 
 A PDF workshop that runs on your own machine — split, extract, merge, reorder pages,
-click-to-edit text, fill and flatten AcroForm fields, scan pages into a multi-page PDF,
-and **E-Sign** a PDF. There is no account, no database, and nothing is uploaded: files stay
-on the computer. Ships in two shapes from this one repo:
+rotate pages, click-to-edit text, fill and flatten AcroForm fields, scan pages into a
+multi-page PDF, and **E-Sign** a PDF. There is no account, no database, and nothing is
+uploaded: files stay on the computer. Ships in two shapes from this one repo:
 
 - **Browser** — the TanStack Start + Vite web app, including a phone-sized
   shell (bottom nav, large tap targets, camera scan, Save / Share).

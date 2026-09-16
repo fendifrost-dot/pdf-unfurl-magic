@@ -7,9 +7,11 @@ import {
   copyPagesInOrder,
   extractPages,
   getPageCount,
+  listPageRotations,
   mergeFiles,
   moveIndex,
   reorderPages,
+  rotatePagesBy,
 } from "./pdf-tools";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
@@ -105,5 +107,18 @@ describe("reorder pages", () => {
     expect(extracted.pages).toBe(2);
     expect(await markerOnPage(extracted.bytes, 1)).toContain("PAGE_MARKER_3");
     expect(await markerOnPage(extracted.bytes, 2)).toContain("PAGE_MARKER_1");
+  });
+
+  it("keeps /Rotate on a page when that page is moved in a 3-1-2 reorder", async () => {
+    const source = load("multi-page.pdf");
+    const before = snapshot(source);
+    const rotated = await rotatePagesBy(source, [2], 90);
+    expect(await listPageRotations(asBuffer(rotated))).toEqual([0, 90, 0]);
+    const out = await reorderPages(asBuffer(rotated), [3, 1, 2], "multi-page");
+    expect(await markerOnPage(out.bytes, 1)).toContain("PAGE_MARKER_3");
+    expect(await markerOnPage(out.bytes, 2)).toContain("PAGE_MARKER_1");
+    expect(await markerOnPage(out.bytes, 3)).toContain("PAGE_MARKER_2");
+    expect(await listPageRotations(asBuffer(out.bytes))).toEqual([0, 0, 90]);
+    expect(snapshot(source)).toEqual(before);
   });
 });
