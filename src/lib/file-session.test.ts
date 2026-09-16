@@ -33,6 +33,10 @@ describe("Save As / Close document copy", () => {
     expect(ensureNewPdfName("multi-page.pdf", "multi-page-reordered.pdf")).toBe(
       "multi-page-reordered.pdf",
     );
+    expect(ensureNewPdfName("multi-page.pdf", "multi-page-extract.pdf")).toBe(
+      "multi-page-extract.pdf",
+    );
+    expect(ensureNewPdfName("multi-page.pdf", "multi-page-pages.pdf")).toBe("multi-page-pages.pdf");
     expect(isSamePdfBaseName("June_statement.pdf", "June_statement.pdf")).toBe(true);
     expect(isSamePdfBaseName("June_statement.pdf", "June_statement-edited.pdf")).toBe(false);
   });

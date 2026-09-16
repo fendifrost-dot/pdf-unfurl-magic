@@ -100,7 +100,7 @@ describe("reorder pages", () => {
     expect(await markerOnPage(out.bytes, 3)).toContain("PAGE_MARKER_1");
   });
 
-  it("rejects a partial order so extract stays the tool for dropping pages", async () => {
+  it("rejects a partial order so extract or delete is used to drop pages", async () => {
     const source = load("multi-page.pdf");
     await expect(reorderPages(source, [3, 1], "multi-page")).rejects.toThrow(/all 3 pages/i);
     const extracted = await extractPages(source, "multi-page", [3, 1]);

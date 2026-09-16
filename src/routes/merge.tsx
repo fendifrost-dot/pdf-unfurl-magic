@@ -29,8 +29,9 @@ function MergePage() {
           Stack the pieces back into one file.
         </h1>
         <p className="mt-4 max-w-2xl text-muted-foreground">
-          Open the first PDF, add the rest, drag pages into order, then save or share. Works in the
-          phone browser and in the desktop app. The files you opened are never overwritten.
+          Open the first PDF, add the rest, drag or tick pages to reorder, delete, or extract, then
+          save or share. Works in the phone browser and in the desktop app. The files you opened are
+          never overwritten.
         </p>
         <div className="mt-8">
           <PdfWorkbench initialTab="merge" />

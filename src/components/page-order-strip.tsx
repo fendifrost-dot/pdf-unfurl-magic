@@ -1,24 +1,74 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, GripVertical, Layers, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PAGE_THUMB_LIMIT, usePageThumbs } from "@/hooks/use-page-thumbs";
-import { moveIndex, type PageSlot } from "@/lib/page-order";
+import { moveIndex, slotsAfterDelete, slotsForExtract, type PageSlot } from "@/lib/page-order";
 
 type Props = {
   slots: PageSlot[];
   onReorder: (next: PageSlot[]) => void;
+  onExtract?: (picked: PageSlot[]) => void;
+  onDelete?: (remaining: PageSlot[]) => void;
+  actionsDisabled?: boolean;
 };
 
-export function PageOrderStrip({ slots, onReorder }: Props) {
+export function PageOrderStrip({
+  slots,
+  onReorder,
+  onExtract,
+  onDelete,
+  actionsDisabled = false,
+}: Props) {
   const thumbs = usePageThumbs(slots);
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const live = new Set(slots.map((slot) => slot.id));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [slots]);
 
   if (slots.length === 0) return null;
+
+  const selectedCount = slots.filter((slot) => selectedIds.has(slot.id)).length;
+  const canExtract = !actionsDisabled && selectedCount > 0 && !!onExtract;
+  const canDelete =
+    !actionsDisabled && selectedCount > 0 && selectedCount < slots.length && !!onDelete;
 
   const move = (from: number, to: number) => {
     if (from === to) return;
     onReorder(moveIndex(slots, from, to));
+  };
+
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const extractSelected = () => {
+    if (!onExtract) return;
+    onExtract(slotsForExtract(slots, selectedIds));
+  };
+
+  const deleteSelected = () => {
+    if (!onDelete) return;
+    const remaining = slotsAfterDelete(slots, selectedIds);
+    setSelectedIds(new Set());
+    onDelete(remaining);
   };
 
   return (
@@ -29,7 +79,9 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
             Page order · {slots.length} page{slots.length === 1 ? "" : "s"}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Drag or use the arrows. Save As writes a new PDF; the files you opened stay as they are.
+            Drag or use the arrows to reorder. Tick pages, then extract a new PDF of the selection
+            or delete them from this strip. Save As writes a copy; the files you opened stay as they
+            are.
           </p>
           <p
             className="mt-1 text-sm font-medium"
@@ -37,6 +89,15 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
             aria-live="polite"
           >
             Original pages in this order: {slots.map((slot) => slot.sourcePage).join(" · ")}
+          </p>
+          <p
+            className="mt-1 text-xs text-muted-foreground"
+            data-testid="page-order-selected-count"
+            aria-live="polite"
+          >
+            {selectedCount === 0
+              ? "No pages selected."
+              : `${selectedCount} page${selectedCount === 1 ? "" : "s"} selected.`}
           </p>
         </div>
         {slots.length > PAGE_THUMB_LIMIT && (
@@ -46,15 +107,48 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
           </p>
         )}
       </div>
+      {(onExtract || onDelete) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {onExtract && (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 touch-manipulation"
+              disabled={!canExtract}
+              onClick={extractSelected}
+              data-testid="extract-selected-pages"
+            >
+              <Layers className="size-3.5" />
+              Extract selected
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 touch-manipulation"
+              disabled={!canDelete}
+              onClick={deleteSelected}
+              data-testid="delete-selected-pages"
+            >
+              <Trash2 className="size-3.5" />
+              Delete selected
+            </Button>
+          )}
+        </div>
+      )}
       <ol className="mt-3 flex gap-3 overflow-x-auto pb-1">
         {slots.map((slot, index) => {
           const thumb = thumbs[slot.id];
           const isOver = over === index && dragging !== null && dragging !== index;
+          const selected = selectedIds.has(slot.id);
           return (
             <li
               key={slot.id}
               data-testid={`page-slot-${index}`}
               data-source-page={slot.sourcePage}
+              data-selected={selected ? "true" : "false"}
+              aria-selected={selected}
               className={[
                 "w-[132px] shrink-0 rounded-md",
                 isOver ? "ring-2 ring-primary/40" : "",
@@ -88,14 +182,31 @@ export function PageOrderStrip({ slots, onReorder }: Props) {
               <div
                 className={[
                   "overflow-hidden rounded-md border bg-paper",
-                  dragging === index ? "opacity-60" : "border-border",
+                  dragging === index ? "opacity-60" : "",
+                  selected ? "border-primary ring-2 ring-primary/30" : "border-border",
                 ].join(" ")}
               >
-                <div className="flex items-center justify-between gap-1 px-1.5 py-1 text-muted-foreground">
+                <div className="flex items-center justify-between gap-1 px-1 py-0.5 text-muted-foreground">
                   <GripVertical className="size-3.5 shrink-0" aria-hidden />
-                  <span className="text-gauge truncate text-[10px]" title={slot.sourceName}>
+                  <span
+                    className="text-gauge min-w-0 flex-1 truncate text-[10px]"
+                    title={slot.sourceName}
+                  >
                     {slot.sourceName}
                   </span>
+                  <div
+                    className="flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={selected}
+                      data-testid={`select-page-${index}`}
+                      aria-label={`Select position ${index + 1}, original page ${slot.sourcePage}`}
+                      onCheckedChange={(value) => toggleSelected(slot.id, value === true)}
+                    />
+                  </div>
                 </div>
                 <div className="relative">
                   {thumb ? (

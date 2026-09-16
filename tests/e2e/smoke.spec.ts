@@ -122,4 +122,59 @@ test.describe("PDF Relief fixture smoke", () => {
     expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
     expect(bytes.toString("latin1")).toMatch(/PAGE_MARKER_3/);
   });
+
+  test("merge bench: extract selected page 2", async ({ page }) => {
+    await page.goto(`${baseURL}/merge`);
+    await dropPdf(page, "main", "multi-page.pdf");
+    await expect(page.getByText(/3 pages/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("page-order-strip")).toBeVisible();
+    await page.getByTestId("select-page-1").click();
+    await expect(page.getByTestId("page-order-selected-count")).toHaveText(/1 page selected/i);
+    await page.getByTestId("extract-selected-pages").click();
+    await expect(page.getByText(/Ready to save/i)).toBeVisible({ timeout: 15_000 });
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page
+        .getByRole("button", { name: /Save As/i })
+        .first()
+        .click(),
+    ]);
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.concat(chunks);
+    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(bytes.toString("latin1")).toMatch(/PAGE_MARKER_2/);
+    expect(bytes.toString("latin1")).not.toMatch(/PAGE_MARKER_1/);
+    expect(bytes.toString("latin1")).not.toMatch(/PAGE_MARKER_3/);
+  });
+
+  test("merge bench: delete selected page 2 then Save As remaining 1 then 3", async ({ page }) => {
+    await page.goto(`${baseURL}/merge`);
+    await dropPdf(page, "main", "multi-page.pdf");
+    await expect(page.getByText(/3 pages/i)).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId("select-page-1").click();
+    await page.getByTestId("delete-selected-pages").click();
+    await expect(page.getByTestId("page-order-sequence")).toHaveText(
+      /Original pages in this order:\s*1\s*·\s*3/,
+    );
+    await page.getByTestId("save-page-order").click();
+    await expect(page.getByText(/Ready to save/i)).toBeVisible({ timeout: 15_000 });
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page
+        .getByRole("button", { name: /Save As/i })
+        .first()
+        .click(),
+    ]);
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.concat(chunks);
+    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(bytes.toString("latin1")).toMatch(/PAGE_MARKER_1/);
+    expect(bytes.toString("latin1")).toMatch(/PAGE_MARKER_3/);
+  });
 });

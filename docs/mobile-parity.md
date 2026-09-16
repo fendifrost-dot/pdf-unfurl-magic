@@ -9,7 +9,7 @@ Electron app. Edit-fidelity fonts and e-sign crypto are other lanes.
 | Edit text          | `/edit`, click line, side panel       | `/edit`, tap highlighted boxes, bottom drawer                                |
 | One page in memory | Yes                                   | Yes — canvas width follows the screen; DPR capped at 1.5 on narrow viewports |
 | Split / extract    | Home bench + File menu                | `/split` + bottom nav + home shortcut                                        |
-| Merge / reorder    | Home bench + Merge tab page strip     | `/merge` + Reorder tab; drag or arrows; Save As only                         |
+| Merge / reorder    | Home bench + Merge tab page strip     | `/merge` + Reorder tab; drag, arrows, select to delete/extract; Save As only |
 | Scan               | File menu → Scan (same route)         | `/scan` camera + photo library. Auto-crop / OCR TODO for scan lane           |
 | Save               | Native Save dialog                    | Download                                                                     |
 | Share              | Not used (desktop save)               | OS share sheet when `canShare({ files })`                                    |

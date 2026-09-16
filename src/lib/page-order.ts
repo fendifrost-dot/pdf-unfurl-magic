@@ -109,3 +109,33 @@ export function slotsMatchFileOrder(
 export function refsFromSlots(slots: readonly PageSlot[]): PageRef[] {
   return slots.map((slot) => ({ bytes: slot.sourceBytes, page: slot.sourcePage }));
 }
+
+/** Selected slots in current strip order (Acrobat extract uses this order). */
+export function slotsForExtract(
+  slots: readonly PageSlot[],
+  selectedIds: ReadonlySet<string>,
+): PageSlot[] {
+  const picked = slots.filter((slot) => selectedIds.has(slot.id));
+  if (picked.length === 0) {
+    throw new Error("Select at least one page to extract.");
+  }
+  return picked;
+}
+
+/**
+ * Drop selected slots; remaining keep strip order.
+ * Refuses an empty document — Save As still needs at least one page.
+ */
+export function slotsAfterDelete(
+  slots: readonly PageSlot[],
+  selectedIds: ReadonlySet<string>,
+): PageSlot[] {
+  const remaining = slots.filter((slot) => !selectedIds.has(slot.id));
+  if (remaining.length === slots.length) {
+    throw new Error("Select at least one page to delete.");
+  }
+  if (remaining.length === 0) {
+    throw new Error("Keep at least one page.");
+  }
+  return remaining;
+}

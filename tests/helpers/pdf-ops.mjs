@@ -3,7 +3,16 @@
  * Mirrors src/lib/pdf-tools.ts (load / split / extract / merge / save) so
  * feature PRs can assert page counts and export size without importing TS.
  */
-import { PDFDocument, PDFArray, PDFName, PDFRawStream, PDFRef, StandardFonts, decodePDFRawStream, rgb } from "pdf-lib";
+import {
+  PDFDocument,
+  PDFArray,
+  PDFName,
+  PDFRawStream,
+  PDFRef,
+  StandardFonts,
+  decodePDFRawStream,
+  rgb,
+} from "pdf-lib";
 
 function asBytes(bytes) {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -40,14 +49,33 @@ export async function splitIntoChunks(bytes, baseName, chunkSize) {
 }
 
 export async function extractPages(bytes, baseName, pages) {
-  const src = await load(bytes);
-  const doc = await PDFDocument.create();
-  const copied = await doc.copyPages(
-    src,
-    pages.map((p) => p - 1),
+  return copyPagesInOrder(
+    pages.map((page) => ({ bytes, page })),
+    `${baseName}-extract.pdf`,
   );
-  copied.forEach((p) => doc.addPage(p));
-  return { name: `${baseName}-extract.pdf`, bytes: await doc.save(), pages: pages.length };
+}
+
+export async function deletePages(bytes, pagesToRemove, baseName = "document") {
+  const src = await load(bytes);
+  const total = src.getPageCount();
+  if (total < 1) throw new Error("This file has no pages to edit.");
+  const remove = new Set();
+  for (const page of pagesToRemove) {
+    if (!Number.isInteger(page) || page < 1 || page > total) {
+      throw new Error(`Page ${page} is outside 1–${total}.`);
+    }
+    remove.add(page);
+  }
+  if (remove.size === 0) throw new Error("Select at least one page to delete.");
+  if (remove.size >= total) throw new Error("Keep at least one page.");
+  const keep = [];
+  for (let page = 1; page <= total; page++) {
+    if (!remove.has(page)) keep.push(page);
+  }
+  return copyPagesInOrder(
+    keep.map((page) => ({ bytes, page })),
+    `${baseName}-pages.pdf`,
+  );
 }
 
 export async function mergeFiles(inputs) {
@@ -117,7 +145,10 @@ function streamLatin1(doc, refOrStream) {
     return Buffer.from(decodePDFRawStream(obj).decode()).toString("latin1");
   }
   if (obj instanceof PDFArray) {
-    return obj.asArray().map((item) => streamLatin1(doc, item)).join("");
+    return obj
+      .asArray()
+      .map((item) => streamLatin1(doc, item))
+      .join("");
   }
   return "";
 }
@@ -128,7 +159,7 @@ export async function pageContentLatin1(bytes, pageNumber) {
   const page = doc.getPages()[pageNumber - 1];
   if (!page) return "";
   const raw = streamLatin1(doc, page.node.get(PDFName.of("Contents")));
-  // pdf-lib copyPages often rewrites Tj strings as hex: <504147...> 
+  // pdf-lib copyPages often rewrites Tj strings as hex: <504147...>
   return raw.replace(/<([0-9A-Fa-f]+)>/g, (_, hex) => Buffer.from(hex, "hex").toString("latin1"));
 }
 
