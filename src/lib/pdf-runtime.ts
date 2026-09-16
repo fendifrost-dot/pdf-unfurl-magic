@@ -43,10 +43,13 @@ export async function getPdfJs(): Promise<PdfJs> {
   return pdfjsPromise;
 }
 
-export async function openDocument(bytes: ArrayBuffer): Promise<PDFDocumentProxy> {
+export async function openDocument(bytes: ArrayBuffer, password = ""): Promise<PDFDocumentProxy> {
   const pdfjs = await getPdfJs();
   // Copy: PDF.js transfers/detaches the buffer it is given.
-  return pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)) }).promise;
+  return pdfjs.getDocument({
+    data: new Uint8Array(bytes.slice(0)),
+    password,
+  }).promise;
 }
 
 export type TextLine = {

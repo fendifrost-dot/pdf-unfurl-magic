@@ -31,7 +31,7 @@ import {
   type PDFField,
 } from "pdf-lib";
 import { extractShownStrings, tokenizeContentStream } from "./pdf-content-stream";
-import { loadPdfDocument } from "./pdf-io";
+import { loadPdfDocument, PdfEncryptedMutationError } from "./pdf-io";
 
 export const SAMPLE_ACROFORM_FIELDS = {
   fullName: "fullName",
@@ -256,7 +256,15 @@ function collectWarnings(hasXfa: boolean, fields: AcroFormField[]): string[] {
 }
 
 export async function inspectAcroForm(bytes: ArrayBuffer): Promise<AcroFormReport> {
-  const doc = await loadPdfDocument(bytes);
+  let doc;
+  try {
+    doc = await loadPdfDocument(bytes);
+  } catch (error) {
+    if (error instanceof PdfEncryptedMutationError) {
+      return emptyAcroFormReport();
+    }
+    throw error;
+  }
   if (!catalogHasAcroForm(doc)) return emptyAcroFormReport();
 
   const hasXfa = catalogHasXfa(doc);

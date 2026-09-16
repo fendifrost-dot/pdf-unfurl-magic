@@ -7,7 +7,8 @@
       "kind": "simple-text",
       "summary": "One Helvetica page with a REPLACE_ME line.",
       "bytes": 1101,
-      "maxBytes": 8000
+      "maxBytes": 8000,
+      "expect": "opens"
     },
     {
       "file": "multi-font.pdf",
@@ -15,7 +16,8 @@
       "kind": "multi-font",
       "summary": "Helvetica, Helvetica-Bold, Times-Roman, Courier on one page.",
       "bytes": 1251,
-      "maxBytes": 12000
+      "maxBytes": 12000,
+      "expect": "opens"
     },
     {
       "file": "lines-and-text.pdf",
@@ -23,7 +25,8 @@
       "kind": "lines-text",
       "summary": "Table rules plus a signature line. Neighbouring vectors must survive edits.",
       "bytes": 1436,
-      "maxBytes": 12000
+      "maxBytes": 12000,
+      "expect": "opens"
     },
     {
       "file": "image-and-text.pdf",
@@ -31,7 +34,8 @@
       "kind": "image-text",
       "summary": "Embedded PNG plus a caption. Image must remain a PDF image object.",
       "bytes": 1366,
-      "maxBytes": 20000
+      "maxBytes": 20000,
+      "expect": "opens"
     },
     {
       "file": "comma-amounts.pdf",
@@ -39,7 +43,8 @@
       "kind": "comma-amounts",
       "summary": "Comma amounts plus a multi-run POS line for text-extract / font-mimic QA.",
       "bytes": 1376,
-      "maxBytes": 12000
+      "maxBytes": 12000,
+      "expect": "opens"
     },
     {
       "file": "multi-page.pdf",
@@ -47,7 +52,8 @@
       "kind": "multi-page",
       "summary": "Three labeled pages for split / extract / merge and untouched-page checks.",
       "bytes": 1858,
-      "maxBytes": 16000
+      "maxBytes": 16000,
+      "expect": "opens"
     },
     {
       "file": "scan-image-only.pdf",
@@ -55,7 +61,8 @@
       "kind": "scan-image",
       "summary": "Full-page bitmap, no text operators. Scan-aware edit / OCR target.",
       "bytes": 2607,
-      "maxBytes": 90000
+      "maxBytes": 90000,
+      "expect": "opens"
     },
     {
       "file": "redact-secret.pdf",
@@ -63,7 +70,8 @@
       "kind": "redact-secret",
       "summary": "KEEP / SECRET / VISIBLE plus a magenta-cyan PNG for permanent redact QA.",
       "bytes": 1268,
-      "maxBytes": 20000
+      "maxBytes": 20000,
+      "expect": "opens"
     },
     {
       "file": "acroform-blank.pdf",
@@ -71,7 +79,17 @@
       "kind": "acroform-blank",
       "summary": "Blank AcroForm (5 widgets: name, email, city, size, agree). Email has format/calculate JS so Form UI must warn.",
       "bytes": 7925,
-      "maxBytes": 24000
+      "maxBytes": 24000,
+      "expect": "opens"
+    },
+    {
+      "file": "password-open.pdf",
+      "pages": 1,
+      "kind": "password-open",
+      "summary": "User-password encrypted page. Open path must prompt; password is pdfrelief.",
+      "bytes": 921,
+      "maxBytes": 8000,
+      "expect": "opens-with-prompt"
     }
   ]
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Highlighter, Loader2, Scissors, Layers, FileStack } from "lucide-react";
 import { PdfDropZone } from "@/components/pdf-drop-zone";
+import { PdfPasswordDialog } from "@/components/pdf-password-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,16 +11,20 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { formatBytes, parsePageRanges } from "@/lib/pdf-runtime";
+import { PDF_OPEN_DAMAGED_MESSAGE } from "@/lib/pdf-open";
+import { useOpenPdf } from "@/hooks/use-open-pdf";
 import { FileActions } from "@/components/file-actions";
-import {
-  extractPages,
-  getPageCount,
-  mergeFiles,
-  splitIntoChunks,
-  type SplitOutput,
-} from "@/lib/pdf-tools";
+import { extractPages, mergeFiles, splitIntoChunks, type SplitOutput } from "@/lib/pdf-tools";
 
-type Loaded = { name: string; base: string; size: number; bytes: ArrayBuffer; pages: number };
+type Loaded = {
+  name: string;
+  base: string;
+  size: number;
+  bytes: ArrayBuffer;
+  pages: number;
+  canMutate: boolean;
+  restrictionMessage: string | null;
+};
 type ToolTab = "split" | "extract" | "merge";
 
 export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab }) {
@@ -30,35 +35,40 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
   const [results, setResults] = useState<SplitOutput[]>([]);
   const [chunk, setChunk] = useState("25");
   const [ranges, setRanges] = useState("1-3");
+  const { prompt: passwordPrompt, openPdf, cancelPrompt } = useOpenPdf();
 
   const reset = () => {
     setResults([]);
     setError(null);
   };
 
-  const openFile = async (files: File[]) => {
-    const file = files[0];
-    if (!file) return;
+  const openBytes = async (name: string, bytes: ArrayBuffer, size: number, password?: string) => {
     reset();
     setBusy("Reading the file in this tab");
     try {
-      const bytes = await file.arrayBuffer();
-      const pages = await getPageCount(bytes);
+      const opened = await openPdf(name, bytes, password);
+      if (!opened) return;
       setLoaded({
-        name: file.name,
-        base: file.name.replace(/\.pdf$/i, ""),
-        size: file.size,
-        bytes,
-        pages,
+        name,
+        base: name.replace(/\.pdf$/i, ""),
+        size,
+        bytes: opened.bytes,
+        pages: opened.pageCount,
+        canMutate: opened.canMutate,
+        restrictionMessage: opened.restrictionMessage,
       });
     } catch {
       setLoaded(null);
-      setError(
-        "That file could not be opened. It may be password-protected, or the PDF structure is damaged. Try re-exporting it from the app that made it.",
-      );
+      setError(PDF_OPEN_DAMAGED_MESSAGE);
     } finally {
       setBusy(null);
     }
+  };
+
+  const openFile = async (files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    await openBytes(file.name, await file.arrayBuffer(), file.size);
   };
 
   const run = async (label: string, work: () => Promise<SplitOutput[]>) => {
@@ -75,6 +85,22 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
 
   return (
     <div className="p-0">
+      <PdfPasswordDialog
+        open={!!passwordPrompt}
+        fileName={passwordPrompt?.name ?? ""}
+        incorrect={passwordPrompt?.incorrect ?? false}
+        busy={!!busy}
+        onUnlock={(password) => {
+          if (!passwordPrompt) return;
+          void openBytes(
+            passwordPrompt.name,
+            passwordPrompt.bytes,
+            passwordPrompt.bytes.byteLength,
+            password,
+          );
+        }}
+        onCancel={cancelPrompt}
+      />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">PDF tools</p>
@@ -139,6 +165,14 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
               </Button>
             </div>
 
+            {loaded.restrictionMessage && (
+              <Alert className="mt-4" data-testid="pdf-view-only-banner">
+                <AlertTriangle className="size-4" />
+                <AlertTitle>View only</AlertTitle>
+                <AlertDescription>{loaded.restrictionMessage}</AlertDescription>
+              </Alert>
+            )}
+
             <Tabs defaultValue={initialTab} className="mt-5">
               <TabsList className="h-auto w-full sm:w-auto">
                 <TabsTrigger
@@ -179,7 +213,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                   </div>
                   <Button
                     className="min-h-11 touch-manipulation"
-                    disabled={!!busy}
+                    disabled={!!busy || !loaded.canMutate}
                     onClick={() =>
                       run("Splitting the copy", async () => {
                         const size = Number(chunk);
@@ -213,7 +247,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                   </div>
                   <Button
                     className="min-h-11 touch-manipulation"
-                    disabled={!!busy}
+                    disabled={!!busy || !loaded.canMutate}
                     onClick={() =>
                       run("Extracting pages", async () => {
                         const pages = parsePageRanges(ranges, loaded.pages);
@@ -255,7 +289,7 @@ export function PdfWorkbench({ initialTab = "split" }: { initialTab?: ToolTab })
                 )}
                 <Button
                   className="min-h-11 touch-manipulation"
-                  disabled={!!busy || extra.length === 0}
+                  disabled={!!busy || extra.length === 0 || !loaded.canMutate}
                   onClick={() =>
                     run("Merging the copies", async () => [
                       await mergeFiles([{ name: loaded.name, bytes: loaded.bytes }, ...extra]),

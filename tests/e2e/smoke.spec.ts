@@ -65,7 +65,10 @@ test.describe("PDF Relief fixture smoke", () => {
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByRole("button", { name: /Save As/i }).first().click(),
+      page
+        .getByRole("button", { name: /Save As/i })
+        .first()
+        .click(),
     ]);
     const stream = await download.createReadStream();
     const chunks: Buffer[] = [];
@@ -74,5 +77,21 @@ test.describe("PDF Relief fixture smoke", () => {
     expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
     expect(bytes.byteLength).toBeGreaterThan(200);
     expect(bytes.byteLength).toBeLessThan(20_000);
+  });
+
+  test("editor: password-open prompts, retries, then unlocks", async ({ page }) => {
+    await page.goto(`${baseURL}/edit`);
+    await dropPdf(page, "main", "password-open.pdf");
+    await expect(page.getByTestId("pdf-password-dialog")).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId("pdf-password-input").fill("wrong-password");
+    await page.getByTestId("pdf-password-unlock").click();
+    await expect(page.getByTestId("pdf-password-error")).toBeVisible();
+    await page.getByTestId("pdf-password-input").fill("pdfrelief");
+    await page.getByTestId("pdf-password-unlock").click();
+    await expect(page.getByText(/1\s*\/\s*1/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("pdf-view-only-banner")).toBeVisible();
+    await expect(page.getByTestId("save-as")).toBeDisabled();
+    await expect(page.getByTestId("rotate-left")).toBeDisabled();
+    await expect(page.getByTestId("rotate-right")).toBeDisabled();
   });
 });
