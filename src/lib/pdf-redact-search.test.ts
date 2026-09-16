@@ -189,6 +189,29 @@ describe("findHitsInPageItems", () => {
     const rect = hits[0]?.rects[0];
     expect(rect?.width).toBeGreaterThanOrEqual(estimateWidth("SECRET", 18));
   });
+
+  it("covers the leading glyph when an astral code point precedes the match", () => {
+    // An emoji is one glyph but two UTF-16 units. Slicing the glyph array by raw
+    // string offsets used to drop the leading "S", leaving it exposed after Save
+    // As. The erase box must reach the start of "SECRET", not skip into it.
+    const items = [{ str: "😀SECRET", x: 40, y: 360, width: 84, height: 18 }];
+    const hits = findHitsInPageItems(items, "secret", 1);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.matched).toBe("SECRET");
+    const emojiRight = 40 + (84 / 7) * 1; // one glyph in, where "S" begins
+    const rect = hits[0]!.rects[0]!;
+    expect(rect.x).toBeLessThanOrEqual(emojiRight + 2);
+  });
+
+  it("keeps offsets aligned when a preceding glyph lowercases to two units", () => {
+    // Turkish dotted capital İ (U+0130) lowercases to "i̇" (two units). The
+    // lowered-search offsets must map back to whole glyphs so the match is not
+    // shifted and truncated.
+    const items = [{ str: "Aİ SECRET", x: 40, y: 360, width: 108, height: 18 }];
+    const hits = findHitsInPageItems(items, "secret", 1);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.matched).toBe("SECRET");
+  });
 });
 
 describe("searchDocumentText + permanent redact", () => {
