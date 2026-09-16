@@ -2792,11 +2792,6 @@ function Editor() {
                   draft={imageDraft}
                   previewUrl={previewUrl}
                   previewBusy={previewBusy}
-                  outputBytes={
-                    selectedImage
-                      ? (imageEdits[selectedImage.id]?.output.bytes.byteLength ?? null)
-                      : null
-                  }
                   sourceLabel={sourceLabel}
                   onChange={setImageDraft}
                   onReplace={(file) => void replaceImage(file)}
