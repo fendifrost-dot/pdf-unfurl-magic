@@ -12,26 +12,37 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 
-function git(args) {
+/**
+ * Runs git and distinguishes "command failed" from "command succeeded with no
+ * output". `git status --porcelain` prints nothing on a clean tree, so collapsing
+ * empty output to null would report a clean build as "unknown".
+ */
+function gitRaw(args) {
   try {
-    return (
-      execFileSync("git", args, {
+    return {
+      ok: true,
+      out: execFileSync("git", args, {
         cwd: root,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
-      }).trim() || null
-    );
+      }).trim(),
+    };
   } catch {
-    return null;
+    return { ok: false, out: "" };
   }
 }
 
+function git(args) {
+  const { ok, out } = gitRaw(args);
+  return ok && out ? out : null;
+}
+
 function buildInfo() {
-  const status = git(["status", "--porcelain"]);
+  const status = gitRaw(["status", "--porcelain"]);
   return {
     sha: git(["rev-parse", "--short", "HEAD"]),
     branch: git(["rev-parse", "--abbrev-ref", "HEAD"]),
-    dirty: status === null ? null : status.length > 0,
+    dirty: status.ok ? status.out.length > 0 : null,
     builtAt: new Date().toISOString(),
   };
 }

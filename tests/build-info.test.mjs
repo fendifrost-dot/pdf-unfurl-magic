@@ -21,6 +21,21 @@ test("buildInfo() returns the expected shape", () => {
   assert.doesNotThrow(() => new Date(info.builtAt).toISOString());
 });
 
+test("dirty distinguishes a clean tree from unknown", () => {
+  // `git status --porcelain` prints nothing on a clean tree. Collapsing that
+  // empty output to null reported a clean build as "unknown" — the packed app
+  // at 345a0ff shipped `"dirty": null` from a clean checkout.
+  const info = mod.buildInfo();
+  if (info.sha !== null) {
+    assert.notEqual(
+      info.dirty,
+      null,
+      "git worked, so dirty must be true or false — never null",
+    );
+    assert.equal(typeof info.dirty, "boolean");
+  }
+});
+
 test("write() emits parseable JSON at the packed location", () => {
   const { out, info } = mod.write();
   assert.equal(out, mod.OUT_PATH);
