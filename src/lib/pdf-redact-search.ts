@@ -215,14 +215,34 @@ export function findHitsInPageItems(
   // glyphs — a redaction-honesty leak that leaves the head/tail of a match
   // exposed. Build the searched string per glyph and keep unit→glyph maps so
   // every match translates back to the exact glyphs it covers.
+  //
+  // Whitespace is collapsed the same way `normalizeSearchQuery` collapses the
+  // query: any run of whitespace glyphs — including the "\n" that `hasEOL`
+  // inserts between items and any double spaces (we read the text layer with
+  // `disableNormalization: true`, so raw spacing survives) — becomes a single
+  // space. Without this a search for "Social Security Number" silently misses a
+  // copy that wraps across a line, giving false confidence the phrase is absent.
   const chars = glyphs.map((g) => g.ch);
   let raw = "";
   let lowered = "";
   const rawStart: number[] = []; // rawStart[i] = raw offset where glyph i begins
   const lowGlyph: number[] = []; // lowGlyph[u] = glyph index owning lowered unit u
+  let inWhitespaceRun = false;
   chars.forEach((ch, i) => {
     rawStart.push(raw.length);
     raw += ch;
+    if (/\s/.test(ch)) {
+      // Collapse a maximal whitespace run to one space; map that space to the
+      // first whitespace glyph. Matches never start or end on it (the needle is
+      // trimmed), so it only ever falls inside a run and gets covered anyway.
+      if (!inWhitespaceRun) {
+        lowered += " ";
+        lowGlyph.push(i);
+        inWhitespaceRun = true;
+      }
+      return;
+    }
+    inWhitespaceRun = false;
     const low = ch.toLowerCase();
     lowered += low;
     for (let u = 0; u < low.length; u++) lowGlyph.push(i);

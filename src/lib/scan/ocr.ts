@@ -112,7 +112,7 @@ export function groupOcrWords(words: OcrWord[]): OcrLineBox[] {
   }
 
   return groups
-    .map((group) => {
+    .map((group): OcrLineBox | null => {
       const ordered = [...group].sort((a, b) => a.x0 - b.x0);
       const text = ordered
         .map((item) => item.text)

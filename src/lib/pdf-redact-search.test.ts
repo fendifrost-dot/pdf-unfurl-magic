@@ -212,6 +212,37 @@ describe("findHitsInPageItems", () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.matched).toBe("SECRET");
   });
+
+  it("matches a multi-word phrase that wraps across a line", () => {
+    // pdf.js emits hasEOL on the item that ends a line, which this module turns
+    // into a "\n" glyph. A phrase split across the wrap must still be found and
+    // redacted per line, or the copy on the page is silently missed.
+    const items = [
+      { str: "Social Security", x: 40, y: 360, width: 130, height: 18, hasEOL: true },
+      { str: "Number 123", x: 40, y: 340, width: 90, height: 18 },
+    ];
+    const hits = findHitsInPageItems(items, "Security Number", 1);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.matched.replace(/\s+/g, " ")).toBe("Security Number");
+    // One rect per line so the erase covers "Security" on line 1 and "Number"
+    // on line 2, not the whitespace gulf between them.
+    expect(hits[0]?.rects.length).toBe(2);
+  });
+
+  it("matches across a double space in the text layer", () => {
+    // disableNormalization keeps the raw run, so two spaces survive. The query
+    // is collapsed to one space; the haystack must be too or this is a miss.
+    const items = [{ str: "FIRST  LAST", x: 40, y: 360, width: 110, height: 18 }];
+    const hits = findHitsInPageItems(items, "first last", 1);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.matched).toBe("FIRST  LAST");
+  });
+
+  it("does not join two words when the query has no space between them", () => {
+    // "foobar" must not match "foo bar": collapsing whitespace must not delete it.
+    const items = [{ str: "foo bar", x: 40, y: 360, width: 70, height: 18 }];
+    expect(findHitsInPageItems(items, "foobar", 1)).toHaveLength(0);
+  });
 });
 
 describe("searchDocumentText + permanent redact", () => {

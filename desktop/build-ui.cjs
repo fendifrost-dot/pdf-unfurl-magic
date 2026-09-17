@@ -9,6 +9,10 @@ const path = require("node:path");
 const root = path.join(__dirname, "..");
 const env = { ...process.env, PDF_RELIEF_DESKTOP: "1" };
 
+// Stamp the commit before bundling so the packed app can name what it was built
+// from. Never fatal — a build without git metadata still ships, with nulls.
+require("./gen-build-info.cjs").write();
+
 const vite = spawnSync("npx", ["vite", "build"], {
   cwd: root,
   env,

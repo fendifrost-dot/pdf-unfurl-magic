@@ -21,7 +21,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "node scripts/tsc-ratchet.mjs",
-    "test": "vitest run && tsx --test src/lib/esign.test.ts && node --test tests/desktop-static-ui.test.mjs",
+    "test": "vitest run && tsx --test src/lib/esign.test.ts && node --test tests/desktop-static-ui.test.mjs tests/build-info.test.mjs",
     "test:scan": "tsx --test src/lib/scan/geometry.node-test.ts",
     "test:image-studio": "tsx scripts/verify-image-studio.mjs",
     "test:smoke": "node --test tests/smoke-pdf.test.mjs",
@@ -45,6 +45,8 @@
       "desktop/preload.cjs",
       "desktop/static-ui.cjs",
       "desktop/save-path.cjs",
+      "desktop/gen-build-info.cjs",
+      "desktop/build-info.json",
       "desktop/icon.png",
       "desktop/icon.svg",
       {
