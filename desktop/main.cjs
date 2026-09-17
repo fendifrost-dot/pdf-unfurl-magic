@@ -3,6 +3,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveUiRoot, startStaticUiServer } = require("./static-ui.cjs");
+const buildInfo = require("./gen-build-info.cjs");
 const { avoidOverwritePath, sameFsPath } = require("./save-path.cjs");
 
 const DEV_PORT = Number(process.env.PDF_RELIEF_PORT || 47321);
@@ -270,6 +271,20 @@ function buildMenu() {
         {
           label: "How this works",
           click: () => mainWindow?.loadURL(joinAppPath("/")),
+        },
+        { type: "separator" },
+        {
+          label: "About PDF Relief",
+          click: () => {
+            const info = buildInfo.read();
+            dialog.showMessageBox(mainWindow ?? undefined, {
+              type: "info",
+              title: "About PDF Relief",
+              message: `PDF Relief ${app.getVersion()}`,
+              detail: `${buildInfo.describe(info)}\n\nYour PDFs stay on this Mac.`,
+              buttons: ["OK"],
+            });
+          },
         },
       ],
     },

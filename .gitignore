@@ -19,6 +19,9 @@ release
 tmp
 .desktop-ui-staging
 
+# Generated at pack time by desktop/gen-build-info.cjs
+desktop/build-info.json
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
