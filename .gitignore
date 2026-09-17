@@ -21,6 +21,9 @@ tmp
 
 # Generated at pack time by desktop/gen-build-info.cjs
 desktop/build-info.json
+# Guard the repo root too: a stray build-info.json here (e.g. an ad-hoc build
+# run) is untracked provenance that a broad `git add` could commit stale.
+/build-info.json
 
 # Wrangler / Cloudflare
 .wrangler/
