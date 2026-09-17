@@ -126,7 +126,7 @@ function walkForm(
   doc: PDFDocument,
   stream: PDFStream,
   acc: { shows: string[]; images: number },
-  seen: Set<number>,
+  seen: Set<string>,
 ) {
   acc.shows.push(...collectStreamShows(stream));
   const dict = streamDict(stream);
@@ -138,7 +138,7 @@ function walkResources(
   doc: PDFDocument,
   resources: PDFDict,
   acc: { shows: string[]; images: number },
-  seen: Set<number>,
+  seen: Set<string>,
 ) {
   const xobjects = resources.lookupMaybe(PDFName.of("XObject"), PDFDict);
   if (!xobjects) return;
@@ -279,7 +279,7 @@ export async function inspectPageScan(
   }
 
   const acc = { shows: [] as string[], images: 0 };
-  const seen = new Set<number>();
+  const seen = new Set<string>();
   for (const stream of pageContentStreams(doc, page)) {
     acc.shows.push(...collectStreamShows(stream));
   }
