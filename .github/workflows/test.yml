@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # CI has never typechecked, which is how type errors reached main unseen.
+      # Ratchet, not a gate: the committed baseline is a ceiling that only drops.
+      - name: Typecheck ratchet
+        if: matrix.node == '22'
+        run: npm run typecheck
+
       - name: Unit tests
         run: npm test
 

@@ -20,6 +20,7 @@
     "build:desktop": "node desktop/build-ui.cjs",
     "preview": "vite preview",
     "lint": "eslint .",
+    "typecheck": "node scripts/tsc-ratchet.mjs",
     "test": "vitest run && tsx --test src/lib/esign.test.ts && node --test tests/desktop-static-ui.test.mjs",
     "test:scan": "tsx --test src/lib/scan/geometry.node-test.ts",
     "test:image-studio": "tsx scripts/verify-image-studio.mjs",
